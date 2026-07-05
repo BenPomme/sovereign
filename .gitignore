@@ -1,0 +1,16 @@
+node_modules/
+apps/client/dist/
+output/
+
+.DS_Store
+*.log
+
+AI_BUG_REPORTS.md
+AI_BUG_BUCKET_TRIAGE.json
+AI_BUG_SNAPSHOTS/
+AI_BUG_TRIAGE.json
+AI_ITERATION_REVIEW.md
+AI_ITERATION_STATUS.json
+AI_SNAPSHOT_REPLAY_REPORT.md
+
+*.png

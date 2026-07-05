@@ -1,0 +1,36 @@
+{
+  "name": "sovereign-worlds",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --config vite.config.ts",
+    "build": "tsc --noEmit && vite build --config vite.config.ts",
+    "test": "vitest run",
+    "ai:review": "node scripts/ai-iteration-review.mjs",
+    "ai:review:strict": "node scripts/ai-iteration-review.mjs --strict",
+    "ai:review:buckets": "node scripts/ai-iteration-review.mjs --list-buckets --json --no-write",
+    "ai:review:reopen-legacy": "node scripts/ai-iteration-review.mjs --reopen-proofless-fixed",
+    "ai:review:triage-legacy": "node scripts/ai-iteration-review.mjs --triage-legacy-ai-buckets",
+    "ai:snapshots:replay": "node scripts/replay-ai-snapshots.mjs --strict",
+    "ai:iterate": "node scripts/ai-iteration-loop.mjs",
+    "ai:iterate:live": "node scripts/ai-iteration-loop.mjs --live",
+    "smoke:buildings": "node scripts/smoke-building-visibility.mjs",
+    "smoke": "node scripts/smoke-playwright.mjs",
+    "smoke:smooth": "node scripts/smoke-smooth-frame-loop.mjs",
+    "smoke:ai-fairness": "node scripts/smoke-ai-fairness.mjs",
+    "smoke:live-ai": "node scripts/smoke-live-ai-iteration.mjs",
+    "smoke:mock-ollama": "node scripts/smoke-mocked-ollama.mjs",
+    "preview": "vite preview --host 0.0.0.0 apps/client"
+  },
+  "dependencies": {
+    "pixi.js": "^8.16.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.1",
+    "playwright": "^1.61.1",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.11",
+    "vitest": "^2.1.9"
+  }
+}

@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sovereign Worlds</title>
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <div class="brand">
+          <strong>Sovereign Worlds</strong>
+          <span>vertical slice</span>
+        </div>
+        <div id="resourceBar" class="resource-bar"></div>
+        <div class="time-controls">
+          <button id="pauseButton" type="button" aria-label="Pause simulation">Pause</button>
+          <button id="speedButton" type="button" aria-label="Change simulation speed">1x</button>
+        </div>
+      </header>
+      <main class="shell">
+        <section id="viewport" class="viewport" aria-label="World map">
+          <div id="hoverTooltip" class="hover-tooltip" hidden></div>
+        </section>
+        <aside class="side-panel">
+          <section class="panel-section">
+            <h2>AI Observer</h2>
+            <div id="llmPanel" class="llm-panel">Connecting to local Ollama...</div>
+            <div class="button-row compact-actions">
+              <button id="askAiNowButton" type="button">Ask sovereign now</button>
+              <button id="followActionButton" type="button">Follow action</button>
+            </div>
+          </section>
+          <section class="panel-section">
+            <h2>Victory Pressure</h2>
+            <div id="victoryPanel" class="victory-panel">Mandate race pending.</div>
+          </section>
+          <section class="panel-section">
+            <h2>Map Layers</h2>
+            <div id="mapLayerPanel" class="map-layer-panel">
+              <label class="layer-toggle">
+                <input id="showResourceLabelsToggle" type="checkbox" checked />
+                <span>Resource labels</span>
+              </label>
+              <label class="layer-toggle">
+                <input id="showContestedResourcesToggle" type="checkbox" checked />
+                <span>Contested deposits</span>
+              </label>
+              <label class="layer-toggle">
+                <input id="showDefenseOverlayToggle" type="checkbox" checked />
+                <span>Walls, gates, and turret ranges</span>
+              </label>
+            </div>
+          </section>
+          <section class="panel-section">
+            <h2>AI Bug Queue</h2>
+            <div id="aiBugPanel" class="ai-bug-panel">No AI reports yet.</div>
+          </section>
+          <section class="panel-section">
+            <h2>AI Info Requests</h2>
+            <div id="aiInfoRequestPanel" class="ai-info-request-panel">No information requests yet.</div>
+          </section>
+          <section class="panel-section">
+            <h2>AI Report Review</h2>
+            <div id="aiReportReviewPanel" class="ai-report-review-panel">Loading report history...</div>
+          </section>
+          <section class="panel-section">
+            <h2>Tribes</h2>
+            <div id="tribePanel" class="tribe-panel"></div>
+          </section>
+          <section class="panel-section">
+            <h2>Selected</h2>
+            <div id="selectedPanel" class="selected-panel">Select a visible unit or building.</div>
+          </section>
+          <section class="panel-section">
+            <h2>Diplomacy</h2>
+            <div id="diplomacyPanel" class="diplomacy-panel"></div>
+            <details class="inline-debug">
+              <summary>Manual message test</summary>
+              <label class="field">
+                Recipient
+                <select id="recipientSelect"></select>
+              </label>
+              <div class="button-row">
+                <button id="sendPeaceButton" type="button">Send peace offer</button>
+                <button id="sendThreatButton" type="button">Send warning</button>
+              </div>
+            </details>
+          </section>
+          <section class="panel-section">
+            <h2>Events</h2>
+            <div id="eventLog" class="event-log"></div>
+          </section>
+          <section class="panel-section">
+            <h2>Legend</h2>
+            <div id="legendPanel" class="legend-panel"></div>
+          </section>
+          <details class="panel-section debug-controls">
+            <summary>Blue debug controls</summary>
+            <div class="button-grid">
+              <button id="trainPeonButton" type="button">Train peon</button>
+              <button id="trainMilitiaButton" type="button">Train militia</button>
+              <button id="trainArcherButton" type="button">Train archer</button>
+              <button id="buildFarmButton" type="button">Build farm</button>
+              <button id="buildWatchtowerButton" type="button">Build watchtower</button>
+              <button id="buildWallButton" type="button">Build wall</button>
+              <button id="buildGateButton" type="button">Build gate</button>
+              <button id="buildTurretButton" type="button">Build turret</button>
+              <button id="assignFoodButton" type="button">Gather food</button>
+              <button id="assignWoodButton" type="button">Gather wood</button>
+              <button id="assignStoneButton" type="button">Gather stone</button>
+              <button id="assignClayButton" type="button">Gather clay</button>
+              <button id="assignLimestoneButton" type="button">Gather limestone</button>
+              <button id="assignIronButton" type="button">Gather iron</button>
+              <button id="assignCoalButton" type="button">Gather coal</button>
+              <button id="assignGoldButton" type="button">Gather gold</button>
+            </div>
+          </details>
+        </aside>
+      </main>
+      <footer class="command-bar">
+        <button id="focusSovereignButton" type="button">Focus sovereign</button>
+        <button id="focusMessengerButton" type="button">Focus messenger</button>
+        <button id="resetViewButton" type="button">Reset view</button>
+        <span>Observer mode. Pan: drag empty map, edge-scroll, WASD / arrows. Zoom: wheel. Hover units to inspect orders. Blue movement: right click.</span>
+      </footer>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
