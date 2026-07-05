@@ -9,6 +9,7 @@ const screenshotPath =
   "/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-smoke.png";
 const bugReportPath = "/Users/benjaminpommeraud/Desktop/Sovereigns/AI_BUG_REPORTS.md";
 const persistentLearningStorageKey = "sovereign-worlds.learning.v1";
+const failedSelfReportBody = "Smoke forced a failed REPORT_BUG save and verified it did not enter sovereign memory.";
 const smokeSelfReportBody = "Smoke verified that explicit REPORT_BUG orders persist and render.";
 const smokeInfoRequestBody = "Smoke verified that REQUEST_INFO asks for strategy context without becoming a bug report.";
 const realClassifierReportBody =
@@ -27,6 +28,7 @@ await page.addInitScript((storageKey) => {
 const errors = [];
 const warnings = [];
 let expectedBadRequestCount = 0;
+let expectedForcedSelfReportFailureCount = 0;
 let triageState;
 const mockedOllamaCalls = {
   tags: 0,
@@ -44,6 +46,11 @@ page.on("console", (message) => {
     if (expectedBadRequestCount > 0 && text.includes("400") && text.includes("Bad Request")) {
       expectedBadRequestCount -= 1;
       warnings.push(`expected rejected fixed-triage console error: ${text}`);
+      return;
+    }
+    if (expectedForcedSelfReportFailureCount > 0 && text.includes("500") && text.includes("Internal Server Error")) {
+      expectedForcedSelfReportFailureCount -= 1;
+      warnings.push(`expected forced self-report persistence console error: ${text}`);
       return;
     }
     errors.push(`console error: ${text}`);
@@ -64,6 +71,30 @@ page.on("dialog", async (dialog) => {
 });
 
 await installDeterministicOllamaRoutes(page);
+let failNextSelfReportSave = true;
+await page.route("**/api/ai-bug-report", async (route, request) => {
+  if (failNextSelfReportSave && request.method() === "POST") {
+    let payload = {};
+    try {
+      payload = JSON.parse(request.postData() ?? "{}");
+    } catch {
+      payload = {};
+    }
+    const source = String(payload.source ?? "");
+    const report = String(payload.report ?? "");
+    if (source.includes("kind=report_bug_order") && report.includes(failedSelfReportBody)) {
+      failNextSelfReportSave = false;
+      expectedForcedSelfReportFailureCount += 1;
+      await route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: false, error: "forced smoke persistence failure" })
+      });
+      return;
+    }
+  }
+  await route.continue();
+});
 
 await page.goto(url, { waitUntil: "domcontentloaded" });
 await page.waitForSelector("canvas", { timeout: 15_000 });
@@ -407,6 +438,28 @@ const selectedText = await page.locator("#selectedPanel").innerText();
 if (!selectedText.includes("Fires on hostile units") || !selectedText.includes("Build cost") || !selectedText.includes("New construction visible on map")) {
   throw new Error(`Turret build did not expose defensive behavior in the selected panel. Text: ${selectedText}`);
 }
+const preFailureSelfReportState = await readSelfReportState(page, failedSelfReportBody);
+const preFailureMemoryFiledCount = preFailureSelfReportState.memoryFiledNotes.length;
+const failedSelfReportResult = await page.evaluate(async (body) => {
+  if (typeof window.force_ai_self_report_for_test !== "function") return { ok: false, reason: "missing self-report hook" };
+  return await window.force_ai_self_report_for_test("blue", body);
+}, failedSelfReportBody);
+if (!failedSelfReportResult.ok || failedSelfReportResult.issue?.saveState !== "failed") {
+  throw new Error(`Forced failed AI self-report did not surface a failed issue: ${JSON.stringify(failedSelfReportResult)}`);
+}
+const failedSelfReportState = await readSelfReportState(page, failedSelfReportBody);
+if (failedSelfReportState.issue?.saveState !== "failed") {
+  throw new Error(`render_game_to_text did not expose the failed self-report issue: ${JSON.stringify(failedSelfReportState)}`);
+}
+if (
+  failedSelfReportState.memoryFiledNotes.length !== preFailureMemoryFiledCount ||
+  failedSelfReportState.memory.some((note) => note.includes(failedSelfReportBody))
+) {
+  throw new Error(`Failed self-report incorrectly entered sovereign memory: ${JSON.stringify(failedSelfReportState.memory)}`);
+}
+if (failNextSelfReportSave) {
+  throw new Error("Forced self-report persistence failure route was not consumed.");
+}
 const selfReportResult = await page.evaluate(async (body) => {
   if (typeof window.force_ai_self_report_for_test !== "function") return { ok: false, reason: "missing self-report hook" };
   return await window.force_ai_self_report_for_test("blue", body);
@@ -414,8 +467,18 @@ const selfReportResult = await page.evaluate(async (body) => {
 if (!selfReportResult.ok) {
   throw new Error(`Explicit AI self-report test hook failed: ${JSON.stringify(selfReportResult)}`);
 }
+if (selfReportResult.issue?.saveState !== "saved") {
+  throw new Error(`Successful AI self-report did not return a saved issue: ${JSON.stringify(selfReportResult)}`);
+}
 if (!selfReportResult.memoryIncludesReport) {
   throw new Error(`Explicit AI self-report did not enter sovereign memory for the next prompt: ${JSON.stringify(selfReportResult)}`);
+}
+const savedSelfReportState = await readSelfReportState(page, smokeSelfReportBody);
+if (savedSelfReportState.issue?.saveState !== "saved") {
+  throw new Error(`render_game_to_text did not expose the saved self-report issue: ${JSON.stringify(savedSelfReportState)}`);
+}
+if (!savedSelfReportState.memory.some((note) => note.includes("AI iteration report filed") && note.includes("Smoke verified"))) {
+  throw new Error(`Successful self-report did not enter sovereign memory with the report text: ${JSON.stringify(savedSelfReportState.memory)}`);
 }
 const selfReportMemory = await page.evaluate(() => {
   const blue = JSON.parse(window.render_game_to_text()).tribes?.find((tribe) => tribe.id === "blue");
@@ -1433,6 +1496,27 @@ console.log(
     2
   )
 );
+
+async function readSelfReportState(page, reportMarker) {
+  return await page.evaluate((marker) => {
+    const parsed = JSON.parse(window.render_game_to_text());
+    const blue = parsed.tribes?.find((tribe) => tribe.id === "blue");
+    const memory = blue?.memory ?? [];
+    const matchingIssues = (parsed.aiIssues ?? []).filter((issue) => {
+      return (
+        issue.tribeId === "blue" &&
+        String(issue.source ?? "").includes("kind=report_bug_order") &&
+        String(issue.report ?? "").includes(marker)
+      );
+    });
+    return {
+      memory,
+      memoryFiledNotes: memory.filter((note) => String(note).includes("AI iteration report filed")),
+      issue: matchingIssues.at(-1),
+      matchingIssueCount: matchingIssues.length
+    };
+  }, reportMarker);
+}
 
 async function setReportReviewFilters(page, filters = {}) {
   await page.evaluate((nextFilters) => {

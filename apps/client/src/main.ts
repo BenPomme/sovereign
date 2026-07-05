@@ -91,7 +91,15 @@ declare global {
     force_ai_self_report_for_test?: (
       tribeId?: TribeId,
       report?: string
-    ) => Promise<{ ok: boolean; issueCount: number; accepted: string[]; rejected: string[]; memory: string[]; memoryIncludesReport: boolean }>;
+    ) => Promise<{
+      ok: boolean;
+      issueCount: number;
+      accepted: string[];
+      rejected: string[];
+      memory: string[];
+      memoryIncludesReport: boolean;
+      issue?: AiIssueSummary;
+    }>;
     force_live_ai_issue_for_test?: (
       tribeId?: TribeId,
       report?: string
@@ -1195,7 +1203,15 @@ function activeConstructionFlashes(game: GameState): ConstructionFlash[] {
 async function forceAiSelfReportForTest(
   tribeId: TribeId = playerTribe,
   report = "Smoke test explicit AI self-report order."
-): Promise<{ ok: boolean; issueCount: number; accepted: string[]; rejected: string[]; memory: string[]; memoryIncludesReport: boolean }> {
+): Promise<{
+  ok: boolean;
+  issueCount: number;
+  accepted: string[];
+  rejected: string[];
+  memory: string[];
+  memoryIncludesReport: boolean;
+  issue?: AiIssueSummary;
+}> {
   const order: AiStrategicOrder = {
     type: "REPORT_BUG",
     priority: 1,
@@ -1228,13 +1244,15 @@ async function forceAiSelfReportForTest(
   if (result.ok) await postAiBugReport(stored, formatSelfReportOrder(order), order.bugSeverity ?? "medium", "self_report", true, "report_bug_order");
   render();
   const memory = state.sovereignMemories[tribeId]?.notes ?? [];
+  const latestIssue = aiBugReports.at(-1);
   return {
     ok: result.ok,
     issueCount: aiBugReports.length,
     accepted,
     rejected,
     memory,
-    memoryIncludesReport: memory.some((note) => note.includes("AI iteration report filed"))
+    memoryIncludesReport: memory.some((note) => note.includes("AI iteration report filed")),
+    issue: result.ok && latestIssue ? summarizeAiIssue(latestIssue) : undefined
   };
 }
 
@@ -3420,8 +3438,8 @@ async function postAiBugReport(
   const source = buildAiReportSource(decision, sourceKind);
   const turnContext = buildAiReportTurnContext(decision);
   const entry = recordAiIssue(decision, report, severity, category, persist ? "pending" : "local", source, turnContext);
-  rememberAiReportFiled(decision, entry);
   if (!persist) {
+    rememberAiReportFiled(decision, entry);
     bugReportStatus = `Latest AI issue logged locally for ${entry.tribeName}.`;
     render();
     return;
@@ -3452,6 +3470,7 @@ async function postAiBugReport(
     const saved = (await response.json()) as { snapshot?: string };
     entry.snapshot = typeof saved.snapshot === "string" ? saved.snapshot : undefined;
     entry.saveState = "saved";
+    rememberAiReportFiled(decision, entry);
     bugReportStatus = `Latest AI bug report saved for ${state.tribes[decision.tribeId].name}.`;
     await refreshAiReportReview();
   } catch (error) {

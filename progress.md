@@ -2590,3 +2590,32 @@ Original prompt: ok continue with roadmap make sure the AIs can report bugs and 
 - Remaining backlog:
   - decide whether future dropped packets, siege projectiles, trade goods, and inventory objects should become targetable map entities or remain abstract records,
   - continue PixiJS label-tier/readability work so statted resources, packets, fortifications, and battle states are easier to inspect visually.
+
+### 2026-07-05 AI Report Persistence Acknowledgement Guard
+
+- Continued the active AI-iteration goal by fixing a feedback-loop integrity bug:
+  - `postAiBugReport()` no longer writes `AI iteration report filed` into sovereign memory while the report is still `pending`,
+  - persisted reports now enter sovereign memory only after `/api/ai-bug-report` returns success and the local issue is marked `saved`,
+  - local-only/non-persistent reports keep their existing local memory behavior,
+  - failed persistence still leaves a visible `failed` AI issue with the endpoint error, but the reporting sovereign is not taught that the report was successfully filed.
+- Strengthened browser QA:
+  - `window.force_ai_self_report_for_test()` now returns the latest issue summary so smoke can inspect `saveState`,
+  - full smoke forces a one-shot 500 response for a unique `REPORT_BUG` save and proves the issue becomes `failed`,
+  - the same smoke assertion proves the failed report text does not enter Blue's sovereign memory,
+  - the next forced self-report then saves normally and must enter sovereign memory with `AI iteration report filed`.
+- QA completed:
+  - `pnpm exec tsc --noEmit` passed,
+  - `node --check scripts/smoke-playwright.mjs` passed,
+  - `git diff --check` passed,
+  - focused Vitest command passed the broader current suite: 4 files, 114 tests,
+  - `pnpm build` passed,
+  - `pnpm smoke:buildings` passed,
+  - `pnpm smoke:smooth` passed with measured FPS 24.5,
+  - full `pnpm smoke` passed twice after the final smoke assertion adjustment, including the forced 500 self-report failure and subsequent saved self-report memory acknowledgement,
+  - inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-smoke.png`; the board and AI report review panel render normally,
+  - `pnpm ai:review:strict -- --json --no-write` passed after the final smoke: 810 total reports, 0 actionable unresolved, 0 parser/transport open,
+  - `pnpm ai:snapshots:replay -- --strict --json --no-write` passed after the final smoke: 498 replayed, 0 failures, 0 contract warnings.
+- Remaining backlog:
+  - expand AI iteration memory beyond short report/lesson snippets so each sovereign can reason over richer report context without leaking synthetic QA reports,
+  - add normal-play quality-loop evidence that live sovereign reports, not only canaries, produce later changed strategy,
+  - keep default report review focused on current live unresolved buckets while preserving synthetic/failure-path QA coverage.

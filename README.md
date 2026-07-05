@@ -58,6 +58,7 @@ http://localhost:5173/
   - orders are validated before execution
   - later decisions can rename owned villagers, messengers, scouts, and soldiers
   - sovereigns can report bugs into `AI_BUG_REPORTS.md` through a local dev-server endpoint
+  - sovereign memory acknowledges a persisted AI bug report only after the save succeeds; failed saves remain visible as failed issues without teaching the sovereign that the report was filed
   - persisted AI bug reports include source kind, decision id, provider/model, turn resources, units, walls/turrets, diplomacy state, survival pressure, accepted/rejected counts, memory, and recent events
   - persisted AI bug reports also save compact JSON state snapshots in `AI_BUG_SNAPSHOTS/` and expose review-panel snapshot previews/links for follow-up debugging
   - `pnpm ai:review` turns unresolved AI reports, per-report triage, and bucket-level currentness state into a ranked iteration backlog in `AI_ITERATION_REVIEW.md`; `pnpm ai:review:strict` gates on distinct unresolved buckets while still showing raw report volume

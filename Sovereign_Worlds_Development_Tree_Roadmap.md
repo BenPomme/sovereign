@@ -84,6 +84,8 @@ This roadmap must stay tied to the visible board. Development choices should cha
 
 **Delivered packet item stat and coverage guard on July 5, 2026:** physical messenger packets are now first-class item entities with health, armor, attack/range, cooldown, condition, and browser-hook combat stats. Packet items are initialized on dispatch, drop to zero HP when killed with a messenger or destroyed by population elimination, and `render_game_to_text().combatStatCoverage` now verifies every live unit, building, resource deposit, and packet item has sane combat stats.
 
+**Delivered AI report persistence acknowledgement guard on July 5, 2026:** sovereign memory now records `AI iteration report filed` only after a persisted bug report is actually saved. Failed `/api/ai-bug-report` saves remain visible as failed issues in browser-hook state and the AI bug queue, but do not enter the reporting sovereign's future planning memory as if they were successful.
+
 1. **Building-tree prerequisites:** extend per-tribe development state beyond current walls, gates, and turrets into stronger walls, siege tools, road upgrades, gate automation, and later fortification variants behind masonry, brick kilns, ironworking, ballistics, and military architecture.
 2. **Chosen placement:** let LLMs choose perimeter/fortification intent and later add human tile previews only after the human play model is decided.
 3. **Advanced siege behavior:** add siege tools, breach previews, contested field repairs under fire, and multi-unit assault doctrines on top of explicit building-target attacks.
