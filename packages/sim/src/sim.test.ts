@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TICKS_PER_GAME_YEAR, TICK_RATE, advanceGame, advanceGameTicks, appendSovereignMemory, applyTribeIdentity, assignGathering, attachReplyToPacket, buildStructure, buildingTypes, createGame, createResourceDeposit, damageBuilding, damageResourceDeposit, formAlliance, getBuildingCombatStats, getBuildingTypeCombatStats, getCurrentYear, getBuildingCost, getBuildingRepairCost, getRecentVisibleEvents, getResourceControlSummary, getResourceDepositCombatStats, getResourceDepositPosturesForTribe, getResourceTypeCombatStats, getTownHall, getUnitCombatStats, getUnitTypeCombatStats, getVictoryPressure, getVisibleBuildings, getVisibleUnits, isTileWalkable, issueSovereignOrder, recordAiDecision, renameUnits, resourceTypes, sendPlayerMessage, setAllControllers, setGateState, summarizeDiplomaticIntel, summarizeSovereignMemory, tileIndex, unitTypes, worldSignature } from "./index";
+import { TICKS_PER_GAME_YEAR, TICK_RATE, advanceGame, advanceGameTicks, appendSovereignMemory, applyTribeIdentity, assignGathering, attachReplyToPacket, buildStructure, buildingTypes, createGame, createResourceDeposit, damageBuilding, damageResourceDeposit, formAlliance, getBuildingCombatStats, getBuildingTypeCombatStats, getCombatStatCoverageReport, getCurrentYear, getBuildingCost, getBuildingRepairCost, getPacketItemCombatStats, getPacketItemTypeCombatStats, getRecentVisibleEvents, getResourceControlSummary, getResourceDepositCombatStats, getResourceDepositPosturesForTribe, getResourceTypeCombatStats, getTownHall, getUnitCombatStats, getUnitTypeCombatStats, getVictoryPressure, getVisibleBuildings, getVisibleUnits, isTileWalkable, issueSovereignOrder, recordAiDecision, renameUnits, resourceTypes, sendPlayerMessage, setAllControllers, setGateState, summarizeDiplomaticIntel, summarizeSovereignMemory, tileIndex, unitTypes, worldSignature } from "./index";
 
 describe("Sovereign Worlds vertical slice simulation", () => {
   it("is deterministic for the same seed and elapsed time", () => {
@@ -82,7 +82,7 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     expect(startingUnits.every((unit) => unit.name === unit.id)).toBe(true);
   });
 
-  it("exposes health, armor, attack, and range stats on all units, buildings, and map items", () => {
+  it("exposes health, armor, attack, and range stats on all units, buildings, map items, and carried packets", () => {
     const state = createGame(10);
     state.tribes.blue.resources = { gold: 800, food: 800, wood: 800, stone: 800, clay: 800, limestone: 800, iron: 800, coal: 800 };
     expect(issueSovereignOrder(state, "blue", { type: "DEVELOP", priority: 1, developmentId: "masonry", reason: "Unlock durability-test walls." }).ok).toBe(true);
@@ -122,6 +122,13 @@ describe("Sovereign Worlds vertical slice simulation", () => {
       expect(stats.range).toBe(0);
       expect(stats.attackCooldown).toBe(0);
     }
+    const packetTypeStats = getPacketItemTypeCombatStats();
+    expect(packetTypeStats.maxHp).toBeGreaterThan(0);
+    expect(packetTypeStats.hp).toBe(packetTypeStats.maxHp);
+    expect(packetTypeStats.armor).toBeGreaterThanOrEqual(0);
+    expect(packetTypeStats.attack).toBe(0);
+    expect(packetTypeStats.range).toBe(0);
+    expect(packetTypeStats.attackCooldown).toBe(0);
     for (const unit of Object.values(state.units)) {
       const stats = getUnitCombatStats(unit);
       expect(stats.maxHp).toBeGreaterThan(0);
@@ -151,6 +158,24 @@ describe("Sovereign Worlds vertical slice simulation", () => {
       expect(stats.range).toBe(0);
       expect(stats.attackCooldown).toBe(0);
     }
+    const sent = sendPlayerMessage(state, "green", "peace");
+    expect(sent.ok).toBe(true);
+    if (!sent.ok) throw new Error("Expected packet dispatch");
+    const packet = state.packets[sent.packetId];
+    expect(packet.itemType).toBe("packet");
+    const packetStats = getPacketItemCombatStats(packet);
+    expect(packetStats.maxHp).toBeGreaterThan(0);
+    expect(packetStats.hp).toBe(packetStats.maxHp);
+    expect(packetStats.armor).toBeGreaterThanOrEqual(0);
+    expect(packetStats.attack).toBe(0);
+    expect(packetStats.range).toBe(0);
+    expect(packetStats.attackCooldown).toBe(0);
+    const coverage = getCombatStatCoverageReport(state);
+    expect(coverage.ok).toBe(true);
+    expect(coverage.byKind.unitType).toBe(unitTypes.length);
+    expect(coverage.byKind.buildingType).toBe(buildingTypes.length);
+    expect(coverage.byKind.resourceType).toBe(resourceTypes.length);
+    expect(coverage.byKind.packet).toBeGreaterThanOrEqual(2);
     const defensiveTypes = new Set(Object.values(state.buildings).filter((building) => building.tribeId === "blue").map((building) => building.type));
     expect(defensiveTypes.has("wall")).toBe(true);
     expect(defensiveTypes.has("gate")).toBe(true);
@@ -903,6 +928,12 @@ describe("Sovereign Worlds vertical slice simulation", () => {
 
   it("eliminates the poorest surviving population at a century review", () => {
     const state = createGame(9351);
+    const sent = sendPlayerMessage(state, "green", "peace");
+    expect(sent.ok).toBe(true);
+    if (!sent.ok) throw new Error("Expected in-flight packet before century review");
+    const packet = state.packets[sent.packetId];
+    expect(packet.itemType).toBe("packet");
+    expect(packet.hp).toBeGreaterThan(0);
     state.victoryPressure.nextReviewYear = 1;
     state.tribes.blue.resources = { gold: 0, food: 0, wood: 0, stone: 0, clay: 0, limestone: 0, iron: 0, coal: 0 };
     state.tribes.blue.happiness = 0;
@@ -912,6 +943,10 @@ describe("Sovereign Worlds vertical slice simulation", () => {
 
     expect(state.tribes.blue.eliminated).toBe(true);
     expect(state.tribes.blue.eliminatedYear).toBe(1);
+    expect(packet.state).toBe("KILLED_WITH_PACKET");
+    expect(packet.hp).toBe(0);
+    expect(getPacketItemCombatStats(packet).hp).toBe(0);
+    expect(getCombatStatCoverageReport(state).ok).toBe(true);
     const pressure = getVictoryPressure(state);
     expect(pressure.survivingTribes).toBe(4);
     expect(state.postGameLearnings).toHaveLength(5);

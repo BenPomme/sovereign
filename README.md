@@ -91,7 +91,7 @@ http://localhost:5173/
 - Defensive construction:
   - walls block movement until destroyed
   - gates are buildable, can be open/closed/locked, and open gates follow access policies
-  - units, buildings, and resource deposits share an explicit health/armor/attack/range stat contract
+  - units, buildings, resource deposits, and physical messenger packets share an explicit health/armor/attack/range stat contract
   - walls are drawn as high-contrast segmented barrier tiles and selected/new walls get a bright construction pulse, centered camera, selected-panel confirmation, and recent-construction labels so rapid builds remain visible
   - selected units and buildings expose health, armor, attack/range, condition, and repair state; damaged walls/gates/turrets draw cracks, rubble, scorch marks, health bars, and repair pulses
   - optional defense overlay outlines wall tiles and shows turret range
@@ -119,6 +119,7 @@ http://localhost:5173/
   - recipient AI writes a reply
   - return
   - overdue/loss handling in simulation
+  - packet items expose health, armor, attack/range, condition, and combat-stat coverage in browser QA hooks
 - Alliances form through discussion:
   - an AI sends a treaty/alliance offer by messenger
   - the recipient AI reads the delivered text
@@ -128,7 +129,7 @@ http://localhost:5173/
   reset view, and wheel zoom.
 - Browser QA hooks:
   - `window.render_game_to_text()` returns structured JSON with tick, tribes,
-    visible entities, map-layer toggles, board-readability metadata, blocking wall status, building costs, resource-tile samples, contested resource sites, packets, victory pressure, recent AI decisions, per-model LLM quality, sovereign memory, AI issue queue, and events
+    visible entities, map-layer toggles, board-readability metadata, combat-stat coverage, blocking wall status, building costs, resource-tile samples, contested resource sites, statted packets, victory pressure, recent AI decisions, per-model LLM quality, sovereign memory, AI issue queue, and events
   - `window.advanceTime(ms)` steps the same simulation path used by the ticker
     and re-renders the game
 

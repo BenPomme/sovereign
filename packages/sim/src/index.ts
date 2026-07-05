@@ -37,6 +37,7 @@ export type PacketState =
   | "KILLED_WITH_PACKET"
   | "REFUSED_AT_GATE"
   | "DETAINED";
+export type ItemType = "packet";
 
 export type Position = {
   x: number;
@@ -355,8 +356,9 @@ export type Message = {
   readTick?: number;
 };
 
-export type Packet = {
+export type Packet = CombatStats & {
   id: string;
+  itemType: ItemType;
   messageIds: string[];
   carrierUnitId?: string;
   originTribeId: TribeId;
@@ -369,6 +371,19 @@ export type Packet = {
   lastStateChangeTick: number;
   overdueAnnounced: boolean;
   routeMemory: string[];
+};
+
+export type CombatStatCoverageIssue = {
+  kind: "unitType" | "buildingType" | "resourceType" | "unit" | "building" | "resource" | "packet" | "map";
+  id: string;
+  reason: string;
+};
+
+export type CombatStatCoverageReport = {
+  ok: boolean;
+  checked: number;
+  byKind: Record<"unitType" | "buildingType" | "resourceType" | "unit" | "building" | "resource" | "packet", number>;
+  issues: CombatStatCoverageIssue[];
 };
 
 export type GameEvent = {
@@ -557,6 +572,8 @@ const unitStats: Record<UnitType, UnitStatDefinition> = {
   militia: { hp: 55, maxHp: 55, armor: 2, speed: 1.05, visionRadius: 5, attack: 7, range: 1.2, attackCooldown: 0 },
   archer: { hp: 40, maxHp: 40, armor: 1, speed: 1.0, visionRadius: 6, attack: 5, range: 4.4, attackCooldown: 0 }
 };
+
+const packetStats: CombatStats = { hp: 8, maxHp: 8, armor: 0, attack: 0, range: 0, attackCooldown: 0 };
 
 const REPAIR_RANGE = 1.2;
 const REPAIR_HP_PER_TICK = 5;
@@ -1460,6 +1477,17 @@ export function getResourceDepositCombatStats(resource: ResourceDeposit): Combat
   };
 }
 
+export function getPacketItemCombatStats(packet: Packet): CombatStats {
+  return {
+    hp: packet.hp,
+    maxHp: packet.maxHp,
+    armor: packet.armor,
+    attack: packet.attack,
+    range: packet.range,
+    attackCooldown: packet.attackCooldown
+  };
+}
+
 export function getUnitTypeCombatStats(type: UnitType): CombatStats {
   const stats = unitStats[type];
   return {
@@ -1484,8 +1512,83 @@ export function getBuildingTypeCombatStats(type: BuildingType): CombatStats {
   };
 }
 
+export function getPacketItemTypeCombatStats(): CombatStats {
+  return { ...packetStats };
+}
+
 export function getResourceTypeCombatStats(type: ResourceType, amount = 1): CombatStats {
   return getResourceDepositCombatStats(createResourceDeposit(type, amount));
+}
+
+export function getCombatStatCoverageReport(state: GameState): CombatStatCoverageReport {
+  const issues: CombatStatCoverageIssue[] = [];
+  const byKind: CombatStatCoverageReport["byKind"] = {
+    unitType: 0,
+    buildingType: 0,
+    resourceType: 0,
+    unit: 0,
+    building: 0,
+    resource: 0,
+    packet: 0
+  };
+  const check = (
+    kind: Exclude<CombatStatCoverageIssue["kind"], "map">,
+    id: string,
+    stats: Partial<CombatStats> | undefined,
+    options: { requireHp?: boolean; attackMustBeZero?: boolean } = {}
+  ) => {
+    if (!stats) {
+      issues.push({ kind, id, reason: "missing combat stats" });
+      return;
+    }
+    byKind[kind] += 1;
+    const numbers: Array<keyof CombatStats> = ["hp", "maxHp", "armor", "attack", "range", "attackCooldown"];
+    for (const field of numbers) {
+      if (typeof stats[field] !== "number" || !Number.isFinite(stats[field])) {
+        issues.push({ kind, id, reason: `${field} is missing or not finite` });
+      }
+    }
+    if ((stats.maxHp ?? 0) <= 0) issues.push({ kind, id, reason: "maxHp must be positive" });
+    if (options.requireHp !== false && (stats.hp ?? 0) <= 0) issues.push({ kind, id, reason: "hp must be positive for live object" });
+    if ((stats.hp ?? 0) > (stats.maxHp ?? 0)) issues.push({ kind, id, reason: "hp exceeds maxHp" });
+    if ((stats.armor ?? -1) < 0) issues.push({ kind, id, reason: "armor must be non-negative" });
+    if ((stats.attack ?? -1) < 0) issues.push({ kind, id, reason: "attack must be non-negative" });
+    if ((stats.range ?? -1) < 0) issues.push({ kind, id, reason: "range must be non-negative" });
+    if ((stats.attackCooldown ?? -1) < 0) issues.push({ kind, id, reason: "attackCooldown must be non-negative" });
+    if ((stats.attack ?? 0) > 0 && (stats.range ?? 0) <= 0) issues.push({ kind, id, reason: "attacking object must have positive range" });
+    if (options.attackMustBeZero && (stats.attack ?? 0) !== 0) issues.push({ kind, id, reason: "passive item/resource attack must be zero" });
+  };
+
+  for (const type of unitTypes) check("unitType", type, getUnitTypeCombatStats(type));
+  for (const type of buildingTypes) check("buildingType", type, getBuildingTypeCombatStats(type));
+  for (const type of resourceTypes) check("resourceType", type, getResourceTypeCombatStats(type, 12), { attackMustBeZero: true });
+  check("packet", "packet:itemType", getPacketItemTypeCombatStats(), { attackMustBeZero: true });
+
+  for (const unit of Object.values(state.units)) if (unit.hp > 0) check("unit", unit.id, unit);
+  for (const building of Object.values(state.buildings)) if (building.hp > 0) check("building", building.id, building);
+  for (const [index, tile] of state.map.entries()) {
+    const x = index % MAP_SIZE;
+    const y = Math.floor(index / MAP_SIZE);
+    if (tile.terrain === "forest" && (!tile.resource || tile.resource.type !== "wood" || tile.resource.amount <= 0 || tile.resource.hp <= 0)) {
+      issues.push({ kind: "map", id: `${x},${y}`, reason: "forest terrain must carry a live wood ResourceDeposit instead of acting as an unstatted wood item" });
+    }
+    if (!tile.resource) continue;
+    if (tile.resource.amount <= 0 || tile.resource.hp <= 0) {
+      issues.push({ kind: "resource", id: `${tile.resource.type}:${x},${y}`, reason: "dead or exhausted resource deposit should be removed from the map" });
+      continue;
+    }
+    check("resource", `${tile.resource.type}:${x},${y}`, tile.resource, { attackMustBeZero: true });
+  }
+  for (const packet of Object.values(state.packets)) {
+    check("packet", packet.id, packet, { requireHp: packet.state !== "KILLED_WITH_PACKET", attackMustBeZero: true });
+    if (packet.itemType !== "packet") issues.push({ kind: "packet", id: packet.id, reason: "packet itemType must be packet" });
+  }
+  return {
+    ok: issues.length === 0,
+    checked: Object.values(byKind).reduce((sum, count) => sum + count, 0),
+    byKind,
+    issues
+  };
 }
 
 export function createResourceDeposit(type: ResourceType, amount: number): ResourceDeposit {
@@ -2587,7 +2690,14 @@ function updateGatherer(state: GameState, unit: Unit): void {
       }
       return;
     }
-    task.cargo += 1;
+    targetTile.terrain = "grass";
+    const next = findNearestResource(state, unit, task.resource);
+    if (!next) {
+      unit.task = { kind: "idle" };
+      return;
+    }
+    task.target = next;
+    task.path = findPath(state, unit, next);
     return;
   }
   if (!targetTile.resource || targetTile.resource.amount <= 0) {
@@ -2914,9 +3024,7 @@ function applyUnitDamage(state: GameState, target: Unit, amount: number, attacke
   target.hp = 0;
   if (target.carriedPacketId) {
     const packet = state.packets[target.carriedPacketId];
-    packet.state = "KILLED_WITH_PACKET";
-    packet.carrierUnitId = undefined;
-    packet.lastStateChangeTick = state.tick;
+    if (packet) destroyPacketItem(state, packet);
     addEvent(
       state,
       "MESSENGER_KILLED",
@@ -3087,9 +3195,7 @@ function eliminateTribeAtReview(state: GameState, tribeId: TribeId, reviewYear: 
       unit.task = { kind: "idle" };
       if (unit.carriedPacketId) {
         const packet = state.packets[unit.carriedPacketId];
-        packet.state = "KILLED_WITH_PACKET";
-        packet.carrierUnitId = undefined;
-        packet.lastStateChangeTick = state.tick;
+        if (packet) destroyPacketItem(state, packet);
       }
     }
   }
@@ -3101,9 +3207,7 @@ function eliminateTribeAtReview(state: GameState, tribeId: TribeId, reviewYear: 
       carrier.carriedPacketId = undefined;
       if (carrier.tribeId !== tribeId && carrier.hp > 0) carrier.task = { kind: "idle" };
     }
-    packet.state = "KILLED_WITH_PACKET";
-    packet.carrierUnitId = undefined;
-    packet.lastStateChangeTick = state.tick;
+    destroyPacketItem(state, packet);
   }
   addEvent(
     state,
@@ -3256,6 +3360,8 @@ function sendMessage(
   const estimatedTicks = Math.max(150, Math.round(path.length / messenger.speed * TICK_RATE * 2.6));
   const packet: Packet = {
     id: packetId,
+    itemType: "packet",
+    ...packetStats,
     messageIds: [messageId],
     carrierUnitId: messenger.id,
     originTribeId,
@@ -3332,6 +3438,13 @@ function markMessengerRouteBlocked(state: GameState, unit: Unit, packet: Packet,
     `${unit.name} could not complete a packet route: ${reason}.`,
     [packet.originTribeId, packet.recipientTribeId]
   );
+}
+
+function destroyPacketItem(state: GameState, packet: Packet): void {
+  packet.hp = 0;
+  packet.state = "KILLED_WITH_PACKET";
+  packet.carrierUnitId = undefined;
+  packet.lastStateChangeTick = state.tick;
 }
 
 function createDeterministicReplyInput(
@@ -3492,7 +3605,10 @@ function findNearestResource(state: GameState, unit: Unit, resource: ResourceTyp
   for (let y = 1; y < MAP_SIZE - 1; y += 1) {
     for (let x = 1; x < MAP_SIZE - 1; x += 1) {
       const tile = state.map[tileIndex(x, y)];
-      const matches = resource === "wood" ? tile.terrain === "forest" : tile.resource?.type === resource && tile.resource.amount > 0;
+      const matches =
+        resource === "wood"
+          ? tile.resource?.type === "wood" && tile.resource.amount > 0 && tile.resource.hp > 0
+          : tile.resource?.type === resource && tile.resource.amount > 0 && tile.resource.hp > 0;
       if (!matches) continue;
       const d = Math.abs(unit.x - x) + Math.abs(unit.y - y);
       if (d < bestDistance) {

@@ -102,6 +102,7 @@ const buildingState = await page.evaluate(() => {
   const owned = parsed.visibleBuildings.filter((building) => building.tribeId === "blue");
   return {
     selected: parsed.selected,
+    combatStatCoverage: parsed.combatStatCoverage,
     constructionFeedback: parsed.constructionFeedback,
     recentConstructionFeedback: parsed.recentConstructionFeedback,
     focused,
@@ -114,6 +115,9 @@ const buildingState = await page.evaluate(() => {
     }
   };
 });
+if (!buildingState.combatStatCoverage?.ok) {
+  throw new Error(`Combat stat coverage failed after building setup: ${JSON.stringify(buildingState.combatStatCoverage)}`);
+}
 for (const type of ["farm", "watchtower", "wall", "gate", "turret"]) {
   if ((buildingState.ownedBuildableCounts[type] ?? 0) < 1) {
     throw new Error(`Created ${type} was not still visible in final building state: ${JSON.stringify(buildingState)}`);
@@ -134,6 +138,10 @@ for (const type of ["wall", "gate", "turret"]) {
 const resourceRaidState = await assertResourceRaidOrder(page);
 const damageState = await assertDamageVisualization(page);
 const repairState = await assertRepairOrder(page);
+const finalCombatStatCoverage = await page.evaluate(() => JSON.parse(window.render_game_to_text()).combatStatCoverage);
+if (!finalCombatStatCoverage?.ok) {
+  throw new Error(`Combat stat coverage failed after siege/raid/repair flow: ${JSON.stringify(finalCombatStatCoverage)}`);
+}
 
 await page.screenshot({ path: screenshotPath, fullPage: true });
 const screenshot = await stat(screenshotPath);
@@ -157,7 +165,8 @@ console.log(
       siegeStates,
       resourceRaidState,
       damageState,
-      repairState
+      repairState,
+      finalCombatStatCoverage
     },
     null,
     2

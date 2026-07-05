@@ -18,8 +18,10 @@ import {
   getBuildingCost,
   getBuildingRepairCost,
   getBuildingRequirements,
+  getCombatStatCoverageReport,
   getDevelopment,
   getMissingBuildingDevelopments,
+  getPacketItemCombatStats,
   getRecentVisibleEvents,
   getResourceControlSummary,
   getTownHall,
@@ -313,6 +315,7 @@ type CombatStatSnapshot = {
   armor: number;
   attack: number;
   range: number;
+  attackCooldown: number;
   condition: DurabilityCondition;
 };
 type BuildingDurabilitySnapshot = CombatStatSnapshot & {
@@ -1581,7 +1584,7 @@ function durabilityCondition(entity: { hp: number; maxHp: number }): DurabilityC
   return "critical";
 }
 
-function combatStatSnapshot(entity: { hp: number; maxHp: number; armor: number; attack: number; range: number }): CombatStatSnapshot {
+function combatStatSnapshot(entity: { hp: number; maxHp: number; armor: number; attack: number; range: number; attackCooldown: number }): CombatStatSnapshot {
   return {
     hp: Math.ceil(entity.hp),
     maxHp: entity.maxHp,
@@ -1589,6 +1592,7 @@ function combatStatSnapshot(entity: { hp: number; maxHp: number; armor: number; 
     armor: entity.armor,
     attack: entity.attack,
     range: entity.range,
+    attackCooldown: entity.attackCooldown,
     condition: durabilityCondition(entity)
   };
 }
@@ -1767,6 +1771,7 @@ function renderGameToText(): string {
         construction: constructionResourceTypes.has(type)
       }))
     },
+    combatStatCoverage: getCombatStatCoverageReport(state),
     buildingCosts: buildableBuildingTypes.map((type) => ({
       type,
       cost: getBuildingCost(type),
@@ -1850,15 +1855,29 @@ function renderGameToText(): string {
     visibleResourceDepositsForPlayer: getVisibleResourceDepositIntel(state, playerTribe, 20),
     packets: Object.values(state.packets)
       .slice(-20)
-      .map((packet) => ({
-        id: packet.id,
-        originTribeId: packet.originTribeId,
-        recipientTribeId: packet.recipientTribeId,
-        state: packet.state,
-        messages: packet.messageIds.length,
-        carrierUnitId: packet.carrierUnitId ?? null,
-        overdueAnnounced: packet.overdueAnnounced
-      })),
+      .map((packet) => {
+        const stats = getPacketItemCombatStats(packet);
+        const durability = combatStatSnapshot(packet);
+        return {
+          id: packet.id,
+          itemType: packet.itemType,
+          originTribeId: packet.originTribeId,
+          recipientTribeId: packet.recipientTribeId,
+          state: packet.state,
+          messages: packet.messageIds.length,
+          carrierUnitId: packet.carrierUnitId ?? null,
+          overdueAnnounced: packet.overdueAnnounced,
+          hp: durability.hp,
+          maxHp: durability.maxHp,
+          healthPct: durability.healthPct,
+          armor: durability.armor,
+          attack: durability.attack,
+          range: durability.range,
+          attackCooldown: durability.attackCooldown,
+          condition: durability.condition,
+          combatStats: stats
+        };
+      }),
     latestAiDecisions: state.aiDecisions.slice(-20).map((decision) => ({
       tick: decision.tick,
       tribeId: decision.tribeId,
@@ -2424,8 +2443,6 @@ function collectResourceTiles(
       if (type === "wood") {
         if (tile.resource?.type === "wood" && tile.resource.amount > 0 && tile.resource.hp > 0) {
           tiles.push({ x, y, ...tile.resource });
-        } else if (tile.terrain === "forest") {
-          tiles.push({ x, y, amount: 1, hp: 1, maxHp: 1, armor: 0, attack: 0, range: 0, attackCooldown: 0 });
         }
         continue;
       }

@@ -2563,3 +2563,30 @@ Original prompt: ok continue with roadmap make sure the AIs can report bugs and 
   - expand resource-control scoring into defended logistics routes, tribute, embargoes, market manipulation, and richer resource-denial consequences,
   - continue the PixiJS graphics upgrade so resource/fortification posture becomes more readable to humans,
   - add siege engines, breach previews, and contested field repair under fire.
+
+### 2026-07-05 Packet Item Stats And Universal Combat Coverage
+
+- Closed the literal item-stat gap in the combat contract:
+  - physical messenger packets now extend the shared `CombatStats` surface with health, armor, attack/range, and cooldown,
+  - dispatched packets initialize as `itemType: "packet"` items with their own HP instead of relying only on the carrier messenger,
+  - packets killed with messengers or by century population elimination now drop to `hp: 0`,
+  - `getPacketItemCombatStats()` and `getPacketItemTypeCombatStats()` expose packet item stats for tests and browser tooling.
+- Added a universal runtime coverage guard:
+  - `getCombatStatCoverageReport()` verifies declared unit types, building types, resource types, live units, live buildings, live resource deposits, and packet items,
+  - dead/exhausted resource deposits must be removed from the map,
+  - bare forest tiles can no longer behave like unstatted wood; harvestable wood must be a live `ResourceDeposit`,
+  - `render_game_to_text()` now exposes `combatStatCoverage` and per-packet item combat stats.
+- Rechecked walls and destroyable defenses under the same contract:
+  - the existing wall test still proves walls block movement until destroyed and become walkable after destruction,
+  - browser building smoke now checks combat-stat coverage after building setup and again after wall/gate/turret siege, resource raid, damage, and repair flows.
+- QA completed:
+  - `pnpm exec tsc --noEmit` passed,
+  - full `pnpm test -- --run packages/sim/src/sim.test.ts` passed: 114 tests,
+  - `pnpm build` passed,
+  - `node --check scripts/smoke-playwright.mjs && node --check scripts/smoke-building-visibility.mjs && git diff --check` passed,
+  - `pnpm smoke:buildings` passed with clean combat-stat coverage after construction and after siege/raid/repair,
+  - `pnpm smoke:smooth` passed with measured FPS 27.5 and visible interpolation,
+  - full `pnpm smoke` passed with packet item combat stats visible in the browser hook and clean combat-stat coverage.
+- Remaining backlog:
+  - decide whether future dropped packets, siege projectiles, trade goods, and inventory objects should become targetable map entities or remain abstract records,
+  - continue PixiJS label-tier/readability work so statted resources, packets, fortifications, and battle states are easier to inspect visually.

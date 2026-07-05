@@ -85,6 +85,7 @@ const hookCheck = await page.evaluate(() => {
     afterTick: after.tick,
     coordinateSystem: after.coordinateSystem,
     compactAiStatus: after.llm?.compactStatus,
+    combatStatCoverage: after.combatStatCoverage,
     visibleUnits: Array.isArray(after.visibleUnits) ? after.visibleUnits.length : 0,
     tribes: Array.isArray(after.tribes) ? after.tribes.length : 0,
     packets: Array.isArray(after.packets) ? after.packets.length : 0,
@@ -118,6 +119,9 @@ if (
 ) {
   throw new Error(`render_game_to_text did not expose compact AI status: ${JSON.stringify(hookCheck.compactAiStatus)}`);
 }
+if (!hookCheck.combatStatCoverage?.ok || hookCheck.combatStatCoverage?.byKind?.unitType !== 7 || hookCheck.combatStatCoverage?.byKind?.buildingType !== 8) {
+  throw new Error(`render_game_to_text did not expose complete combat stat coverage: ${JSON.stringify(hookCheck.combatStatCoverage)}`);
+}
 await page.waitForFunction(
   () => {
     if (typeof window.render_game_to_text !== "function") return false;
@@ -138,6 +142,30 @@ const openedManualMessage = await page.evaluate(() => {
 });
 if (!openedManualMessage) throw new Error("Missing manual message test controls.");
 await page.click("#sendPeaceButton");
+const packetStatState = await page.evaluate(() => {
+  const parsed = JSON.parse(window.render_game_to_text());
+  const packets = parsed.packets ?? [];
+  const packet = packets.find((candidate) => candidate.originTribeId === "blue") ?? packets[0];
+  return {
+    coverage: parsed.combatStatCoverage,
+    packet,
+    packets
+  };
+});
+if (!packetStatState.coverage?.ok) {
+  throw new Error(`Combat stat coverage failed after dispatching a packet: ${JSON.stringify(packetStatState.coverage)}`);
+}
+if (
+  packetStatState.packet?.itemType !== "packet" ||
+  packetStatState.packet?.hp <= 0 ||
+  packetStatState.packet?.maxHp <= 0 ||
+  packetStatState.packet?.armor < 0 ||
+  packetStatState.packet?.attack !== 0 ||
+  packetStatState.packet?.range !== 0 ||
+  packetStatState.packet?.combatStats?.hp !== packetStatState.packet?.hp
+) {
+  throw new Error(`Dispatched packet did not expose item combat stats: ${JSON.stringify(packetStatState)}`);
+}
 const openedDebug = await page.evaluate(() => {
   const details = document.querySelector("details.debug-controls");
   if (!(details instanceof HTMLDetailsElement)) return false;
