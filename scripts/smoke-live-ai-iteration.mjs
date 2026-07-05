@@ -10,6 +10,9 @@ const screenshotPath =
   "/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-live-ai-iteration.png";
 const startupTimeoutMs = numberEnv("SOVEREIGNS_LIVE_AI_STARTUP_TIMEOUT_MS", 600_000);
 const sampleMs = numberEnv("SOVEREIGNS_LIVE_AI_SAMPLE_MS", 30_000);
+const postFixSampleMs = numberEnv("SOVEREIGNS_LIVE_AI_POST_FIX_SAMPLE_MS", 180_000);
+const postFixDrainMs = numberEnv("SOVEREIGNS_LIVE_AI_POST_FIX_DRAIN_MS", 120_000);
+const postFixMinStrategyTurnsPerFixedTribe = numberEnv("SOVEREIGNS_LIVE_AI_POST_FIX_MIN_STRATEGY_TURNS", 1);
 const minStrategyTurnsPerTribe = numberEnv("SOVEREIGNS_LIVE_AI_MIN_STRATEGY_TURNS", 1);
 const forceLiveIssue = booleanEnv("SOVEREIGNS_FORCE_LIVE_AI_ISSUE", true);
 const forceLiveAuthoredBugReport = booleanEnv("SOVEREIGNS_FORCE_LIVE_AUTHORED_BUG_REPORT", true);
@@ -123,6 +126,7 @@ let forcedLiveIssueState = null;
 let forcedOpenPromptState = null;
 const forcedLiveIssueTriages = [];
 let forcedFixedLessonState = null;
+let postFixStrategyState = null;
 if (forceLiveIssue) {
   for (const tribeId of requiredTribes) {
     const result = await page.evaluate(async ({ targetTribeId }) => {
@@ -169,7 +173,6 @@ while (Date.now() - sampleStartedAt < sampleMs) {
   sampledState = summarizeLiveAiState(parsed, requiredTribes);
 }
 
-await page.screenshot({ path: screenshotPath, fullPage: true });
 if (liveAuthoredBugReportResult?.issue) {
   liveAuthoredBugReportTriage = await markLiveIssueFixed(
     page,
@@ -200,14 +203,12 @@ if (liveAuthoredBugReportResult?.issue || forcedLiveIssueResults.some((result) =
     assertTestOnlyIssuesExcludedFromPromptContexts(forcedFixedLessonState, [liveAuthoredBugReportResult], "fixed");
   }
 }
-await browser.close();
+if (forceLiveIssue && forcedLiveIssueResults.some((result) => result?.issue) && postFixSampleMs > 0) {
+  postFixStrategyState = await samplePostFixStrategyConsumption(page, forcedLiveIssueResults, startupState.assignments);
+  assertPostFixStrategyConsumption(postFixStrategyState);
+}
 
-const reportQuality = summarizeReportQuality({
-  liveAuthoredBugReportResult,
-  forcedLiveIssueResults,
-  finalState: sampledState
-});
-
+await page.screenshot({ path: screenshotPath, fullPage: true });
 const screenshot = await stat(screenshotPath);
 if (screenshot.size < 50_000) {
   throw new Error(`Live AI iteration screenshot looks too small: ${screenshot.size}`);
@@ -215,6 +216,14 @@ if (screenshot.size < 50_000) {
 if (errors.length > 0) {
   throw new Error(`Browser emitted errors:\n${errors.join("\n")}`);
 }
+await browser.close();
+
+const reportQuality = summarizeReportQuality({
+  liveAuthoredBugReportResult,
+  forcedLiveIssueResults,
+  finalState: postFixStrategyState?.finalState ?? sampledState
+});
+assertReportQuality(reportQuality);
 
 assertStartupParallelism(parallelStartupState);
 assertStartupState(startupState);
@@ -240,6 +249,9 @@ console.log(
       url,
       startupTimeoutMs,
       sampleMs,
+      postFixSampleMs,
+      postFixDrainMs,
+      postFixMinStrategyTurnsPerFixedTribe,
       minStrategyTurnsPerTribe,
       forceLiveIssue,
       forceLiveAuthoredBugReport,
@@ -319,6 +331,7 @@ console.log(
               : null
           }
         : null,
+      postFixStrategy: summarizePostFixStrategyForOutput(postFixStrategyState),
       reportQuality,
       final: sampledState,
       review: {
@@ -548,6 +561,165 @@ function assertSampledState(state) {
   }
 }
 
+async function samplePostFixStrategyConsumption(page, results, assignments) {
+  const issues = forcedIssues(results);
+  const targetTribes = Array.from(new Set(issues.map((issue) => issue.tribeId))).filter(Boolean);
+  const baselineParsed = await page.evaluate(() => JSON.parse(window.render_game_to_text()));
+  const baselineTick = baselineParsed.tick ?? 0;
+  let finalState = summarizeLiveAiState(baselineParsed, requiredTribes);
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < postFixSampleMs) {
+    await page.waitForTimeout(1000);
+    const parsed = await page.evaluate(() => {
+      window.advanceTime?.(1000);
+      const stateBeforeAsk = JSON.parse(window.render_game_to_text());
+      const capacity = Math.max(0, (stateBeforeAsk.llm?.maxConcurrentJobs ?? 1) - (stateBeforeAsk.llm?.activeJobCount ?? 0));
+      const button = document.querySelector("#askAiNowButton");
+      for (let index = 0; index < capacity; index += 1) {
+        if (button instanceof HTMLButtonElement) button.click();
+      }
+      return JSON.parse(window.render_game_to_text());
+    });
+    finalState = summarizeLiveAiState(parsed, requiredTribes);
+    const summary = summarizePostFixStrategy(finalState, issues, assignments, baselineTick, targetTribes);
+    if (postFixTargetsSatisfied(summary)) return summary;
+  }
+  let summary = summarizePostFixStrategy(finalState, issues, assignments, baselineTick, targetTribes);
+  const drainStartedAt = Date.now();
+  while (!postFixTargetsSatisfied(summary) && Date.now() - drainStartedAt < postFixDrainMs && shouldContinuePostFixDrain(summary)) {
+    await page.waitForTimeout(1000);
+    const parsed = await page.evaluate(() => {
+      window.advanceTime?.(1000);
+      const stateBeforeAsk = JSON.parse(window.render_game_to_text());
+      const capacity = Math.max(0, (stateBeforeAsk.llm?.maxConcurrentJobs ?? 1) - (stateBeforeAsk.llm?.activeJobCount ?? 0));
+      const button = document.querySelector("#askAiNowButton");
+      for (let index = 0; index < capacity; index += 1) {
+        if (button instanceof HTMLButtonElement) button.click();
+      }
+      return JSON.parse(window.render_game_to_text());
+    });
+    finalState = summarizeLiveAiState(parsed, requiredTribes);
+    summary = summarizePostFixStrategy(finalState, issues, assignments, baselineTick, targetTribes);
+  }
+  return summary;
+}
+
+function summarizePostFixStrategy(state, issues, assignments, baselineTick, targetTribes) {
+  const coverage = targetTribes.map((tribeId) => {
+    const decisions = (state.latestAiDecisions ?? []).filter(
+      (decision) => decision.tribeId === tribeId && decision.tick > baselineTick && isAutonomousStrategyDecision(decision)
+    );
+    const assignedModel = assignments?.[tribeId] ?? "";
+    const assignedModelLive = decisions.filter((decision) => decision.provider === "ollama" && (!assignedModel || decision.model === assignedModel));
+    const acceptedNonReportOrders = assignedModelLive.flatMap((decision) => acceptedNonReportOrdersForDecision(decision));
+    return {
+      tribeId,
+      assignedModel,
+      postFixStrategyDecisions: decisions.length,
+      postFixAssignedModelLiveDecisions: assignedModelLive.length,
+      acceptedNonReportOrders,
+      latestTick: decisions.at(-1)?.tick ?? null,
+      latestModel: decisions.at(-1)?.model ?? null,
+      latestSummary: decisions.at(-1)?.summary ?? ""
+    };
+  });
+  const duplicateFixedReports = findDuplicateFixedReports(state, issues, baselineTick);
+  return {
+    ok: false,
+    baselineTick,
+    sampleMs: postFixSampleMs,
+    drainMs: postFixDrainMs,
+    minimumTurns: postFixMinStrategyTurnsPerFixedTribe,
+    targetTribes,
+    coverage,
+    duplicateFixedReportCount: duplicateFixedReports.length,
+    duplicateFixedReports,
+    acceptedNonReportOrdersByTribe: Object.fromEntries(coverage.map((row) => [row.tribeId, row.acceptedNonReportOrders])),
+    finalState: state
+  };
+}
+
+function acceptedNonReportOrdersForDecision(decision) {
+  return (decision.accepted ?? []).filter((entry) => {
+    const text = String(entry);
+    return !/^(REPORT_BUG|IDENTITY|REPLY|LLM_|AI_BUG|BUG_REPORT):?/i.test(text);
+  });
+}
+
+function findDuplicateFixedReports(state, issues, baselineTick) {
+  const issueRows = issues.map((issue) => ({
+    tribeId: issue.tribeId,
+    category: issue.category,
+    severity: issue.severity,
+    snippet: stableIssueSnippet(issue.report)
+  }));
+  return (state.aiIssues ?? []).filter((candidate) => {
+    if (candidate.tick <= baselineTick || isSyntheticIssue(candidate)) return false;
+    return issueRows.some(
+      (issue) =>
+        candidate.tribeId === issue.tribeId &&
+        candidate.category === issue.category &&
+        candidate.severity === issue.severity &&
+        issue.snippet &&
+        normalizeIssueText(candidate.report).includes(issue.snippet)
+    );
+  });
+}
+
+function postFixTargetsSatisfied(summary) {
+  if (summary.duplicateFixedReportCount > 0) return false;
+  return postFixMissingRows(summary).length === 0;
+}
+
+function shouldContinuePostFixDrain(summary) {
+  if (!summary || summary.duplicateFixedReportCount > 0) return false;
+  return postFixMissingRows(summary).length > 0;
+}
+
+function postFixMissingRows(summary) {
+  return (summary.coverage ?? []).filter(
+    (row) =>
+      (row.postFixAssignedModelLiveDecisions ?? 0) < postFixMinStrategyTurnsPerFixedTribe ||
+      (row.acceptedNonReportOrders?.length ?? 0) < postFixMinStrategyTurnsPerFixedTribe
+  );
+}
+
+function assertPostFixStrategyConsumption(summary) {
+  if (!summary) return;
+  if (summary.duplicateFixedReportCount > 0) {
+    throw new Error(`Fixed live issues were re-filed after being marked fixed: ${JSON.stringify(summary)}`);
+  }
+  const missing = postFixMissingRows(summary);
+  if (missing.length > 0) {
+    throw new Error(`Fixed lessons did not lead to later assigned-model non-report strategy turns for every affected tribe: ${JSON.stringify({ missing, summary })}`);
+  }
+  summary.ok = true;
+}
+
+function summarizePostFixStrategyForOutput(summary) {
+  if (!summary) return null;
+  return {
+    ok: summary.ok,
+    baselineTick: summary.baselineTick,
+    sampleMs: summary.sampleMs,
+    drainMs: summary.drainMs,
+    minimumTurns: summary.minimumTurns,
+    targetTribes: summary.targetTribes,
+    coverage: summary.coverage,
+    duplicateFixedReportCount: summary.duplicateFixedReportCount,
+    duplicateFixedReports: summary.duplicateFixedReports.map((issue) => ({
+      tick: issue.tick,
+      tribeId: issue.tribeId,
+      category: issue.category,
+      severity: issue.severity,
+      report: issue.report
+    })),
+    acceptedNonReportOrdersByTribe: summary.acceptedNonReportOrdersByTribe,
+    finalTick: summary.finalState?.tick ?? null,
+    finalAiIssueCount: summary.finalState?.aiIssues?.length ?? null
+  };
+}
+
 function assertPerTribeStrategyCoverage(state, minimumTurns, label) {
   const rows = state.autonomousStrategyCoverage ?? [];
   const missing = requiredTribes
@@ -740,6 +912,17 @@ function summarizeReportQuality({ liveAuthoredBugReportResult, forcedLiveIssueRe
     vagueCount,
     examples
   };
+}
+
+function assertReportQuality(reportQuality) {
+  if (!reportQuality || reportQuality.total === 0) {
+    if (forceLiveIssue) throw new Error(`Live report quality gate had no non-synthetic reports to inspect: ${JSON.stringify(reportQuality)}`);
+    return;
+  }
+  const missingFields = Object.entries(reportQuality.missingFieldsByName ?? {}).filter(([, count]) => count > 0);
+  if (missingFields.length > 0 || reportQuality.vagueCount > 0 || reportQuality.actionable !== reportQuality.total) {
+    throw new Error(`Live AI report quality gate failed: ${JSON.stringify(reportQuality)}`);
+  }
 }
 
 function collectReportQualityRows({ liveAuthoredBugReportResult, forcedLiveIssueResults, finalState }) {

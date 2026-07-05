@@ -227,6 +227,17 @@ function summarizeLiveAi(data) {
       aiIssueCount: data.final?.aiIssues?.length ?? 0,
       autonomousStrategyCoverage: data.final?.autonomousStrategyCoverage ?? [],
       reportQuality: data.reportQuality ?? null,
+      postFixStrategy: data.postFixStrategy
+        ? {
+            ok: data.postFixStrategy.ok,
+            baselineTick: data.postFixStrategy.baselineTick,
+            sampleMs: data.postFixStrategy.sampleMs,
+            minimumTurns: data.postFixStrategy.minimumTurns,
+            duplicateFixedReportCount: data.postFixStrategy.duplicateFixedReportCount,
+            coverage: data.postFixStrategy.coverage ?? [],
+            acceptedNonReportOrdersByTribe: data.postFixStrategy.acceptedNonReportOrdersByTribe ?? {}
+          }
+        : null,
       liveAuthoredBugReport: data.liveAuthoredBugReport
         ? {
             ok: data.liveAuthoredBugReport.ok,
@@ -366,6 +377,13 @@ function commandSummary(name, data) {
           }
         : null,
       aiIssueCount: data.final?.aiIssues?.length ?? 0,
+      postFixStrategy: data.postFixStrategy
+        ? {
+            ok: data.postFixStrategy.ok,
+            duplicateFixedReportCount: data.postFixStrategy.duplicateFixedReportCount,
+            coverage: data.postFixStrategy.coverage ?? []
+          }
+        : null,
       forcedLiveIssue: forcedLiveIssueCount > 0 && forcedLiveIssueFixedCount === forcedLiveIssueCount,
       forcedLiveIssueCount,
       forcedLiveIssueFixedCount,

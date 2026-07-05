@@ -39,6 +39,7 @@ http://localhost:5173/
   - unit, building, and resource legend
   - build-cost legend tying farms, watchtowers, walls, and turrets to their required materials
   - clay, limestone, iron, and coal deposits shown distinctly from food, wood, gold, and stone
+  - resource deposits expose health, armor, attack/range, and condition metadata in hover and browser-hook output
 - Local LLM sovereign decisions through Ollama:
   - browser calls local Ollama through the Vite `/ollama` proxy
   - default model selection prefers `qwen3.5:9b-mlx` for clean/fast schema output, then `gemma4:12b`, then other schema-compatible local models
@@ -90,6 +91,7 @@ http://localhost:5173/
 - Defensive construction:
   - walls block movement until destroyed
   - gates are buildable, can be open/closed/locked, and open gates follow access policies
+  - units, buildings, and resource deposits share an explicit health/armor/attack/range stat contract
   - walls are drawn as high-contrast segmented barrier tiles and selected/new walls get a bright construction pulse, centered camera, selected-panel confirmation, and recent-construction labels so rapid builds remain visible
   - selected units and buildings expose health, armor, attack/range, condition, and repair state; damaged walls/gates/turrets draw cracks, rubble, scorch marks, health bars, and repair pulses
   - optional defense overlay outlines wall tiles and shows turret range

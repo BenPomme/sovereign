@@ -2426,3 +2426,43 @@ Original prompt: ok continue with roadmap make sure the AIs can report bugs and 
   - add contested field-repair behavior under fire,
   - expand gate diplomacy around safe-passage treaties, tolls, betrayal, sabotage, and ambushes,
   - keep every future targetable item, siege engine, and processing building on the health/armor/attack/range plus condition/repair-state contract.
+
+### 2026-07-05 Combat Stat Contract Hardening
+
+- Responded to the new durability requirement by tightening the actual model contract:
+  - introduced shared `CombatStats` and `DamageableWorldObject` types,
+  - made units and buildings inherit the same health, armor, attack/range, and cooldown fields,
+  - added stat snapshot helpers for units and buildings,
+  - made resource deposits first-class statted map items with health, armor, attack/range, and cooldown metadata,
+  - resource gathering now reduces deposit health alongside finite amount.
+- Preserved and rechecked wall destruction:
+  - walls already block movement until destroyed,
+  - armor-reduced building damage still deletes destroyed walls and makes their tile walkable,
+  - browser damage QA now uses `damageBuilding()` instead of direct HP mutation.
+- Tightened visibility and UI:
+  - zero-health buildings are filtered out of visible-building projections,
+  - resource samples in `render_game_to_text()` now include hp, maxHp, health percentage, armor, attack, and range,
+  - resource hover cards now show deposit health, condition, armor, attack, and range.
+- QA completed so far:
+  - `node --check scripts/smoke-live-ai-iteration.mjs && node --check scripts/ai-iteration-loop.mjs` passed,
+  - `pnpm exec tsc --noEmit` passed,
+  - `pnpm exec vitest run packages/sim/src/sim.test.ts --reporter=dot` passed: 46 tests,
+  - full `pnpm test` passed: 109 tests,
+  - `pnpm build` passed,
+  - `pnpm smoke:buildings` passed with real `damageBuilding()` evidence for damaged/repaired `gate_0001` and `test_siege_wall` destruction,
+  - inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-buildings.png`; the construction cluster and labels are visible, though dense,
+  - `pnpm smoke:smooth` passed with measured FPS 28.4 and visible interpolation,
+  - full `pnpm smoke` passed with board, diplomacy, report review, info request, wall/resource, learning, and persistence checks,
+  - inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-smoke.png`; the board and AI report review panel render normally,
+  - shared `develop-web-game` Playwright client exited cleanly, but did not emit a new screenshot path,
+  - first bounded `pnpm smoke:live-ai` runs exposed that 45s/180s post-fix windows could fail while later tribes were still waiting or thinking,
+  - fixed live smoke by raising the default post-fix sample window and adding a drain phase for in-flight post-fix strategy jobs,
+  - final `SOVEREIGNS_LIVE_AI_SAMPLE_MS=8000 pnpm smoke:live-ai` passed with post-fix strategy coverage for all five tribes, 24 live AI turns, 0 fallback decisions, and no duplicate fixed reports,
+  - inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-live-ai-iteration.png`; all identities/doctrines are complete and the AI observer panel renders normally,
+  - `pnpm ai:review:strict -- --json --no-write` passed after live smoke: 0 actionable unresolved, 0 parser/transport open,
+  - `pnpm ai:snapshots:replay -- --strict --json --no-write` passed: 449 replayed before live smoke and 470 replayed through the AI iteration wrapper after live smoke, 0 failures, 0 contract warnings,
+  - `node scripts/ai-iteration-loop.mjs --output /tmp/sovereign-ai-iteration-status.json` passed.
+- Remaining backlog:
+  - add explicit damage/destruction mechanics for future inventory items, siege engines, and processing installations as they become real entities,
+  - decide whether resource deposits should be attackable/raided directly or only exhausted/controlled by workers and territory,
+  - keep using live smoke to verify that fixed AI reports become later non-report strategy, not repeated complaints.

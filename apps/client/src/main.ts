@@ -13,6 +13,7 @@ import {
   chooseDevelopment,
   computeWealth,
   createGame,
+  damageBuilding,
   getBuildingCost,
   getBuildingRepairCost,
   getBuildingRequirements,
@@ -51,6 +52,7 @@ import {
   type Position,
   type PostGameLearning,
   type ResourceCost,
+  type ResourceDeposit,
   type ResourceType,
   type TerrainType,
   type TribeId,
@@ -276,7 +278,7 @@ type HitTarget = { kind: "unit"; unit: Unit } | { kind: "building"; building: Bu
 type HoverTarget =
   | { kind: "unit"; unit: Unit }
   | { kind: "building"; building: Building }
-  | { kind: "tile"; x: number; y: number; terrain: TerrainType; resource?: { type: ResourceType; amount: number } };
+  | { kind: "tile"; x: number; y: number; terrain: TerrainType; resource?: ResourceDeposit };
 type DurabilityCondition = "intact" | "worn" | "damaged" | "critical" | "destroyed";
 type RepairState = "none" | "repairing" | "recently_repaired";
 type CombatStatSnapshot = {
@@ -2033,14 +2035,22 @@ function forceDamageBuildingForTest(): {
     return { ok: false, reason: ensured.reason };
   }
   const building = ensured.building;
+  if (building.hp < building.maxHp * 0.7) building.hp = building.maxHp;
   const beforeHp = Math.ceil(building.hp);
-  building.hp = Math.max(1, Math.min(building.maxHp - 1, Math.floor(building.maxHp * 0.45)));
-  selectAndShowBuilding(building);
-  const durability = buildingDurabilitySnapshot(state, building);
+  const targetHp = Math.max(1, Math.min(building.maxHp - 1, Math.floor(building.maxHp * 0.45)));
+  const damageAmount = Math.max(1, beforeHp - targetHp + building.armor);
+  const damaged = damageBuilding(state, building.id, damageAmount, "red");
+  const damagedBuilding = state.buildings[building.id];
+  if (!damaged.ok || !damagedBuilding || damaged.destroyed) {
+    render();
+    return { ok: false, targetBuildingId: building.id, buildingType: building.type, beforeHp, reason: damaged.ok ? "damage test unexpectedly destroyed the building" : damaged.reason };
+  }
+  selectAndShowBuilding(damagedBuilding);
+  const durability = buildingDurabilitySnapshot(state, damagedBuilding);
   return {
     ok: durability.damageState !== "intact" && durability.damageState !== "destroyed",
-    targetBuildingId: building.id,
-    buildingType: building.type,
+    targetBuildingId: damagedBuilding.id,
+    buildingType: damagedBuilding.type,
     beforeHp,
     afterHp: durability.hp,
     damageState: durability.damageState,
@@ -2201,7 +2211,7 @@ function summarizeResourceTiles(game: GameState, type: ResourceType): {
   type: ResourceType;
   tiles: number;
   amount: number;
-  samples: Array<{ x: number; y: number; amount: number }>;
+  samples: Array<{ x: number; y: number; amount: number; hp: number; maxHp: number; healthPct: number; armor: number; attack: number; range: number }>;
 } {
   const tiles = collectResourceTiles(game, type);
   const center = { x: Math.floor(MAP_SIZE / 2), y: Math.floor(MAP_SIZE / 2) };
@@ -2209,7 +2219,17 @@ function summarizeResourceTiles(game: GameState, type: ResourceType): {
     .slice()
     .sort((left, right) => distanceToTile(left, center) - distanceToTile(right, center))
     .slice(0, 5)
-    .map((tile) => ({ x: tile.x, y: tile.y, amount: Math.round(tile.amount) }));
+    .map((tile) => ({
+      x: tile.x,
+      y: tile.y,
+      amount: Math.round(tile.amount),
+      hp: Math.ceil(tile.hp),
+      maxHp: tile.maxHp,
+      healthPct: Math.round(healthRatio(tile) * 100),
+      armor: tile.armor,
+      attack: tile.attack,
+      range: tile.range
+    }));
   return {
     type,
     tiles: tiles.length,
@@ -2269,17 +2289,24 @@ function summarizeContestedResourceSites(game: GameState): Array<{
     .slice(0, 24);
 }
 
-function collectResourceTiles(game: GameState, type: ResourceType): Array<{ x: number; y: number; amount: number }> {
-  const tiles: Array<{ x: number; y: number; amount: number }> = [];
+function collectResourceTiles(
+  game: GameState,
+  type: ResourceType
+): Array<{ x: number; y: number; amount: number; hp: number; maxHp: number; armor: number; attack: number; range: number; attackCooldown: number }> {
+  const tiles: Array<{ x: number; y: number; amount: number; hp: number; maxHp: number; armor: number; attack: number; range: number; attackCooldown: number }> = [];
   for (let y = 0; y < MAP_SIZE; y += 1) {
     for (let x = 0; x < MAP_SIZE; x += 1) {
       const tile = game.map[tileIndex(x, y)];
       if (type === "wood") {
-        if (tile.terrain === "forest") tiles.push({ x, y, amount: 1 });
+        if (tile.resource?.type === "wood" && tile.resource.amount > 0) {
+          tiles.push({ x, y, ...tile.resource });
+        } else if (tile.terrain === "forest") {
+          tiles.push({ x, y, amount: 1, hp: 1, maxHp: 1, armor: 0, attack: 0, range: 0, attackCooldown: 0 });
+        }
         continue;
       }
       if (tile.resource?.type === type && tile.resource.amount > 0) {
-        tiles.push({ x, y, amount: tile.resource.amount });
+        tiles.push({ x, y, ...tile.resource });
       }
     }
   }
@@ -5779,10 +5806,21 @@ function hoverMarkup(target: HoverTarget): string {
     `;
   }
   const resource = target.resource && target.resource.amount > 0 ? `${target.resource.type} ${Math.round(target.resource.amount)}` : "none";
+  const resourceStats = target.resource && target.resource.amount > 0 ? combatStatSnapshot(target.resource) : undefined;
   return `
     <strong>${target.terrain}</strong>
     <div>Tile: ${target.x}, ${target.y}</div>
     <div>Resource: ${resource}</div>
+    ${
+      resourceStats
+        ? `
+          <div>Deposit health: ${resourceStats.hp} / ${resourceStats.maxHp}</div>
+          <div>Condition: ${formatCondition(resourceStats.condition)} (${resourceStats.healthPct}%)</div>
+          <div>Armor: ${resourceStats.armor}</div>
+          <div>Attack: ${resourceStats.attack} / range ${resourceStats.range}</div>
+        `
+        : ""
+    }
     ${target.resource && target.resource.amount > 0 ? `<div>${resourceRole(target.resource.type)}</div>` : ""}
   `;
 }

@@ -43,12 +43,23 @@ export type Position = {
   y: number;
 };
 
+export type CombatStats = {
+  hp: number;
+  maxHp: number;
+  armor: number;
+  attack: number;
+  range: number;
+  attackCooldown: number;
+};
+
+export type ResourceDeposit = CombatStats & {
+  type: ResourceType;
+  amount: number;
+};
+
 export type Tile = {
   terrain: TerrainType;
-  resource?: {
-    type: ResourceType;
-    amount: number;
-  };
+  resource?: ResourceDeposit;
 };
 
 export type Resources = Record<ResourceType, number>;
@@ -236,37 +247,33 @@ export type UnitTask =
   | { kind: "attackBuilding"; targetBuildingId: string; path: Position[] }
   | { kind: "repair"; targetBuildingId: string; path: Position[] };
 
-export type Unit = {
+export type DamageableWorldObject = CombatStats & {
+  id: string;
+  type: UnitType | BuildingType;
+  tribeId: TribeId;
+  x: number;
+  y: number;
+};
+
+export type Unit = CombatStats & {
   id: string;
   name: string;
   type: UnitType;
   tribeId: TribeId;
   x: number;
   y: number;
-  hp: number;
-  maxHp: number;
-  armor: number;
   speed: number;
   visionRadius: number;
-  attack: number;
-  range: number;
-  attackCooldown: number;
   task: UnitTask;
   carriedPacketId?: string;
 };
 
-export type Building = {
+export type Building = CombatStats & {
   id: string;
   type: BuildingType;
   tribeId: TribeId;
   x: number;
   y: number;
-  hp: number;
-  maxHp: number;
-  armor: number;
-  attack: number;
-  range: number;
-  attackCooldown: number;
   gateState?: GateState;
   gateAccessPolicy?: GateAccessPolicy;
 };
@@ -1267,6 +1274,50 @@ export function damageBuilding(
   return { ok: true, destroyed };
 }
 
+export function getUnitCombatStats(unit: Unit): CombatStats {
+  return {
+    hp: unit.hp,
+    maxHp: unit.maxHp,
+    armor: unit.armor,
+    attack: unit.attack,
+    range: unit.range,
+    attackCooldown: unit.attackCooldown
+  };
+}
+
+export function getBuildingCombatStats(building: Building): CombatStats {
+  return {
+    hp: building.hp,
+    maxHp: building.maxHp,
+    armor: building.armor,
+    attack: building.attack,
+    range: building.range,
+    attackCooldown: building.attackCooldown
+  };
+}
+
+export function createResourceDeposit(type: ResourceType, amount: number): ResourceDeposit {
+  const normalizedAmount = Math.max(0, Math.round(amount));
+  const maxHp = Math.max(1, normalizedAmount);
+  return {
+    type,
+    amount: normalizedAmount,
+    hp: maxHp,
+    maxHp,
+    armor: resourceDepositArmor(type),
+    attack: 0,
+    range: 0,
+    attackCooldown: 0
+  };
+}
+
+function resourceDepositArmor(type: ResourceType): number {
+  if (type === "iron") return 3;
+  if (type === "stone" || type === "coal" || type === "limestone") return 2;
+  if (type === "gold" || type === "clay") return 1;
+  return 0;
+}
+
 function canAfford(resources: Resources, cost: ResourceCost): boolean {
   return resourceTypes.every((type) => resources[type] >= (cost[type] ?? 0));
 }
@@ -1476,7 +1527,7 @@ export function getVisibleUnits(state: GameState, tribeId: TribeId): Unit[] {
 
 export function getVisibleBuildings(state: GameState, tribeId: TribeId): Building[] {
   const visible = state.visibility[tribeId];
-  return Object.values(state.buildings).filter((building) => visible[tileIndex(building.x, building.y)] === 2);
+  return Object.values(state.buildings).filter((building) => building.hp > 0 && visible[tileIndex(building.x, building.y)] === 2);
 }
 
 function answerInformationRequest(state: GameState, request: AiInformationRequest): void {
@@ -1899,9 +1950,10 @@ function updateGatherer(state: GameState, unit: Unit): void {
         unit.task = { kind: "idle" };
         return;
       }
-      targetTile.resource.amount -= 1;
+      targetTile.resource.amount = Math.max(0, targetTile.resource.amount - 1);
+      targetTile.resource.hp = Math.max(0, targetTile.resource.hp - 1);
       task.cargo += 1;
-      if (targetTile.resource.amount <= 0) {
+      if (targetTile.resource.amount <= 0 || targetTile.resource.hp <= 0) {
         targetTile.terrain = "grass";
         delete targetTile.resource;
       }
@@ -1920,7 +1972,8 @@ function updateGatherer(state: GameState, unit: Unit): void {
     task.path = findPath(state, unit, next);
     return;
   }
-  targetTile.resource.amount -= 1;
+  targetTile.resource.amount = Math.max(0, targetTile.resource.amount - 1);
+  targetTile.resource.hp = Math.max(0, targetTile.resource.hp - 1);
   task.cargo += 1;
 }
 
@@ -2844,7 +2897,7 @@ function generateMap(seed: number): Tile[] {
       else if (r < 0.12) terrain = "forest";
       else if (r < 0.17) terrain = "hill";
       else if (r < 0.19) terrain = "water";
-      map.push(terrain === "forest" ? { terrain, resource: { type: "wood", amount: 90 + Math.floor(next() * 90) } } : { terrain });
+      map.push(terrain === "forest" ? { terrain, resource: createResourceDeposit("wood", 90 + Math.floor(next() * 90)) } : { terrain });
     }
   }
   const center = { x: 64, y: 64 };
@@ -2949,7 +3002,7 @@ function addResourcePatch(map: Tile[], center: Position, type: ResourceType, amo
     for (let x = safeCenter.x - radius; x <= safeCenter.x + radius; x += 1) {
       if (x <= 0 || y <= 0 || x >= MAP_SIZE - 1 || y >= MAP_SIZE - 1) continue;
       if (distance(safeCenter, { x, y }) > radius + 0.3) continue;
-      map[tileIndex(x, y)] = { terrain: resourceTerrain(type), resource: { type, amount } };
+      map[tileIndex(x, y)] = { terrain: resourceTerrain(type), resource: createResourceDeposit(type, amount) };
     }
   }
 }
@@ -2958,7 +3011,7 @@ function addForestRing(map: Tile[], center: Position): void {
   for (let y = center.y - 5; y <= center.y + 5; y += 1) {
     for (let x = center.x - 5; x <= center.x + 5; x += 1) {
       if (x <= 0 || y <= 0 || x >= MAP_SIZE - 1 || y >= MAP_SIZE - 1) continue;
-      if (distance(center, { x, y }) <= 5) map[tileIndex(x, y)] = { terrain: "forest", resource: { type: "wood", amount: 160 } };
+      if (distance(center, { x, y }) <= 5) map[tileIndex(x, y)] = { terrain: "forest", resource: createResourceDeposit("wood", 160) };
     }
   }
 }

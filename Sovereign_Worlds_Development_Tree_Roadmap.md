@@ -74,6 +74,8 @@ This roadmap must stay tied to the visible board. Development choices should cha
 
 **Delivered durability-visualization slice on July 5, 2026:** visible units and buildings now expose a shared combat-stat snapshot with health percentage and condition, while buildings also expose `damageState`, `repairState`, and movement-blocking status. Damaged walls/gates/turrets render cracks, rubble, scorch marks, health bars, repair rings, and recently repaired pulses, and browser smoke proves damaged -> repairing -> repaired state transitions.
 
+**Delivered combat-stat contract hardening on July 5, 2026:** units and buildings now inherit an explicit shared combat stat type, resource deposits now carry health, armor, attack/range, and condition metadata, gathering reduces deposit health alongside finite amount, dead buildings are excluded from visibility projections, and browser damage QA uses the real armor-reduced building damage API.
+
 1. **Building-tree prerequisites:** extend per-tribe development state beyond current walls, gates, and turrets into stronger walls, siege tools, road upgrades, gate automation, and later fortification variants behind masonry, brick kilns, ironworking, ballistics, and military architecture.
 2. **Chosen placement:** let LLMs choose perimeter/fortification intent and later add human tile previews only after the human play model is decided.
 3. **Advanced siege behavior:** add siege tools, breach previews, contested field repairs under fire, and multi-unit assault doctrines on top of explicit building-target attacks.

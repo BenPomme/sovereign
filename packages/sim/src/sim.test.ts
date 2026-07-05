@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TICKS_PER_GAME_YEAR, TICK_RATE, advanceGame, advanceGameTicks, appendSovereignMemory, applyTribeIdentity, assignGathering, attachReplyToPacket, buildStructure, createGame, damageBuilding, formAlliance, getCurrentYear, getBuildingCost, getBuildingRepairCost, getTownHall, getVictoryPressure, getVisibleUnits, isTileWalkable, issueSovereignOrder, recordAiDecision, renameUnits, sendPlayerMessage, setAllControllers, setGateState, summarizeDiplomaticIntel, summarizeSovereignMemory, tileIndex, worldSignature } from "./index";
+import { TICKS_PER_GAME_YEAR, TICK_RATE, advanceGame, advanceGameTicks, appendSovereignMemory, applyTribeIdentity, assignGathering, attachReplyToPacket, buildStructure, createGame, createResourceDeposit, damageBuilding, formAlliance, getBuildingCombatStats, getCurrentYear, getBuildingCost, getBuildingRepairCost, getTownHall, getUnitCombatStats, getVictoryPressure, getVisibleBuildings, getVisibleUnits, isTileWalkable, issueSovereignOrder, recordAiDecision, renameUnits, sendPlayerMessage, setAllControllers, setGateState, summarizeDiplomaticIntel, summarizeSovereignMemory, tileIndex, worldSignature } from "./index";
 
 describe("Sovereign Worlds vertical slice simulation", () => {
   it("is deterministic for the same seed and elapsed time", () => {
@@ -14,6 +14,14 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     const state = createGame(7);
     const visible = getVisibleUnits(state, "blue");
     expect(visible.some((unit) => unit.tribeId === "red")).toBe(false);
+  });
+
+  it("keeps zero-health buildings out of visibility projections", () => {
+    const state = createGame(14);
+    const townHall = getTownHall(state, "blue");
+    expect(getVisibleBuildings(state, "blue").some((building) => building.id === townHall.id)).toBe(true);
+    townHall.hp = 0;
+    expect(getVisibleBuildings(state, "blue").some((building) => building.id === townHall.id)).toBe(false);
   });
 
   it("records visible foreign unit and building changes per sovereign", () => {
@@ -76,20 +84,47 @@ describe("Sovereign Worlds vertical slice simulation", () => {
 
   it("exposes health, armor, attack, and range stats on all units and buildings", () => {
     const state = createGame(10);
+    state.tribes.blue.resources = { gold: 800, food: 800, wood: 800, stone: 800, clay: 800, limestone: 800, iron: 800, coal: 800 };
+    expect(issueSovereignOrder(state, "blue", { type: "DEVELOP", priority: 1, developmentId: "masonry", reason: "Unlock durability-test walls." }).ok).toBe(true);
+    expect(issueSovereignOrder(state, "blue", { type: "DEVELOP", priority: 1, developmentId: "ironworking", reason: "Unlock durability-test gates." }).ok).toBe(true);
+    expect(issueSovereignOrder(state, "blue", { type: "DEVELOP", priority: 1, developmentId: "ballistics", reason: "Unlock durability-test turrets." }).ok).toBe(true);
+    const townHall = getTownHall(state, "blue");
+    for (const buildingType of ["wall", "gate", "turret"] as const) {
+      const built = buildStructure(state, "blue", buildingType, townHall);
+      expect(built.ok).toBe(true);
+    }
     for (const unit of Object.values(state.units)) {
-      expect(unit.maxHp).toBeGreaterThan(0);
-      expect(unit.hp).toBeGreaterThan(0);
-      expect(unit.armor).toBeGreaterThanOrEqual(0);
-      expect(unit.attack).toBeGreaterThanOrEqual(0);
-      expect(unit.range).toBeGreaterThanOrEqual(0);
+      const stats = getUnitCombatStats(unit);
+      expect(stats.maxHp).toBeGreaterThan(0);
+      expect(stats.hp).toBeGreaterThan(0);
+      expect(stats.armor).toBeGreaterThanOrEqual(0);
+      expect(stats.attack).toBeGreaterThanOrEqual(0);
+      expect(stats.range).toBeGreaterThanOrEqual(0);
+      expect(stats.attackCooldown).toBeGreaterThanOrEqual(0);
     }
     for (const building of Object.values(state.buildings)) {
-      expect(building.maxHp).toBeGreaterThan(0);
-      expect(building.hp).toBeGreaterThan(0);
-      expect(building.armor).toBeGreaterThanOrEqual(0);
-      expect(building.attack).toBeGreaterThanOrEqual(0);
-      expect(building.range).toBeGreaterThanOrEqual(0);
+      const stats = getBuildingCombatStats(building);
+      expect(stats.maxHp).toBeGreaterThan(0);
+      expect(stats.hp).toBeGreaterThan(0);
+      expect(stats.armor).toBeGreaterThanOrEqual(0);
+      expect(stats.attack).toBeGreaterThanOrEqual(0);
+      expect(stats.range).toBeGreaterThanOrEqual(0);
+      expect(stats.attackCooldown).toBeGreaterThanOrEqual(0);
     }
+    const deposits = state.map.flatMap((tile) => (tile.resource ? [tile.resource] : []));
+    expect(deposits.length).toBeGreaterThan(0);
+    for (const deposit of deposits) {
+      expect(deposit.maxHp).toBeGreaterThan(0);
+      expect(deposit.hp).toBeGreaterThan(0);
+      expect(deposit.armor).toBeGreaterThanOrEqual(0);
+      expect(deposit.attack).toBe(0);
+      expect(deposit.range).toBe(0);
+      expect(deposit.attackCooldown).toBe(0);
+    }
+    const defensiveTypes = new Set(Object.values(state.buildings).filter((building) => building.tribeId === "blue").map((building) => building.type));
+    expect(defensiveTypes.has("wall")).toBe(true);
+    expect(defensiveTypes.has("gate")).toBe(true);
+    expect(defensiveTypes.has("turret")).toBe(true);
   });
 
   it("moves a player message through delivery, reply, and return", () => {
@@ -781,10 +816,12 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     const ironTile = { x: townHall.x + 3, y: townHall.y };
     const limestoneTile = { x: townHall.x + 2, y: townHall.y + 1 };
     const coalTile = { x: townHall.x + 3, y: townHall.y + 1 };
-    state.map[tileIndex(clayTile.x, clayTile.y)] = { terrain: "grass", resource: { type: "clay", amount: 50 } };
-    state.map[tileIndex(ironTile.x, ironTile.y)] = { terrain: "hill", resource: { type: "iron", amount: 50 } };
-    state.map[tileIndex(limestoneTile.x, limestoneTile.y)] = { terrain: "hill", resource: { type: "limestone", amount: 50 } };
-    state.map[tileIndex(coalTile.x, coalTile.y)] = { terrain: "hill", resource: { type: "coal", amount: 50 } };
+    state.map[tileIndex(clayTile.x, clayTile.y)] = { terrain: "grass", resource: createResourceDeposit("clay", 50) };
+    state.map[tileIndex(ironTile.x, ironTile.y)] = { terrain: "hill", resource: createResourceDeposit("iron", 50) };
+    state.map[tileIndex(limestoneTile.x, limestoneTile.y)] = { terrain: "hill", resource: createResourceDeposit("limestone", 50) };
+    state.map[tileIndex(coalTile.x, coalTile.y)] = { terrain: "hill", resource: createResourceDeposit("coal", 50) };
+    const clayDepositHp = state.map[tileIndex(clayTile.x, clayTile.y)].resource?.hp ?? 0;
+    const ironDepositHp = state.map[tileIndex(ironTile.x, ironTile.y)].resource?.hp ?? 0;
     clayPeon.x = townHall.x + 1;
     clayPeon.y = townHall.y;
     ironPeon.x = townHall.x + 1;
@@ -803,6 +840,8 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     expect(state.tribes.blue.resources.iron).toBeGreaterThan(ironStart);
     expect(state.tribes.blue.resources.limestone).toBeGreaterThan(limestoneStart);
     expect(state.tribes.blue.resources.coal).toBeGreaterThan(coalStart);
+    expect(state.map[tileIndex(clayTile.x, clayTile.y)].resource?.hp ?? 0).toBeLessThan(clayDepositHp);
+    expect(state.map[tileIndex(ironTile.x, ironTile.y)].resource?.hp ?? 0).toBeLessThan(ironDepositHp);
   });
 
   it("publishes a survival mandate calendar without public rival wealth", () => {
