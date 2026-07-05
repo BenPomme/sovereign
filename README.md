@@ -91,6 +91,7 @@ http://localhost:5173/
   - walls block movement until destroyed
   - gates are buildable, can be open/closed/locked, and open gates follow access policies
   - walls are drawn as high-contrast segmented barrier tiles and selected/new walls get a bright construction pulse, centered camera, selected-panel confirmation, and recent-construction labels so rapid builds remain visible
+  - selected units and buildings expose health, armor, attack/range, condition, and repair state; damaged walls/gates/turrets draw cracks, rubble, scorch marks, health bars, and repair pulses
   - optional defense overlay outlines wall tiles and shows turret range
   - hostile units can damage and destroy structures in range
   - damaged owned buildings can be repaired by idle peons through `REPAIR` orders with scaled repair costs

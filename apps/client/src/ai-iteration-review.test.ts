@@ -113,6 +113,52 @@ describe("AI iteration review classifier", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it("surfaces structured REPORT_BUG fields in the ranked backlog", async () => {
+    const root = await mkdtemp(join(tmpdir(), "sovereign-review-"));
+    try {
+      await writeFile(
+        join(root, "AI_BUG_REPORTS.md"),
+        [
+          "# AI Bug Reports",
+          "",
+          "## 2026-07-02T11:00:00.000Z - Turn 42 - The Ember Court",
+          "",
+          "- Tribe id: blue",
+          "- Severity: high",
+          "- Category: self_report",
+          "- Provider: ollama",
+          "- Model: qwen3.5:9b-mlx",
+          "- Strategy: Repair the wall feedback loop.",
+          "- Source: kind=report_bug_order; decision=ai_structured; provider=ollama; model=qwen3.5:9b-mlx",
+          "- Turn context: turn=42; tribe=The Ember Court; tribeId=blue; resources=stone=50; survival=surviving:year1:review100:survivors5",
+          "- Snapshot: /api/ai-bug-report-snapshot?id=2026-07-02T11%3A00%3A00.000Z",
+          "- Report: Wall repair invisible: I repaired a gate but could not see whether it recovered. | Suspected area: map rendering | Expected: Damaged structures should visibly show recovery. | Actual: The panel reports repair but the board gives no readable change. | Repro: Damage a gate, issue REPAIR, and inspect the map and selected panel. | Strategy impact: I cannot decide whether my people are safe behind repaired walls. | Self-rated severity: high",
+          ""
+        ].join("\n"),
+        "utf8"
+      );
+
+      const result = await runReview(root);
+
+      expect(result.ok).toBe(false);
+      expect(result.actionableUnresolved).toBe(1);
+      expect(result.rankedBacklog[0]).toMatchObject({
+        category: "self_report",
+        latestTribe: "The Ember Court",
+        latestStructured: {
+          suspectedArea: "map rendering",
+          expectedBehavior: "Damaged structures should visibly show recovery.",
+          actualBehavior: "The panel reports repair but the board gives no readable change.",
+          reproductionSteps: "Damage a gate, issue REPAIR, and inspect the map and selected panel.",
+          strategyImpact: "I cannot decide whether my people are safe behind repaired walls.",
+          selfRatedSeverity: "high"
+        }
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });
 
 async function runReview(root: string): Promise<{
@@ -120,7 +166,19 @@ async function runReview(root: string): Promise<{
   totalReports: number;
   actionableUnresolved: number;
   excludedSyntheticUnresolved: number;
-  rankedBacklog: Array<{ category: string; latestTribe: string; latestReport: string }>;
+  rankedBacklog: Array<{
+    category: string;
+    latestTribe: string;
+    latestReport: string;
+    latestStructured?: {
+      suspectedArea?: string;
+      expectedBehavior?: string;
+      actualBehavior?: string;
+      reproductionSteps?: string;
+      strategyImpact?: string;
+      selfRatedSeverity?: string;
+    };
+  }>;
 }> {
   const { stdout } = await new Promise<{ stdout: string }>((resolvePromise, reject) => {
     execFile(process.execPath, [reviewScript, "--json", "--no-write"], { cwd: root }, (error, stdout) => {

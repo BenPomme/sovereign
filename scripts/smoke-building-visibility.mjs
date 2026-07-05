@@ -89,9 +89,13 @@ const buildingState = await page.evaluate(() => {
       gatePassableBy: building.gatePassableBy,
       hp: building.hp,
       maxHp: building.maxHp,
+      healthPct: building.healthPct,
       armor: building.armor,
       attack: building.attack,
       range: building.range,
+      condition: building.condition,
+      damageState: building.damageState,
+      repairState: building.repairState,
       selected: building.selected,
       constructionFocus: building.constructionFocus
     }));
@@ -124,6 +128,7 @@ for (const type of ["farm", "watchtower", "wall", "gate", "turret"]) {
   }
 }
 const siegeState = await assertExplicitSiegeOrder(page);
+const damageState = await assertDamageVisualization(page);
 const repairState = await assertRepairOrder(page);
 
 await page.screenshot({ path: screenshotPath, fullPage: true });
@@ -146,6 +151,7 @@ console.log(
       screenshotBytes: screenshot.size,
       buildingState,
       siegeState,
+      damageState,
       repairState
     },
     null,
@@ -170,6 +176,19 @@ async function assertCreatedBuildingVisible(page, type) {
     throw new Error(`Created ${type} was not the selected visible building: ${JSON.stringify(state)}`);
   }
   if (
+    typeof state.selected.hp !== "number" ||
+    typeof state.selected.maxHp !== "number" ||
+    typeof state.selected.armor !== "number" ||
+    typeof state.selected.attack !== "number" ||
+    typeof state.selected.range !== "number" ||
+    typeof state.selected.healthPct !== "number" ||
+    state.selected.condition !== "intact" ||
+    state.selected.damageState !== "intact" ||
+    state.selected.repairState !== "none"
+  ) {
+    throw new Error(`Created ${type} did not expose intact health/armor/attack durability stats: ${JSON.stringify(state)}`);
+  }
+  if (
     state.constructionFeedback?.buildingType !== type ||
     state.constructionFeedback?.selected !== true ||
     state.constructionFeedback?.visible !== true ||
@@ -179,6 +198,9 @@ async function assertCreatedBuildingVisible(page, type) {
   }
   if (!state.panel.includes("New construction visible on map") || !state.panel.includes("Build cost")) {
     throw new Error(`Created ${type} selected panel did not confirm visibility and cost: ${JSON.stringify(state)}`);
+  }
+  if (!state.panel.includes("Health:") || !state.panel.includes("Armor:") || !state.panel.includes("Attack:") || !state.panel.includes("Condition: intact")) {
+    throw new Error(`Created ${type} selected panel did not expose combat stats and condition: ${JSON.stringify(state)}`);
   }
   if (type === "wall" && !state.panel.includes("Blocks movement")) {
     throw new Error(`Created wall selected panel did not confirm blocking behavior: ${JSON.stringify(state)}`);
@@ -281,6 +303,34 @@ async function assertExplicitSiegeOrder(page) {
   return state;
 }
 
+async function assertDamageVisualization(page) {
+  const state = await page.evaluate(() => {
+    if (typeof window.force_damage_building_for_test !== "function") return { ok: false, reason: "missing damage hook" };
+    return window.force_damage_building_for_test();
+  });
+  if (!state.ok || !state.targetBuildingId || !state.buildingType) {
+    throw new Error(`Damage hook did not produce a damaged selected structure: ${JSON.stringify(state)}`);
+  }
+  if (state.damageState === "intact" || state.damageState === "destroyed" || state.repairState !== "none") {
+    throw new Error(`Damaged structure did not expose an unrepaired damaged state: ${JSON.stringify(state)}`);
+  }
+  if (typeof state.healthPct !== "number" || state.healthPct >= 98 || state.healthPct <= 0) {
+    throw new Error(`Damaged structure did not expose a useful health percentage: ${JSON.stringify(state)}`);
+  }
+  if (!state.selectedPanel?.includes(`Condition: ${state.damageState}`) || !state.selectedPanel.includes("repair none")) {
+    throw new Error(`Damaged selected panel did not expose condition and repair state: ${JSON.stringify(state)}`);
+  }
+  await assertCreatedBuildingPainted(page, state.buildingType);
+  const selected = await page.evaluate(() => {
+    const parsed = JSON.parse(window.render_game_to_text());
+    return parsed.visibleBuildings.find((building) => building.id === parsed.selected.buildingId);
+  });
+  if (selected?.id !== state.targetBuildingId || selected.damageState !== state.damageState || selected.repairState !== "none") {
+    throw new Error(`Damaged render hook state diverged from damage hook result: ${JSON.stringify({ state, selected })}`);
+  }
+  return { ...state, selected };
+}
+
 async function assertRepairOrder(page) {
   const state = await page.evaluate(() => {
     if (typeof window.force_repair_for_test !== "function") return { ok: false, reason: "missing repair hook" };
@@ -292,6 +342,15 @@ async function assertRepairOrder(page) {
   if (!state.completed) {
     throw new Error(`Repair order did not complete within smoke window: ${JSON.stringify(state)}`);
   }
+  if (
+    state.damagedSnapshot?.damageState === "intact" ||
+    state.repairQueuedSnapshot?.repairState !== "repairing" ||
+    state.repairedSnapshot?.damageState !== "intact" ||
+    state.repairedSnapshot?.repairState !== "recently_repaired" ||
+    state.repairedSnapshot?.healthPct !== 100
+  ) {
+    throw new Error(`Repair order did not expose damaged -> repairing -> repaired durability states: ${JSON.stringify(state)}`);
+  }
   if (!state.repairerTasks?.some((task) => task.includes("Repairing"))) {
     throw new Error(`Repair order did not expose repair task text: ${JSON.stringify(state)}`);
   }
@@ -300,6 +359,21 @@ async function assertRepairOrder(page) {
   }
   if (!state.recentEvents?.some((event) => event.includes("STRUCTURE_REPAIRED"))) {
     throw new Error(`Repair order did not emit repaired evidence: ${JSON.stringify(state)}`);
+  }
+  const selected = await page.evaluate(() => {
+    const parsed = JSON.parse(window.render_game_to_text());
+    const selectedBuilding = parsed.visibleBuildings.find((building) => building.id === parsed.selected.buildingId);
+    const panel = document.querySelector("#selectedPanel")?.textContent ?? "";
+    return { selectedBuilding, panel };
+  });
+  if (
+    selected.selectedBuilding?.id !== state.targetBuildingId ||
+    selected.selectedBuilding.damageState !== "intact" ||
+    selected.selectedBuilding.repairState !== "recently_repaired" ||
+    !selected.panel.includes("Condition: intact") ||
+    !selected.panel.includes("repair recently repaired")
+  ) {
+    throw new Error(`Repaired selected building did not expose repaired visual state: ${JSON.stringify({ state, selected })}`);
   }
   return state;
 }

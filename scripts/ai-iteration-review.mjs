@@ -289,6 +289,7 @@ function parseReportSection(section) {
     if (!field) continue;
     fields.set(field[1].trim().toLowerCase(), field[2].trim());
   }
+  const report = fields.get("report") ?? "";
   return {
     id: reportId(timestamp),
     timestamp,
@@ -303,8 +304,38 @@ function parseReportSection(section) {
     source: fields.get("source") ?? "unknown",
     turnContext: fields.get("turn context") ?? "",
     snapshot: fields.get("snapshot") ?? "",
-    report: fields.get("report") ?? ""
+    report,
+    structuredReport: parseStructuredReportFields(report)
   };
+}
+
+function parseStructuredReportFields(report) {
+  const result = {};
+  const segments = String(report ?? "")
+    .split(/\s+\|\s+/g)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  for (const segment of segments) {
+    const match = segment.match(/^([^:]{2,40}):\s*(.*)$/);
+    if (!match) {
+      if (!result.summary) result.summary = cleanText(segment);
+      continue;
+    }
+    const label = match[1].trim().toLowerCase();
+    const value = cleanText(match[2]);
+    if (!value) continue;
+    if (label === "suspected area") result.suspectedArea = value;
+    else if (label === "expected") result.expectedBehavior = value;
+    else if (label === "actual") result.actualBehavior = value;
+    else if (label === "repro") result.reproductionSteps = value;
+    else if (label === "strategy impact") result.strategyImpact = value;
+    else if (label === "self-rated severity") result.selfRatedSeverity = value;
+    else if (!result.summary) result.summary = cleanText(segment);
+  }
+  const hasStructuredFields = ["suspectedArea", "expectedBehavior", "actualBehavior", "reproductionSteps", "strategyImpact", "selfRatedSeverity"].some(
+    (key) => result[key]
+  );
+  return hasStructuredFields ? result : undefined;
 }
 
 function tribeIdFromTurnContext(turnContext) {
@@ -485,6 +516,7 @@ function rankBuckets(entries) {
       latestTimestamp: "",
       latestTribe: "",
       latestReport: "",
+      latestStructured: undefined,
       sampleSnapshot: "",
       score: 0
     };
@@ -497,6 +529,7 @@ function rankBuckets(entries) {
       bucket.latestTimestamp = entry.timestamp;
       bucket.latestTribe = entry.tribe;
       bucket.latestReport = entry.report;
+      bucket.latestStructured = entry.structuredReport;
       bucket.sampleSnapshot = entry.snapshot;
     }
     buckets.set(key, bucket);
@@ -564,7 +597,7 @@ function formatReviewMarkdown(review) {
         (bucket, index) =>
           `${index + 1}. ${bucket.category} / ${bucket.model} / ${bucket.sourceKind} - ${bucket.count} open, score ${bucket.score}, latest turn ${bucket.latestTick} (${bucket.latestTribe})\n` +
           `   - Severity: high ${bucket.severityCounts.high}, medium ${bucket.severityCounts.medium}, low ${bucket.severityCounts.low}\n` +
-          `   - Latest: ${cleanText(bucket.latestReport || "No report text.")}${bucket.sampleSnapshot ? `\n   - Snapshot: ${bucket.sampleSnapshot}` : ""}`
+          `   - Latest: ${cleanText(bucket.latestReport || "No report text.")}${formatStructuredReportMarkdown(bucket.latestStructured)}${bucket.sampleSnapshot ? `\n   - Snapshot: ${bucket.sampleSnapshot}` : ""}`
       )
       .join("\n") || "No unresolved AI reports.";
   const actions = review.nextActions.map((action) => `- ${action}`).join("\n");
@@ -612,6 +645,19 @@ function formatReviewMarkdown(review) {
     actions,
     ""
   ].join("\n");
+}
+
+function formatStructuredReportMarkdown(structured) {
+  if (!structured) return "";
+  const lines = [
+    structured.suspectedArea ? `   - Suspected area: ${structured.suspectedArea}` : "",
+    structured.expectedBehavior ? `   - Expected: ${structured.expectedBehavior}` : "",
+    structured.actualBehavior ? `   - Actual: ${structured.actualBehavior}` : "",
+    structured.reproductionSteps ? `   - Repro: ${structured.reproductionSteps}` : "",
+    structured.strategyImpact ? `   - Strategy impact: ${structured.strategyImpact}` : "",
+    structured.selfRatedSeverity ? `   - Self-rated severity: ${structured.selfRatedSeverity}` : ""
+  ].filter(Boolean);
+  return lines.length > 0 ? `\n${lines.join("\n")}` : "";
 }
 
 function isNewer(entry, latestTimestamp, latestTick) {

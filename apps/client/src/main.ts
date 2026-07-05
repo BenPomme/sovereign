@@ -164,6 +164,18 @@ declare global {
       buildingId?: string,
       gateAccessPolicy?: GateAccessPolicy
     ) => { ok: boolean; buildingId?: string; gateState?: GateState; gateAccessPolicy?: GateAccessPolicy; reason?: string };
+    force_damage_building_for_test?: () => {
+      ok: boolean;
+      targetBuildingId?: string;
+      buildingType?: Building["type"];
+      beforeHp?: number;
+      afterHp?: number;
+      damageState?: DurabilityCondition;
+      repairState?: RepairState;
+      healthPct?: number;
+      selectedPanel?: string;
+      reason?: string;
+    };
     force_siege_for_test?: () => {
       ok: boolean;
       targetBuildingId?: string;
@@ -180,6 +192,9 @@ declare global {
       beforeHp?: number;
       afterHp?: number | null;
       completed?: boolean;
+      damagedSnapshot?: BuildingDurabilitySnapshot;
+      repairQueuedSnapshot?: BuildingDurabilitySnapshot;
+      repairedSnapshot?: BuildingDurabilitySnapshot;
       repairerTasks?: string[];
       recentEvents?: string[];
       reason?: string;
@@ -262,6 +277,22 @@ type HoverTarget =
   | { kind: "unit"; unit: Unit }
   | { kind: "building"; building: Building }
   | { kind: "tile"; x: number; y: number; terrain: TerrainType; resource?: { type: ResourceType; amount: number } };
+type DurabilityCondition = "intact" | "worn" | "damaged" | "critical" | "destroyed";
+type RepairState = "none" | "repairing" | "recently_repaired";
+type CombatStatSnapshot = {
+  hp: number;
+  maxHp: number;
+  healthPct: number;
+  armor: number;
+  attack: number;
+  range: number;
+  condition: DurabilityCondition;
+};
+type BuildingDurabilitySnapshot = CombatStatSnapshot & {
+  damageState: DurabilityCondition;
+  repairState: RepairState;
+  blocksMovement: boolean;
+};
 type AiBugSeverity = "low" | "medium" | "high";
 type AiBugCategory = "ai_report" | "self_report" | "blocked_order" | "state_race" | "validation" | "llm_error" | "llm_transport" | "llm_parser";
 type AiReportSourceKind =
@@ -863,6 +894,7 @@ function installTestHooks(): void {
   window.force_resource_boost_for_test = forceResourceBoostForTest;
   window.force_development_for_test = forceDevelopmentForTest;
   window.force_gate_state_for_test = forceGateStateForTest;
+  window.force_damage_building_for_test = forceDamageBuildingForTest;
   window.force_siege_for_test = forceSiegeForTest;
   window.force_repair_for_test = forceRepairForTest;
   window.force_visual_motion_for_test = forceVisualMotionForTest;
@@ -1507,6 +1539,66 @@ function holdLlmFollowupStrategyForTest(enabled = true): { ok: boolean; enabled:
   return { ok: true, enabled: llmFollowupStrategyHoldForTest };
 }
 
+function healthRatio(entity: { hp: number; maxHp: number }): number {
+  if (!Number.isFinite(entity.maxHp) || entity.maxHp <= 0) return 0;
+  return clamp(entity.hp / entity.maxHp, 0, 1);
+}
+
+function durabilityCondition(entity: { hp: number; maxHp: number }): DurabilityCondition {
+  if (entity.hp <= 0) return "destroyed";
+  const ratio = healthRatio(entity);
+  if (ratio >= 0.98) return "intact";
+  if (ratio >= 0.67) return "worn";
+  if (ratio >= 0.34) return "damaged";
+  return "critical";
+}
+
+function combatStatSnapshot(entity: { hp: number; maxHp: number; armor: number; attack: number; range: number }): CombatStatSnapshot {
+  return {
+    hp: Math.ceil(entity.hp),
+    maxHp: entity.maxHp,
+    healthPct: Math.round(healthRatio(entity) * 100),
+    armor: entity.armor,
+    attack: entity.attack,
+    range: entity.range,
+    condition: durabilityCondition(entity)
+  };
+}
+
+function buildingRepairState(game: GameState, building: Building): RepairState {
+  if (Object.values(game.units).some((unit) => unit.hp > 0 && unit.task.kind === "repair" && unit.task.targetBuildingId === building.id)) {
+    return "repairing";
+  }
+  const recentRepair = game.events
+    .slice(-18)
+    .some((event) => event.type === "STRUCTURE_REPAIRED" && game.tick - event.tick <= TICK_RATE * 8 && event.body.includes(building.id));
+  return recentRepair ? "recently_repaired" : "none";
+}
+
+function buildingDurabilitySnapshot(game: GameState, building: Building): BuildingDurabilitySnapshot {
+  const stats = combatStatSnapshot(building);
+  return {
+    ...stats,
+    damageState: stats.condition,
+    repairState: buildingRepairState(game, building),
+    blocksMovement: isBuildingMovementBlocking(building)
+  };
+}
+
+function formatCondition(condition: DurabilityCondition): string {
+  if (condition === "intact") return "intact";
+  if (condition === "worn") return "worn";
+  if (condition === "damaged") return "damaged";
+  if (condition === "critical") return "critical";
+  return "destroyed";
+}
+
+function formatRepairState(repairState: RepairState): string {
+  if (repairState === "repairing") return "under repair";
+  if (repairState === "recently_repaired") return "recently repaired";
+  return "none";
+}
+
 function renderGameToText(): string {
   const livingUnits = Object.values(state.units).filter((unit) => unit.hp > 0);
   const visibleUnits = observerMode ? livingUnits : getVisibleUnits(state, playerTribe);
@@ -1658,6 +1750,7 @@ function renderGameToText(): string {
     })),
     visibleUnits: visibleUnits.slice(0, 80).map((unit) => {
       const visual = visualPositionForUnit(unit);
+      const durability = combatStatSnapshot(unit);
       return {
         id: unit.id,
         name: unit.name,
@@ -1667,38 +1760,49 @@ function renderGameToText(): string {
         y: Number(unit.y.toFixed(2)),
         visualX: Number(visual.x.toFixed(2)),
         visualY: Number(visual.y.toFixed(2)),
-        hp: Math.ceil(unit.hp),
-        maxHp: unit.maxHp,
-        armor: unit.armor,
-        attack: unit.attack,
-        range: unit.range,
+        hp: durability.hp,
+        maxHp: durability.maxHp,
+        healthPct: durability.healthPct,
+        armor: durability.armor,
+        attack: durability.attack,
+        range: durability.range,
+        condition: durability.condition,
+        combatStats: durability,
         task: describeUnitTask(state, unit),
         carriedPacketId: unit.carriedPacketId ?? null,
         screenX: Number((camera.x + (visual.x * TILE + TILE / 2) * camera.scale).toFixed(2)),
         screenY: Number((camera.y + (visual.y * TILE + TILE / 2) * camera.scale).toFixed(2))
       };
     }),
-    visibleBuildings: visibleBuildings.slice(0, 80).map((building) => ({
-      id: building.id,
-      type: building.type,
-      tribeId: building.tribeId,
-      x: building.x,
-      y: building.y,
-      hp: Math.ceil(building.hp),
-      maxHp: building.maxHp,
-      armor: building.armor,
-      attack: building.attack,
-      range: building.range,
-      gateState: building.type === "gate" ? building.gateState ?? "open" : null,
-      gateAccessPolicy: building.type === "gate" ? building.gateAccessPolicy ?? "owner_allies" : null,
-      gatePassableBy: building.type === "gate" ? tribeIds.filter((tribeId) => !isBuildingMovementBlockingForDisplay(building, tribeId)) : [],
-      blocksMovement: isBuildingMovementBlocking(building),
-      requirements: isBuildableBuilding(building.type) ? getBuildingRequirements(building.type) : [],
-      selected: building.id === selectedBuildingId,
-      constructionFocus: building.id === constructionFlash?.buildingId,
-      screenX: Number((camera.x + (building.x + 0.5) * TILE * camera.scale).toFixed(2)),
-      screenY: Number((camera.y + (building.y + 0.5) * TILE * camera.scale).toFixed(2))
-    })),
+    visibleBuildings: visibleBuildings.slice(0, 80).map((building) => {
+      const durability = buildingDurabilitySnapshot(state, building);
+      return {
+        id: building.id,
+        type: building.type,
+        tribeId: building.tribeId,
+        x: building.x,
+        y: building.y,
+        hp: durability.hp,
+        maxHp: durability.maxHp,
+        healthPct: durability.healthPct,
+        armor: durability.armor,
+        attack: durability.attack,
+        range: durability.range,
+        condition: durability.condition,
+        damageState: durability.damageState,
+        repairState: durability.repairState,
+        combatStats: durability,
+        gateState: building.type === "gate" ? building.gateState ?? "open" : null,
+        gateAccessPolicy: building.type === "gate" ? building.gateAccessPolicy ?? "owner_allies" : null,
+        gatePassableBy: building.type === "gate" ? tribeIds.filter((tribeId) => !isBuildingMovementBlockingForDisplay(building, tribeId)) : [],
+        blocksMovement: durability.blocksMovement,
+        requirements: isBuildableBuilding(building.type) ? getBuildingRequirements(building.type) : [],
+        selected: building.id === selectedBuildingId,
+        constructionFocus: building.id === constructionFlash?.buildingId,
+        screenX: Number((camera.x + (building.x + 0.5) * TILE * camera.scale).toFixed(2)),
+        screenY: Number((camera.y + (building.y + 0.5) * TILE * camera.scale).toFixed(2))
+      };
+    }),
     foreignObservations: (state.foreignObservations?.[playerTribe] ?? []).slice(-20).map((observation) => ({
       id: observation.id,
       tick: observation.tick,
@@ -1885,6 +1989,67 @@ function forceGateStateForTest(
     : { ok: false, reason: result.reason };
 }
 
+function findFortificationForDamageTest(): Building | undefined {
+  return Object.values(state.buildings)
+    .filter((candidate) => candidate.tribeId === playerTribe && candidate.hp > 0 && (candidate.type === "wall" || candidate.type === "gate" || candidate.type === "turret"))
+    .sort((left, right) => left.id.localeCompare(right.id))[0];
+}
+
+function ensureFortificationForDamageTest(): { ok: true; building: Building } | { ok: false; reason: string } {
+  let building = findFortificationForDamageTest();
+  if (building) return { ok: true, building };
+  const tribe = state.tribes[playerTribe];
+  for (const type of resourceTypes) tribe.resources[type] = Math.max(tribe.resources[type], 500);
+  if (!tribe.developments.includes("masonry")) tribe.developments.push("masonry");
+  const built = buildStructure(state, playerTribe, "wall", getTownHall(state, playerTribe));
+  if (!built.ok) return { ok: false, reason: built.reason };
+  building = state.buildings[built.buildingId];
+  return { ok: true, building };
+}
+
+function selectAndShowBuilding(building: Building): void {
+  selectedBuildingId = building.id;
+  selectedUnitId = undefined;
+  centerCamera(building);
+  fogDirty = true;
+  render({ forceHud: true, forceLabels: true, forceFog: true, forceTooltip: true });
+}
+
+function forceDamageBuildingForTest(): {
+  ok: boolean;
+  targetBuildingId?: string;
+  buildingType?: Building["type"];
+  beforeHp?: number;
+  afterHp?: number;
+  damageState?: DurabilityCondition;
+  repairState?: RepairState;
+  healthPct?: number;
+  selectedPanel?: string;
+  reason?: string;
+} {
+  const ensured = ensureFortificationForDamageTest();
+  if (!ensured.ok) {
+    render();
+    return { ok: false, reason: ensured.reason };
+  }
+  const building = ensured.building;
+  const beforeHp = Math.ceil(building.hp);
+  building.hp = Math.max(1, Math.min(building.maxHp - 1, Math.floor(building.maxHp * 0.45)));
+  selectAndShowBuilding(building);
+  const durability = buildingDurabilitySnapshot(state, building);
+  return {
+    ok: durability.damageState !== "intact" && durability.damageState !== "destroyed",
+    targetBuildingId: building.id,
+    buildingType: building.type,
+    beforeHp,
+    afterHp: durability.hp,
+    damageState: durability.damageState,
+    repairState: durability.repairState,
+    healthPct: durability.healthPct,
+    selectedPanel: selectedPanel.textContent ?? ""
+  };
+}
+
 function forceSiegeForTest(): {
   ok: boolean;
   targetBuildingId?: string;
@@ -1956,6 +2121,9 @@ function forceRepairForTest(): {
   beforeHp?: number;
   afterHp?: number | null;
   completed?: boolean;
+  damagedSnapshot?: BuildingDurabilitySnapshot;
+  repairQueuedSnapshot?: BuildingDurabilitySnapshot;
+  repairedSnapshot?: BuildingDurabilitySnapshot;
   repairerTasks?: string[];
   recentEvents?: string[];
   reason?: string;
@@ -1963,18 +2131,23 @@ function forceRepairForTest(): {
   const tribe = state.tribes[playerTribe];
   for (const type of resourceTypes) tribe.resources[type] = Math.max(tribe.resources[type], 500);
   if (!tribe.developments.includes("masonry")) tribe.developments.push("masonry");
-  let building = Object.values(state.buildings)
-    .filter((candidate) => candidate.tribeId === playerTribe && candidate.hp > 0 && (candidate.type === "wall" || candidate.type === "gate" || candidate.type === "turret"))
-    .sort((left, right) => left.id.localeCompare(right.id))[0];
+  let building =
+    selectedBuildingId && state.buildings[selectedBuildingId]?.tribeId === playerTribe && state.buildings[selectedBuildingId].hp > 0
+      ? state.buildings[selectedBuildingId]
+      : findFortificationForDamageTest();
   if (!building) {
-    const built = buildStructure(state, playerTribe, "wall", getTownHall(state, playerTribe));
-    if (!built.ok) {
+    const ensured = ensureFortificationForDamageTest();
+    if (!ensured.ok) {
       render();
-      return { ok: false, reason: built.reason };
+      return { ok: false, reason: ensured.reason };
     }
-    building = state.buildings[built.buildingId];
+    building = ensured.building;
   }
-  building.hp = Math.max(1, building.maxHp - 80);
+  if (building.hp >= building.maxHp) {
+    building.hp = Math.max(1, building.maxHp - 80);
+  }
+  selectAndShowBuilding(building);
+  const damagedSnapshot = buildingDurabilitySnapshot(state, building);
   const repairCost = getBuildingRepairCost(building);
   for (const type of resourceTypes) {
     const needed = repairCost[type] ?? 0;
@@ -1999,20 +2172,26 @@ function forceRepairForTest(): {
     targetBuildingId: building.id,
     reason: "Browser smoke repair test: restore a damaged owned structure."
   });
+  const repairQueuedSnapshot = buildingDurabilitySnapshot(state, building);
   if (!result.ok) {
     render();
-    return { ok: false, targetBuildingId: building.id, beforeHp, reason: result.reason };
+    return { ok: false, targetBuildingId: building.id, beforeHp, damagedSnapshot, repairQueuedSnapshot, reason: result.reason };
   }
   const repairerTasks = repairers.map((unit) => describeUnitTask(state, unit));
   advanceSimulationTicks(80, { scheduleAi: false, render: false });
-  render({ forceHud: true, forceLabels: true, forceFog: true });
   const repaired = state.buildings[building.id];
+  if (repaired) selectAndShowBuilding(repaired);
+  else render({ forceHud: true, forceLabels: true, forceFog: true });
+  const repairedSnapshot = repaired ? buildingDurabilitySnapshot(state, repaired) : undefined;
   return {
     ok: Boolean(repaired && repaired.hp > beforeHp),
     targetBuildingId: building.id,
     beforeHp,
     afterHp: repaired ? Math.ceil(repaired.hp) : null,
     completed: repaired ? repaired.hp >= repaired.maxHp : false,
+    damagedSnapshot,
+    repairQueuedSnapshot,
+    repairedSnapshot,
     repairerTasks,
     recentEvents: state.events.slice(-8).map((event) => `${event.type}:${event.body}`)
   };
@@ -4080,6 +4259,8 @@ function drawBuilding(graphics: Graphics, building: Building, game: GameState): 
       .fill({ color, alpha: 0.72 })
       .stroke({ color: 0x16120e, width: 2 });
   }
+  drawBuildingDamageOverlay(graphics, building, x, y);
+  drawBuildingRepairCue(graphics, building, game, x, y);
   if (selectedBuildingId === building.id) {
     graphics.circle(x + TILE / 2, y + TILE / 2, TILE * 0.86).stroke({ color: 0xffe17b, width: 4, alpha: 0.9 });
     graphics.rect(building.x * TILE - 2, building.y * TILE - 2, TILE + 4, TILE + 4).stroke({ color: 0xffe17b, width: 3 });
@@ -4089,6 +4270,72 @@ function drawBuilding(graphics: Graphics, building: Building, game: GameState): 
     graphics.rect(x + 3, y + TILE - 4, TILE - 6, 3).fill(0x3a1918);
     graphics.rect(x + 3, y + TILE - 4, (TILE - 6) * pct, 3).fill(0x77d26d);
   }
+}
+
+function drawBuildingDamageOverlay(graphics: Graphics, building: Building, x: number, y: number): void {
+  const ratio = healthRatio(building);
+  if (ratio >= 0.98 || building.hp <= 0) return;
+  const condition = durabilityCondition(building);
+  const crackColor = condition === "critical" ? 0x2b0806 : 0x3e2118;
+  const crackWidth = condition === "critical" ? 2.4 : condition === "damaged" ? 2 : 1.4;
+  const alpha = condition === "critical" ? 0.96 : condition === "damaged" ? 0.84 : 0.68;
+  const rubbleColor = condition === "critical" ? 0x1c1713 : 0x3d342c;
+
+  if (building.type === "wall" || building.type === "gate") {
+    graphics
+      .moveTo(x + 4, y + 5)
+      .lineTo(x + 9, y + 10)
+      .lineTo(x + 7, y + 16)
+      .moveTo(x + TILE - 5, y + 6)
+      .lineTo(x + TILE - 11, y + 13)
+      .lineTo(x + TILE - 8, y + 19)
+      .stroke({ color: crackColor, width: crackWidth, alpha });
+    if (condition === "damaged" || condition === "critical") {
+      graphics.rect(x + 3, y + TILE - 10, 5, 6).fill({ color: rubbleColor, alpha: 0.88 });
+      graphics.rect(x + TILE - 8, y + TILE - 12, 4, 8).fill({ color: rubbleColor, alpha: 0.82 });
+    }
+    if (condition === "critical") {
+      graphics
+        .moveTo(x + 3, y + TILE - 4)
+        .lineTo(x + TILE - 3, y + 4)
+        .stroke({ color: 0x7e1f18, width: 3, alpha: 0.78 });
+      graphics.rect(x + 9, y + 8, 5, 8).fill({ color: 0x0f0d0a, alpha: 0.86 });
+    }
+    return;
+  }
+
+  if (building.type === "turret") {
+    graphics
+      .moveTo(x + 7, y + 8)
+      .lineTo(x + 13, y + 15)
+      .moveTo(x + TILE - 7, y + 9)
+      .lineTo(x + TILE - 13, y + 17)
+      .stroke({ color: crackColor, width: crackWidth, alpha });
+    graphics.circle(x + TILE / 2, y + TILE / 2, condition === "critical" ? 8 : 6).stroke({ color: 0x7e1f18, width: 2, alpha: condition === "worn" ? 0.45 : 0.72 });
+    if (condition === "critical") graphics.rect(x + 5, y + TILE - 7, TILE - 10, 4).fill({ color: rubbleColor, alpha: 0.78 });
+    return;
+  }
+
+  graphics
+    .moveTo(x + 6, y + 7)
+    .lineTo(x + 12, y + 15)
+    .moveTo(x + TILE - 6, y + 8)
+    .lineTo(x + TILE - 12, y + 17)
+    .stroke({ color: crackColor, width: crackWidth, alpha });
+}
+
+function drawBuildingRepairCue(graphics: Graphics, building: Building, game: GameState, x: number, y: number): void {
+  const repairState = buildingRepairState(game, building);
+  if (repairState === "none") return;
+  const color = repairState === "repairing" ? 0x7bd8ff : 0x8df07a;
+  const alpha = repairState === "repairing" ? 0.86 : 0.78;
+  graphics.circle(x + TILE / 2, y + TILE / 2, TILE * 0.72).stroke({ color, width: 3, alpha });
+  graphics
+    .moveTo(x + TILE / 2 - 5, y + TILE / 2)
+    .lineTo(x + TILE / 2 + 5, y + TILE / 2)
+    .moveTo(x + TILE / 2, y + TILE / 2 - 5)
+    .lineTo(x + TILE / 2, y + TILE / 2 + 5)
+    .stroke({ color, width: 2, alpha: 0.92 });
 }
 
 function hasAdjacentFortification(game: GameState, building: Building, dx: number, dy: number): boolean {
@@ -4112,6 +4359,7 @@ function drawUnit(graphics: Graphics, unit: Unit, position: Position = visualPos
   if (selectedUnitId === unit.id) graphics.circle(x, y, radius + 5).stroke({ color: 0xf2d28b, width: 2 });
   if (unit.hp < unit.maxHp) {
     const pct = Math.max(0, unit.hp / unit.maxHp);
+    if (pct < 0.67) graphics.circle(x, y, radius + 4).stroke({ color: pct < 0.34 ? 0xff6b52 : 0xffb35c, width: 2, alpha: 0.78 });
     graphics.rect(x - 8, y + 9, 16, 3).fill(0x3a1918);
     graphics.rect(x - 8, y + 9, 16 * pct, 3).fill(0x77d26d);
   }
@@ -4354,12 +4602,14 @@ function updateHud(game: GameState): void {
 function selectedMarkup(game: GameState): string {
   const unit = selectedUnitId ? game.units[selectedUnitId] : undefined;
   if (unit) {
+    const durability = combatStatSnapshot(unit);
     return `
       <div class="selected-row"><strong>${unit.name}</strong> <span class="muted">${unit.type}</span></div>
       <div class="selected-row">Unit id: ${unit.id}</div>
       <div class="selected-row">Tribe: ${game.tribes[unit.tribeId].name}</div>
       <div class="selected-row">Naming style: ${game.tribes[unit.tribeId].namingStyle}</div>
       <div class="selected-row">Health: ${Math.ceil(unit.hp)} / ${unit.maxHp}</div>
+      <div class="selected-row">Condition: ${formatCondition(durability.condition)} (${durability.healthPct}%)</div>
       <div class="selected-row">Armor: ${unit.armor}</div>
       <div class="selected-row">Attack: ${unit.attack} / range ${unit.range}</div>
       <div class="selected-row">Order: ${describeUnitTask(game, unit)}</div>
@@ -4367,6 +4617,7 @@ function selectedMarkup(game: GameState): string {
   }
   const building = selectedBuildingId ? game.buildings[selectedBuildingId] : undefined;
   if (building) {
+    const durability = buildingDurabilitySnapshot(game, building);
     return `
       <div class="selected-row"><strong>${labelBuilding(building.type)}</strong></div>
       ${
@@ -4377,6 +4628,7 @@ function selectedMarkup(game: GameState): string {
       <div class="selected-row">Tribe: ${game.tribes[building.tribeId].name}</div>
       <div class="selected-row">Position: ${building.x}, ${building.y}</div>
       <div class="selected-row">Health: ${building.hp} / ${building.maxHp}</div>
+      <div class="selected-row">Condition: ${formatCondition(durability.condition)} (${durability.healthPct}%); repair ${formatRepairState(durability.repairState)}</div>
       <div class="selected-row">Armor: ${building.armor}</div>
       <div class="selected-row">Attack: ${building.attack} / range ${building.range}</div>
       ${
@@ -5497,12 +5749,14 @@ function hoverMarkup(target: HoverTarget): string {
   if (target.kind === "unit") {
     const unit = target.unit;
     const packet = unit.carriedPacketId ? state.packets[unit.carriedPacketId] : undefined;
+    const durability = combatStatSnapshot(unit);
     return `
       <strong>${unit.name}</strong> <span class="muted">${unit.type}</span>
       <div>Unit id: ${unit.id}</div>
       <div>Tribe: ${state.tribes[unit.tribeId].name}</div>
       <div>Style: ${state.tribes[unit.tribeId].namingStyle}</div>
       <div>Health: ${Math.ceil(unit.hp)} / ${unit.maxHp}</div>
+      <div>Condition: ${formatCondition(durability.condition)} (${durability.healthPct}%)</div>
       <div>Armor: ${unit.armor}</div>
       <div>Attack: ${unit.attack} / range ${unit.range}</div>
       <div>Doing: ${describeUnitTask(state, unit)}</div>
@@ -5511,10 +5765,12 @@ function hoverMarkup(target: HoverTarget): string {
   }
   if (target.kind === "building") {
     const building = target.building;
+    const durability = buildingDurabilitySnapshot(state, building);
     return `
       <strong>${labelBuilding(building.type)}</strong>
       <div>Tribe: ${state.tribes[building.tribeId].name}</div>
       <div>Health: ${Math.ceil(building.hp)} / ${building.maxHp}</div>
+      <div>Condition: ${formatCondition(durability.condition)} (${durability.healthPct}%); repair ${formatRepairState(durability.repairState)}</div>
       <div>Armor: ${building.armor}</div>
       <div>Attack: ${building.attack} / range ${building.range}</div>
       ${building.type === "gate" ? `<div>Gate: ${building.gateState ?? "open"}; access ${formatGateAccessPolicy(building.gateAccessPolicy ?? "owner_allies")}</div>` : ""}

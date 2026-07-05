@@ -2389,3 +2389,40 @@ Original prompt: ok continue with roadmap make sure the AIs can report bugs and 
   - add contested field-repair behavior under fire,
   - expand gate diplomacy around safe-passage treaties, tolls, betrayal, sabotage, and ambushes,
   - continue PixiJS visual production work with clearer fortification silhouettes and zoom-aware construction labels.
+
+### 2026-07-05 Durability Visualization And Structured AI Review
+
+- Completed the durability/readability slice on top of the existing combat stat contract:
+  - visible units now expose `healthPct`, `condition`, and a `combatStats` snapshot through `render_game_to_text`,
+  - visible buildings now expose `healthPct`, `condition`, `damageState`, `repairState`, `blocksMovement`, and a `combatStats` snapshot,
+  - selected panels and hover cards now show condition percentages in addition to health, armor, attack, and range,
+  - damaged walls and gates draw cracks, rubble, health bars, and critical breach marks,
+  - damaged turrets draw cracks/scorch marks and critical foundation damage,
+  - damaged units get an extra visible warning ring below two-thirds health,
+  - buildings under repair draw a blue repair cue and recently repaired buildings draw a green pulse.
+- Strengthened browser QA:
+  - added `window.force_damage_building_for_test()` to select a fortification, damage it, and expose selected-panel condition text,
+  - `window.force_repair_for_test()` now repairs the currently selected damaged owned fortification when available,
+  - `pnpm smoke:buildings` now proves newly built structures expose intact stat/condition fields, hostile siege still destroys a wall, and one selected fortification moves through damaged -> repairing -> recently repaired states with hook and panel evidence.
+- Completed the AI-review parser improvement already in flight:
+  - `scripts/ai-iteration-review.mjs` extracts structured `REPORT_BUG` fields from persisted report prose,
+  - ranked backlog JSON now carries `latestStructured` with suspected area, expected/actual behavior, repro, strategy impact, and severity,
+  - unit coverage verifies those fields survive into the ranked backlog.
+- QA completed:
+  - `pnpm exec tsc --noEmit` passed,
+  - focused `pnpm exec vitest run packages/sim/src/sim.test.ts apps/client/src/ai-iteration-review.test.ts --reporter=dot` passed: 48 tests,
+  - full `pnpm test` passed: 108 tests,
+  - `pnpm build` passed,
+  - `pnpm smoke:buildings` passed with `test_siege_wall` destruction plus damaged/repaired `gate_0001` evidence,
+  - inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-buildings.png`; the board renders normally and the selected repaired fortification cluster is visible, though settlement labels remain dense,
+  - shared `develop-web-game` client completed and captured live state containing the new combat stats, but its screenshots were black in both headless and headed mode for this Pixi surface; do not use those generic-client PNGs as visual evidence for this slice,
+  - `pnpm ai:review:strict -- --json --no-write` passed after full smoke: 0 actionable unresolved, 0 parser/transport open,
+  - `pnpm ai:snapshots:replay -- --strict --json --no-write` passed: 446 replayed, 0 failures, 0 contract warnings,
+  - `pnpm smoke:smooth` passed with measured FPS 28.3 and visible interpolation,
+  - full `pnpm smoke` passed with board, diplomacy, AI report review, information request, learning, and persistence checks.
+- Remaining backlog:
+  - add siege engines, breach previews, and richer multi-unit assault doctrines,
+  - improve label placement and zoom-aware construction/repair labels around dense settlements,
+  - add contested field-repair behavior under fire,
+  - expand gate diplomacy around safe-passage treaties, tolls, betrayal, sabotage, and ambushes,
+  - keep every future targetable item, siege engine, and processing building on the health/armor/attack/range plus condition/repair-state contract.
