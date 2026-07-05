@@ -2464,5 +2464,37 @@ Original prompt: ok continue with roadmap make sure the AIs can report bugs and 
   - `node scripts/ai-iteration-loop.mjs --output /tmp/sovereign-ai-iteration-status.json` passed.
 - Remaining backlog:
   - add explicit damage/destruction mechanics for future inventory items, siege engines, and processing installations as they become real entities,
-  - decide whether resource deposits should be attackable/raided directly or only exhausted/controlled by workers and territory,
   - keep using live smoke to verify that fixed AI reports become later non-report strategy, not repeated complaints.
+
+### 2026-07-05 Resource Raid And Deposit Destruction
+
+- Closed the open resource-deposit attackability decision with the first intentional raid slice:
+  - `ATTACK` orders can now target a visible resource tile through `targetX`, `targetY`, and `targetResourceType`,
+  - military units receive an explicit `attackResource` task, path into range, and damage the deposit through the same armor-reduced combat loop used for walls,
+  - resource deposits now expose `getResourceDepositCombatStats()` and `damageResourceDeposit()` as public stat/damage helpers,
+  - destroyed or exhausted deposits are removed from map summaries and emit `RESOURCE_DEPOSIT_DESTROYED` evidence,
+  - ordinary gathering still depletes deposit health/amount, but resource raids now make coal/iron/gold/stone denial an intentional strategic action.
+- Exposed the mechanic to AIs and QA:
+  - LLM schema accepts `targetResourceType`,
+  - prompts and compact retries list visible raidable deposits with type, coordinate, amount, hp, and armor without exposing hidden rival wealth,
+  - order availability lists `targetResource options`,
+  - browser task text reports `Raiding iron deposit at x,y`,
+  - `window.force_resource_raid_for_test()` proves an order-driven browser raid destroys a visible iron deposit.
+- QA completed:
+  - `pnpm exec tsc --noEmit` passed,
+  - focused `pnpm exec vitest run packages/sim/src/sim.test.ts apps/client/src/llm.test.ts --reporter=dot` passed: 107 tests,
+  - full `pnpm test` passed: 112 tests,
+  - `pnpm build` passed,
+  - `pnpm smoke:buildings` passed with `RESOURCE_RAID_ORDER` and `RESOURCE_DEPOSIT_DESTROYED` evidence for the iron deposit at 49,52,
+  - inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-buildings.png`; board, labels, construction cluster, and overlays remained readable,
+  - `pnpm smoke:smooth` passed with measured FPS 29 and smooth visual interpolation,
+  - `pnpm ai:review:strict -- --json --no-write` passed: 0 actionable unresolved, 0 parser/transport open,
+  - `pnpm ai:snapshots:replay -- --strict --json --no-write` passed after full smoke: 479 replayed, 0 failures, 0 contract warnings,
+  - `pnpm smoke:mock-ollama` passed on rerun with parser/transport/cooldown recovery and gpt-oss chat adapter coverage; first run timed out waiting for the post-cooldown recovery decision,
+  - full `pnpm smoke` passed with board, diplomacy, AI report review, information request, post-game learning, persistence, and screenshot checks,
+  - inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-smoke.png`; the board and AI report review panel render normally.
+- Remaining backlog:
+  - make survival scoring and AI prompts account for controlled, defended, raided, and denied resource deposits,
+  - add siege engines, breach previews, and contested field repair under fire,
+  - improve PixiJS resource/fortification silhouettes and zoom-aware labels,
+  - keep every future targetable item, siege engine, inventory object, and processing building on the health/armor/attack/range plus destruction contract.

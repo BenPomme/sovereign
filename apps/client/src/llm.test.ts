@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { advanceGame, advanceGameTicks, appendSovereignMemory, attachReplyToPacket, buildStructure, createGame, getTownHall, issueSovereignOrder, recordAiDecision, sendPlayerMessage, setAllControllers } from "../../../packages/sim/src";
+import { advanceGame, advanceGameTicks, appendSovereignMemory, attachReplyToPacket, buildStructure, createGame, createResourceDeposit, getTownHall, issueSovereignOrder, recordAiDecision, sendPlayerMessage, setAllControllers, tileIndex } from "../../../packages/sim/src";
 import {
   OllamaRequestError,
   chooseDefaultModel,
@@ -1887,6 +1887,59 @@ describe("Ollama JSON recovery", () => {
       type: "ATTACK",
       recipientTribeId: "red",
       targetBuildingId: "red_test_wall"
+    });
+  });
+
+  it("preserves LLM-authored resource raid targets on attack orders", async () => {
+    const game = createGame(20260707);
+    setAllControllers(game, "human");
+    game.map[tileIndex(21, 20)] = { terrain: "hill", resource: createResourceDeposit("iron", 12) };
+    advanceGameTicks(game, 5);
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        response: JSON.stringify({
+          freeformStrategy: "Iron is the hinge of future turrets; I will deny this visible deposit before a rival can bargain around it.",
+          strategySummary: "Raid a visible iron deposit.",
+          memoryNote: "Iron at 21,20 is a denial target.",
+          orders: [
+            {
+              type: "ATTACK",
+              priority: 1,
+              targetX: 21,
+              targetY: 20,
+              targetResourceType: "iron",
+              messageType: "LETTER",
+              diplomacyIntent: "NONE",
+              subject: "",
+              body: "",
+              reason: "Destroy the visible iron deposit at 21,20."
+            }
+          ],
+          unitNames: [],
+          bugReport: "",
+          bugSeverity: "low"
+        })
+      })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("window", {
+      setTimeout: globalThis.setTimeout,
+      clearTimeout: globalThis.clearTimeout
+    });
+
+    const decision = await requestSovereignDecision(game, "blue", "qwen3.5:9b-mlx");
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+
+    expect(body.prompt).toContain("Visible resource raid targets:");
+    expect(body.prompt).toContain("iron at 21,20 amount 12 hp 12 armor 3");
+    expect(body.prompt).toContain("targetResource options");
+    expect(body.format.properties.orders.items.properties.targetResourceType.enum).toContain("iron");
+    expect(decision.orders[0]).toMatchObject({
+      type: "ATTACK",
+      targetX: 21,
+      targetY: 20,
+      targetResourceType: "iron"
     });
   });
 

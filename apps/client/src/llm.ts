@@ -17,6 +17,7 @@ import {
   resourceTypes,
   summarizeDiplomaticIntel,
   summarizeSovereignMemory,
+  tileIndex,
   tribeIds,
   type AiStrategicOrder,
   type Building,
@@ -29,6 +30,7 @@ import {
   type Message,
   type MessageType,
   type Packet,
+  type ResourceType,
   type ResourceCost,
   type Resources,
   type TribeId,
@@ -148,6 +150,7 @@ const decisionSchema = {
           buildingType: { type: "string", enum: ["farm", "watchtower", "wall", "gate", "turret"] },
           buildingId: { type: "string" },
           targetBuildingId: { type: "string" },
+          targetResourceType: { type: "string", enum: resourceTypes },
           gateState: { type: "string", enum: ["open", "closed", "locked"] },
           gateAccessPolicy: { type: "string", enum: ["all", "owner_allies", "owner_only"] },
           targetX: { type: "integer" },
@@ -994,6 +997,7 @@ function buildPrompt(state: GameState, tribeId: TribeId, iterationContext: AiIte
   const ownBuildings = Object.values(state.buildings).filter((building) => building.tribeId === tribeId && building.hp > 0);
   const visibleForeignUnits = getVisibleUnits(state, tribeId).filter((unit) => unit.tribeId !== tribeId);
   const visibleForeignBuildings = getVisibleBuildings(state, tribeId).filter((building) => building.tribeId !== tribeId);
+  const visibleResourceTargets = summarizeVisibleResourceTargets(state, tribeId);
   const packets = Object.values(state.packets)
     .filter((packet) => packet.originTribeId === tribeId || packet.recipientTribeId === tribeId)
     .slice(-5)
@@ -1029,7 +1033,7 @@ Diplomatic intelligence rule: use the ledger to track who promised, threatened, 
 Message rule: write real first-person diplomatic messages. You may ask questions, negotiate joint plans, threaten, mislead, conceal intent, or set traps. Do not use empty placeholders. The recipient AI will read the delivered text and reply.
 Naming rule: you may rename your own villagers and units through unitNames. Keep names consistent with your naming style. Use exact unitId values. Rename new generic units when useful; an empty unitNames array is allowed.
 Alliance rule: alliances are formed only through chat. Send a SEND_MESSENGER order with messageType TREATY_PROPOSAL and diplomacyIntent ALLIANCE_OFFER if you want to ask for an alliance. If you already have an alliance, do not ask for another.
-War rule: ATTACK with recipientTribeId declares war, breaks any alliance with that target, and sends available military units. To intentionally breach a visible wall, gate, turret, or building, include its exact targetBuildingId from Visible foreign buildings. Use it when your doctrine calls for betrayal, preemption, conquest, retaliation, or opening a blocked route.
+War rule: ATTACK with recipientTribeId declares war, breaks any alliance with that target, and sends available military units. To intentionally breach a visible wall, gate, turret, or building, include its exact targetBuildingId from Visible foreign buildings. To raid or deny a visible resource deposit, include targetX, targetY, and targetResourceType from Visible resource raid targets; recipientTribeId is optional unless you mean to declare war over that raid. Use attacks when your doctrine calls for betrayal, preemption, conquest, retaliation, opening a blocked route, or denying coal/iron/gold/stone logistics.
 Defense rule: walls block movement for everyone until destroyed, including your own people. Gates are the only intended passage through walls: open gates follow an access policy of all, owner_allies, or owner_only; closed or locked gates block everyone. Turrets shoot hostile units near your kingdom. Use them when they fit your doctrine and resources.
 Repair rule: damaged owned buildings can be repaired by idle peons. Use REPAIR with targetBuildingId or buildingId from Own buildings when a wall, gate, turret, or other structure is damaged and keeping it alive matters.
 Development rule: choose developments with DEVELOP before building locked fortifications. Masonry unlocks walls. Masonry plus Ironworking unlock gates and locks. Ironworking plus Ballistics unlock turrets. You may pick development paths for your own doctrine; this is a strategic choice, not a fixed build order.
@@ -1063,6 +1067,7 @@ Order availability: ${orderAvailability}
 Known sovereign tribes: ${tribeIds.filter((id) => id !== tribeId).join(", ")}
 Visible foreign units: ${visibleForeignUnits.length > 0 ? summarizeUnits(visibleForeignUnits) : "none currently visible"}
 Visible foreign buildings: ${summarizeVisibleForeignBuildings(visibleForeignBuildings)}
+Visible resource raid targets: ${visibleResourceTargets}
 Messenger packets involving you: ${packets || "none"}
 Recent diplomacy you can remember: ${summarizeDiplomacy(state, tribeId, sinceTick) || "none"}
 
@@ -1074,13 +1079,13 @@ Legal order types:
 - DEVELOP with developmentId masonry, brick_kilns, ironworking, ballistics, military_architecture, or public_works
 - SCOUT
 - DEFEND
-- ATTACK with recipientTribeId, and optional targetBuildingId for a visible hostile wall, gate, turret, or building
+- ATTACK with optional recipientTribeId, optional targetBuildingId for a visible hostile wall/gate/turret/building, or targetX, targetY, and targetResourceType for a visible resource deposit raid
 - REPAIR with targetBuildingId or buildingId for a damaged owned building
 - SET_POLICY
 - REPORT_BUG with subject, body, reason, suspectedArea, expectedBehavior, actualBehavior, reproductionSteps, strategyImpact, bugSeverity
 - REQUEST_INFO with subject, body, and reason
 
-Return JSON only with freeformStrategy, strategySummary, memoryNote, orders, unitNames, bugReport, and bugSeverity. Keep memoryNote under 220 characters. Keep message bodies specific and under 500 characters. Use at most two orders. For SEND_MESSENGER, subject/body/messageType/diplomacyIntent must be meaningful and non-empty. For DEVELOP, set developmentId to the chosen development. For BUILD, set buildingType and include targetX and targetY when you want the structure near a specific tile. For SET_GATE, set gateState and optionally buildingId and gateAccessPolicy. For ATTACK, set recipientTribeId and optionally targetBuildingId if you want soldiers to breach a specific visible fortification. For REPAIR, set targetBuildingId or buildingId to the exact damaged owned building id. For REPORT_BUG, use subject as the issue title, body as the specific problem, expectedBehavior/actualBehavior for the mismatch, reproductionSteps for how to observe it again, suspectedArea for the likely system, and strategyImpact for why it blocks sovereign planning. For REQUEST_INFO, use subject as the question title and body as the precise information wanted. For other non-message orders, subject and body can be empty strings.
+Return JSON only with freeformStrategy, strategySummary, memoryNote, orders, unitNames, bugReport, and bugSeverity. Keep memoryNote under 220 characters. Keep message bodies specific and under 500 characters. Use at most two orders. For SEND_MESSENGER, subject/body/messageType/diplomacyIntent must be meaningful and non-empty. For DEVELOP, set developmentId to the chosen development. For BUILD, set buildingType and include targetX and targetY when you want the structure near a specific tile. For SET_GATE, set gateState and optionally buildingId and gateAccessPolicy. For ATTACK, set recipientTribeId and optionally targetBuildingId if you want soldiers to breach a specific visible fortification; for a resource raid, set targetX, targetY, and targetResourceType exactly from Visible resource raid targets. For REPAIR, set targetBuildingId or buildingId to the exact damaged owned building id. For REPORT_BUG, use subject as the issue title, body as the specific problem, expectedBehavior/actualBehavior for the mismatch, reproductionSteps for how to observe it again, suspectedArea for the likely system, and strategyImpact for why it blocks sovereign planning. For REQUEST_INFO, use subject as the question title and body as the precise information wanted. For other non-message orders, subject and body can be empty strings.
 `;
 }
 
@@ -1119,6 +1124,7 @@ Wealth ${computeWealth(state, tribeId)}; happiness ${Math.round(tribe.happiness)
 	Use AI iteration memory before orders: unresolved reports are your known issues; fixed or triaged lessons are behavior changes to remember.
 	${integrityNotice ? "Integrity response rule: your first order must be REPORT_BUG with structured subject, body, suspectedArea, expectedBehavior, actualBehavior, reproductionSteps, strategyImpact, bugSeverity, and reason. Do not choose ordinary strategy orders until this contradiction is reported." : ""}
 		Available orders: ${summarizeOrderAvailability(state, tribeId, ownUnits, idleMessenger)}
+		Visible resource raid targets: ${summarizeVisibleResourceTargets(state, tribeId)}
 	Do not output unavailable orders. If SCOUT is unavailable, choose RECRUIT sentinel when available or explain the scouting plan through SET_POLICY/REQUEST_INFO. If a BUILD is locked, choose an available DEVELOP prerequisite first.
 	Recent diplomacy: ${summarizeDiplomacy(state, tribeId, sinceTick) || "none"}
 
@@ -1126,7 +1132,7 @@ Return fields:
 - freeformStrategy: 1-2 sentences of independent doctrine. You are not limited to algorithmic choices.
 - strategySummary: one short sentence.
 - memoryNote: one private note or empty string.
-- orders: up to two legal immediate orders. Use SET_POLICY if unsure. Use DEVELOP with developmentId for prerequisite choices. Use BUILD with buildingType and optional targetX/targetY for chosen placement. Use SET_GATE with gateState open/closed/locked and gateAccessPolicy all/owner_allies/owner_only for owned gates. Use ATTACK with targetBuildingId when breaching a visible wall/gate/building is the immediate executable step. Use REPAIR with targetBuildingId or buildingId when a damaged owned building must be saved. For SEND_MESSENGER, write a real first-person message.
+- orders: up to two legal immediate orders. Use SET_POLICY if unsure. Use DEVELOP with developmentId for prerequisite choices. Use BUILD with buildingType and optional targetX/targetY for chosen placement. Use SET_GATE with gateState open/closed/locked and gateAccessPolicy all/owner_allies/owner_only for owned gates. Use ATTACK with targetBuildingId when breaching a visible wall/gate/building is the immediate executable step, or targetX/targetY/targetResourceType for a visible deposit raid. Use REPAIR with targetBuildingId or buildingId when a damaged owned building must be saved. For SEND_MESSENGER, write a real first-person message.
 - unitNames: optional own unit renames, can be empty.
 - bugReport: empty unless world behavior is impossible or broken. If using a REPORT_BUG order, include subject, body, suspectedArea, expectedBehavior, actualBehavior, reproductionSteps, strategyImpact, and bugSeverity.
 - bugSeverity: low, medium, or high.
@@ -1286,6 +1292,37 @@ function summarizeVisibleForeignBuildings(
       )
       .join("; ") || "none currently visible"
   );
+}
+
+function summarizeVisibleResourceTargets(state: GameState, tribeId: TribeId): string {
+  const visible = state.visibility[tribeId];
+  const base = Object.values(state.buildings).find((building) => building.tribeId === tribeId && building.type === "townHall") ?? { x: MAP_SIZE / 2, y: MAP_SIZE / 2 };
+  const strategic = new Set<ResourceType>(["coal", "iron", "gold", "stone", "limestone", "clay", "wood", "food"]);
+  const deposits: Array<{ type: ResourceType; x: number; y: number; amount: number; hp: number; armor: number; distance: number }> = [];
+  for (let y = 0; y < MAP_SIZE; y += 1) {
+    for (let x = 0; x < MAP_SIZE; x += 1) {
+      const index = tileIndex(x, y);
+      if (visible[index] !== 2) continue;
+      const resource = state.map[index].resource;
+      if (!resource || resource.amount <= 0 || resource.hp <= 0 || !strategic.has(resource.type)) continue;
+      deposits.push({
+        type: resource.type,
+        x,
+        y,
+        amount: Math.round(resource.amount),
+        hp: Math.ceil(resource.hp),
+        armor: resource.armor,
+        distance: Math.hypot(x - base.x, y - base.y)
+      });
+    }
+  }
+  if (deposits.length === 0) return "none currently visible";
+  const scarcityRank: Record<ResourceType, number> = { coal: 8, iron: 7, gold: 6, limestone: 5, stone: 4, clay: 3, wood: 2, food: 1 };
+  return deposits
+    .sort((left, right) => scarcityRank[right.type] - scarcityRank[left.type] || right.amount - left.amount || left.distance - right.distance)
+    .slice(0, 10)
+    .map((deposit) => `${deposit.type} at ${deposit.x},${deposit.y} amount ${deposit.amount} hp ${deposit.hp} armor ${deposit.armor}`)
+    .join("; ");
 }
 
 function summarizeInformationAnswers(state: GameState, tribeId: TribeId, sinceTick = -1): string {
@@ -1522,6 +1559,7 @@ function summarizeOrderAvailability(
     .filter((building) => building.tribeId !== tribeId && building.hp > 0)
     .sort((left, right) => buildingAttackPriority(right.type) - buildingAttackPriority(left.type))
     .slice(0, 8);
+  const visibleResourceTargets = summarizeVisibleResourceTargets(state, tribeId);
   const canAttack = ownUnits.some((unit) => unit.type === "militia" || unit.type === "archer");
   const scoutAvailability = idleSentinel
     ? "SCOUT available: idle sentinel ready"
@@ -1567,7 +1605,9 @@ function summarizeOrderAvailability(
     developmentAvailability,
     `ATTACK ${
       canAttack
-        ? `available${visibleSiegeTargets.length > 0 ? `; targetBuildingId options ${visibleSiegeTargets.map((building) => `${building.id}:${building.tribeId}:${building.type}:${building.x},${building.y}`).join("/")}` : ""}`
+        ? `available${visibleSiegeTargets.length > 0 ? `; targetBuildingId options ${visibleSiegeTargets.map((building) => `${building.id}:${building.tribeId}:${building.type}:${building.x},${building.y}`).join("/")}` : ""}${
+            visibleResourceTargets !== "none currently visible" ? `; targetResource options ${visibleResourceTargets}` : ""
+          }`
         : "unavailable"
     }`,
     "REQUEST_INFO available for strategic questions or desired intelligence",
@@ -1629,6 +1669,7 @@ function normalizeOrder(raw: RawOrder, state: GameState, self: TribeId): AiStrat
     buildingType: normalizeBuildingType(raw.buildingType),
     buildingId: raw.buildingId ? cleanText(raw.buildingId, 80) : undefined,
     targetBuildingId: raw.targetBuildingId ? cleanText(raw.targetBuildingId, 80) : undefined,
+    targetResourceType: normalizeResourceType(raw.targetResourceType),
     gateState: normalizeGateState(raw.gateState),
     gateAccessPolicy: normalizeGateAccessPolicy(raw.gateAccessPolicy),
     developmentId: normalizeDevelopmentId(raw.developmentId),
@@ -1829,6 +1870,10 @@ function canRecruitSentinel(state: GameState, tribeId: TribeId): boolean {
 
 function normalizeBuildingType(value: unknown): BuildableBuildingType | undefined {
   return value === "farm" || value === "watchtower" || value === "wall" || value === "gate" || value === "turret" ? value : undefined;
+}
+
+function normalizeResourceType(value: unknown): ResourceType | undefined {
+  return typeof value === "string" && (resourceTypes as readonly string[]).includes(value) ? (value as ResourceType) : undefined;
 }
 
 function normalizeGateState(value: unknown): "open" | "closed" | "locked" | undefined {

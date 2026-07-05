@@ -96,6 +96,7 @@ export type AiStrategicOrder = {
   buildingType?: BuildableBuildingType;
   buildingId?: string;
   targetBuildingId?: string;
+  targetResourceType?: ResourceType;
   gateState?: GateState;
   gateAccessPolicy?: GateAccessPolicy;
   targetX?: number;
@@ -245,6 +246,7 @@ export type UnitTask =
     }
   | { kind: "attack"; targetUnitId: string; path: Position[] }
   | { kind: "attackBuilding"; targetBuildingId: string; path: Position[] }
+  | { kind: "attackResource"; target: Position; resource: ResourceType; path: Position[] }
   | { kind: "repair"; targetBuildingId: string; path: Position[] };
 
 export type DamageableWorldObject = CombatStats & {
@@ -795,7 +797,7 @@ export function issueSovereignOrder(
       return { ok: true, summary: `moved ${moved} defenders` };
     }
     case "ATTACK":
-      return issueAttackOrder(state, tribeId, order.recipientTribeId, order.reason, order.targetBuildingId ?? order.buildingId);
+      return issueAttackOrder(state, tribeId, order.recipientTribeId, order.reason, order.targetBuildingId ?? order.buildingId, orderResourceTarget(order));
     case "REPAIR":
       return issueRepairOrder(state, tribeId, order.targetBuildingId ?? order.buildingId);
     case "REPORT_BUG": {
@@ -837,6 +839,17 @@ function orderBuildTarget(order: AiStrategicOrder, fallback: Position): Position
   };
 }
 
+function orderResourceTarget(order: AiStrategicOrder): { x: number; y: number; type?: ResourceType } | undefined {
+  const x = Number(order.targetX);
+  const y = Number(order.targetY);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return undefined;
+  return {
+    x: clamp(Math.round(x), 0, MAP_SIZE - 1),
+    y: clamp(Math.round(y), 0, MAP_SIZE - 1),
+    type: order.targetResourceType
+  };
+}
+
 export function formAlliance(state: GameState, a: TribeId, b: TribeId): { ok: true; summary: string } | { ok: false; reason: string } {
   if (a === b) return { ok: false, reason: "a tribe cannot ally with itself" };
   if (state.alliances[a] === b && state.alliances[b] === a) return { ok: true, summary: `${state.tribes[a].name} is already allied with ${state.tribes[b].name}` };
@@ -855,9 +868,13 @@ function issueAttackOrder(
   tribeId: TribeId,
   targetTribeId: TribeId | undefined,
   reason: string | undefined,
-  targetBuildingId?: string
+  targetBuildingId?: string,
+  targetResource?: { x: number; y: number; type?: ResourceType }
 ): { ok: true; summary: string } | { ok: false; reason: string } {
   const targetBuilding = targetBuildingId ? state.buildings[targetBuildingId] : undefined;
+  if (!targetBuilding && targetResource) {
+    return issueResourceAttackOrder(state, tribeId, targetTribeId, reason, targetResource);
+  }
   const resolvedTargetTribeId = targetTribeId ?? targetBuilding?.tribeId;
   if (!resolvedTargetTribeId || resolvedTargetTribeId === tribeId || !tribeIds.includes(resolvedTargetTribeId)) return { ok: false, reason: "invalid attack target" };
   if (state.tribes[resolvedTargetTribeId].eliminated) return { ok: false, reason: `${state.tribes[resolvedTargetTribeId].name} has been eliminated` };
@@ -909,22 +926,72 @@ function issueAttackOrder(
   return { ok: true, summary: `declared war on ${state.tribes[resolvedTargetTribeId].name} and sent ${attackers.length} attackers` };
 }
 
+function issueResourceAttackOrder(
+  state: GameState,
+  tribeId: TribeId,
+  targetTribeId: TribeId | undefined,
+  reason: string | undefined,
+  targetResource: { x: number; y: number; type?: ResourceType }
+): { ok: true; summary: string } | { ok: false; reason: string } {
+  if (state.visibility[tribeId]?.[tileIndex(targetResource.x, targetResource.y)] !== 2) {
+    return { ok: false, reason: "target resource tile is not currently visible" };
+  }
+  const tile = state.map[tileIndex(targetResource.x, targetResource.y)];
+  const resource = tile.resource;
+  if (!resource || resource.hp <= 0 || resource.amount <= 0) return { ok: false, reason: "target resource deposit is missing or exhausted" };
+  if (targetResource.type && resource.type !== targetResource.type) {
+    return { ok: false, reason: `target tile contains ${resource.type}, not ${targetResource.type}` };
+  }
+  if (targetTribeId) {
+    if (targetTribeId === tribeId || !tribeIds.includes(targetTribeId)) return { ok: false, reason: "invalid attack target" };
+    if (state.tribes[targetTribeId].eliminated) return { ok: false, reason: `${state.tribes[targetTribeId].name} has been eliminated` };
+  }
+  const attackers = Object.values(state.units)
+    .filter((unit) => unit.tribeId === tribeId && unit.hp > 0 && (unit.type === "militia" || unit.type === "archer"))
+    .slice(0, 4);
+  if (attackers.length === 0) return { ok: false, reason: "no military units available" };
+  if (targetTribeId) declareWar(state, tribeId, targetTribeId, reason ?? "AI resource raid order");
+  const target = { x: targetResource.x, y: targetResource.y };
+  for (const unit of attackers) {
+    const attackPosition = findResourceAttackPosition(state, unit, target);
+    unit.task = { kind: "attackResource", resource: resource.type, target, path: findPath(state, unit, attackPosition) };
+  }
+  const targetText = targetTribeId ? `${state.tribes[targetTribeId].name}'s claimed ${resource.type} deposit` : `${resource.type} deposit`;
+  addEvent(
+    state,
+    "RESOURCE_RAID_ORDER",
+    `${state.tribes[tribeId].name} raids ${resource.type}`,
+    `${attackers.length} military units move to destroy the ${targetText} at ${target.x},${target.y}. ${clampText(reason ?? "No stated reason.", 180)}`,
+    "all"
+  );
+  return {
+    ok: true,
+    summary: targetTribeId
+      ? `declared war on ${state.tribes[targetTribeId].name} and sent ${attackers.length} attackers against ${resource.type} deposit ${target.x},${target.y}`
+      : `sent ${attackers.length} attackers to raid ${resource.type} deposit ${target.x},${target.y}`
+  };
+}
+
 function findBuildingAttackPosition(state: GameState, unit: Unit, building: Building): Position {
-  return findBuildingInteractionPosition(state, unit, building, unit.range);
+  return findTargetInteractionPosition(state, unit, building, unit.range);
 }
 
 function findBuildingRepairPosition(state: GameState, unit: Unit, building: Building): Position {
-  return findBuildingInteractionPosition(state, unit, building, REPAIR_RANGE);
+  return findTargetInteractionPosition(state, unit, building, REPAIR_RANGE);
 }
 
-function findBuildingInteractionPosition(state: GameState, unit: Unit, building: Building, interactionRange: number): Position {
-  if (distance(unit, building) <= interactionRange) return { x: Math.round(unit.x), y: Math.round(unit.y) };
+function findResourceAttackPosition(state: GameState, unit: Unit, target: Position): Position {
+  return findTargetInteractionPosition(state, unit, target, unit.range);
+}
+
+function findTargetInteractionPosition(state: GameState, unit: Unit, target: Position, interactionRange: number): Position {
+  if (distance(unit, target) <= interactionRange) return { x: Math.round(unit.x), y: Math.round(unit.y) };
   const radius = Math.max(1, Math.ceil(interactionRange));
   let best: { position: Position; pathLength: number; distance: number } | undefined;
-  for (let y = building.y - radius; y <= building.y + radius; y += 1) {
-    for (let x = building.x - radius; x <= building.x + radius; x += 1) {
+  for (let y = target.y - radius; y <= target.y + radius; y += 1) {
+    for (let x = target.x - radius; x <= target.x + radius; x += 1) {
       const position = { x, y };
-      if (distance(position, building) > interactionRange) continue;
+      if (distance(position, target) > interactionRange) continue;
       if (!isWalkableForTribe(state, x, y, unit.tribeId)) continue;
       const path = findPath(state, unit, position);
       const alreadyThere = Math.round(unit.x) === x && Math.round(unit.y) === y;
@@ -933,7 +1000,7 @@ function findBuildingInteractionPosition(state: GameState, unit: Unit, building:
       if (!best || candidate.pathLength < best.pathLength || (candidate.pathLength === best.pathLength && candidate.distance < best.distance)) best = candidate;
     }
   }
-  return best?.position ?? findNearestWalkable(state, building, unit.tribeId) ?? { x: building.x, y: building.y };
+  return best?.position ?? findNearestWalkable(state, target, unit.tribeId) ?? { x: target.x, y: target.y };
 }
 
 function issueRepairOrder(
@@ -1274,6 +1341,24 @@ export function damageBuilding(
   return { ok: true, destroyed };
 }
 
+export function damageResourceDeposit(
+  state: GameState,
+  target: Position,
+  amount: number,
+  attackerTribeId?: TribeId
+): { ok: true; destroyed: boolean; resourceType: ResourceType } | { ok: false; reason: string } {
+  const roundedTarget = { x: Math.round(target.x), y: Math.round(target.y) };
+  if (roundedTarget.x < 0 || roundedTarget.y < 0 || roundedTarget.x >= MAP_SIZE || roundedTarget.y >= MAP_SIZE) {
+    return { ok: false, reason: "target resource tile is out of bounds" };
+  }
+  const tile = state.map[tileIndex(roundedTarget.x, roundedTarget.y)];
+  const resource = tile.resource;
+  if (!resource || resource.hp <= 0 || resource.amount <= 0) return { ok: false, reason: "missing resource deposit" };
+  const resourceType = resource.type;
+  const destroyed = applyResourceDamage(state, roundedTarget, amount, attackerTribeId);
+  return { ok: true, destroyed, resourceType };
+}
+
 export function getUnitCombatStats(unit: Unit): CombatStats {
   return {
     hp: unit.hp,
@@ -1293,6 +1378,17 @@ export function getBuildingCombatStats(building: Building): CombatStats {
     attack: building.attack,
     range: building.range,
     attackCooldown: building.attackCooldown
+  };
+}
+
+export function getResourceDepositCombatStats(resource: ResourceDeposit): CombatStats {
+  return {
+    hp: resource.hp,
+    maxHp: resource.maxHp,
+    armor: resource.armor,
+    attack: resource.attack,
+    range: resource.range,
+    attackCooldown: resource.attackCooldown
   };
 }
 
@@ -1584,7 +1680,7 @@ function summarizeVisibleResourceIntel(state: GameState, tribeId: TribeId, lower
       const index = tileIndex(x, y);
       if (visible[index] !== 2) continue;
       const tile = state.map[index];
-      if (tile.resource?.amount && wanted.includes(tile.resource.type)) {
+      if (tile.resource?.amount && tile.resource.hp > 0 && wanted.includes(tile.resource.type)) {
         deposits.push({ type: tile.resource.type, x, y, amount: Math.round(tile.resource.amount), distance: distance(base, { x, y }) });
       }
     }
@@ -1862,6 +1958,10 @@ function labelBuildingType(type: BuildingType): string {
   return type.replace(/[A-Z]/g, (letter) => ` ${letter.toLowerCase()}`);
 }
 
+function labelResourceType(type: ResourceType): string {
+  return type.charAt(0).toUpperCase() + type.slice(1);
+}
+
 function formatGateAccessPolicy(policy: GateAccessPolicy): string {
   if (policy === "all") return "all tribes";
   if (policy === "owner_only") return "owner only";
@@ -1898,6 +1998,7 @@ function updateUnits(state: GameState): void {
         break;
       case "attack":
       case "attackBuilding":
+      case "attackResource":
         updateAttacker(state, unit);
         break;
       case "repair":
@@ -1975,6 +2076,9 @@ function updateGatherer(state: GameState, unit: Unit): void {
   targetTile.resource.amount = Math.max(0, targetTile.resource.amount - 1);
   targetTile.resource.hp = Math.max(0, targetTile.resource.hp - 1);
   task.cargo += 1;
+  if (targetTile.resource.amount <= 0 || targetTile.resource.hp <= 0) {
+    delete targetTile.resource;
+  }
 }
 
 function updateMessenger(state: GameState, unit: Unit, task: Extract<UnitTask, { kind: "deliver" }>): void {
@@ -2117,6 +2221,17 @@ function updateAttacker(state: GameState, unit: Unit): void {
     moveAlongPath(state, unit, unit.task.path);
     return;
   }
+  if (unit.task.kind === "attackResource") {
+    const targetTile = state.map[tileIndex(unit.task.target.x, unit.task.target.y)];
+    if (!targetTile.resource || targetTile.resource.type !== unit.task.resource || targetTile.resource.hp <= 0 || targetTile.resource.amount <= 0) {
+      unit.task = { kind: "idle" };
+      return;
+    }
+    if (distance(unit, unit.task.target) <= unit.range) return;
+    if (unit.task.path.length === 0) unit.task.path = findPath(state, unit, findResourceAttackPosition(state, unit, unit.task.target));
+    moveAlongPath(state, unit, unit.task.path);
+    return;
+  }
   if (unit.task.kind !== "attackBuilding") return;
   const target = state.buildings[unit.task.targetBuildingId];
   if (!target || target.hp <= 0 || target.tribeId === unit.tribeId) {
@@ -2180,6 +2295,21 @@ function updateCombat(state: GameState): void {
         distance(unit, assignedTarget) <= unit.range
       ) {
         applyBuildingDamage(state, assignedTarget, unit.attack, unit.tribeId);
+        unit.attackCooldown = Math.round(TICK_RATE * 1.2);
+        continue;
+      }
+    }
+    if (unit.task.kind === "attackResource") {
+      const targetTile = state.map[tileIndex(unit.task.target.x, unit.task.target.y)];
+      const assignedTarget = targetTile.resource;
+      if (
+        assignedTarget &&
+        assignedTarget.type === unit.task.resource &&
+        assignedTarget.hp > 0 &&
+        assignedTarget.amount > 0 &&
+        distance(unit, unit.task.target) <= unit.range
+      ) {
+        applyResourceDamage(state, unit.task.target, unit.attack, unit.tribeId);
         unit.attackCooldown = Math.round(TICK_RATE * 1.2);
         continue;
       }
@@ -2286,6 +2416,32 @@ function applyBuildingDamage(state: GameState, building: Building, amount: numbe
   );
   updateVisibility(state);
   return true;
+}
+
+function applyResourceDamage(state: GameState, target: Position, amount: number, attackerTribeId?: TribeId): boolean {
+  const tile = state.map[tileIndex(target.x, target.y)];
+  const resource = tile.resource;
+  if (!resource || resource.hp <= 0 || resource.amount <= 0) return false;
+  const damage = armoredDamage(amount, resource.armor);
+  resource.hp = Math.max(0, resource.hp - damage);
+  resource.amount = Math.max(0, resource.amount - damage);
+  if (resource.hp > 0 && resource.amount > 0) return false;
+  destroyResourceDepositAt(state, target, resource.type, attackerTribeId);
+  return true;
+}
+
+function destroyResourceDepositAt(state: GameState, target: Position, type: ResourceType, attackerTribeId?: TribeId): void {
+  const tile = state.map[tileIndex(target.x, target.y)];
+  if (type === "wood" && tile.terrain === "forest") tile.terrain = "grass";
+  delete tile.resource;
+  addEvent(
+    state,
+    "RESOURCE_DEPOSIT_DESTROYED",
+    `${labelResourceType(type)} deposit destroyed`,
+    `${labelResourceType(type)} deposit at ${target.x},${target.y} was destroyed${attackerTribeId ? ` by ${state.tribes[attackerTribeId].name}` : ""}.`,
+    "all"
+  );
+  updateVisibility(state);
 }
 
 function armoredDamage(amount: number, armor: number): number {

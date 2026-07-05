@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TICKS_PER_GAME_YEAR, TICK_RATE, advanceGame, advanceGameTicks, appendSovereignMemory, applyTribeIdentity, assignGathering, attachReplyToPacket, buildStructure, createGame, createResourceDeposit, damageBuilding, formAlliance, getBuildingCombatStats, getCurrentYear, getBuildingCost, getBuildingRepairCost, getTownHall, getUnitCombatStats, getVictoryPressure, getVisibleBuildings, getVisibleUnits, isTileWalkable, issueSovereignOrder, recordAiDecision, renameUnits, sendPlayerMessage, setAllControllers, setGateState, summarizeDiplomaticIntel, summarizeSovereignMemory, tileIndex, worldSignature } from "./index";
+import { TICKS_PER_GAME_YEAR, TICK_RATE, advanceGame, advanceGameTicks, appendSovereignMemory, applyTribeIdentity, assignGathering, attachReplyToPacket, buildStructure, createGame, createResourceDeposit, damageBuilding, damageResourceDeposit, formAlliance, getBuildingCombatStats, getCurrentYear, getBuildingCost, getBuildingRepairCost, getResourceDepositCombatStats, getTownHall, getUnitCombatStats, getVictoryPressure, getVisibleBuildings, getVisibleUnits, isTileWalkable, issueSovereignOrder, recordAiDecision, renameUnits, sendPlayerMessage, setAllControllers, setGateState, summarizeDiplomaticIntel, summarizeSovereignMemory, tileIndex, worldSignature } from "./index";
 
 describe("Sovereign Worlds vertical slice simulation", () => {
   it("is deterministic for the same seed and elapsed time", () => {
@@ -114,12 +114,13 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     const deposits = state.map.flatMap((tile) => (tile.resource ? [tile.resource] : []));
     expect(deposits.length).toBeGreaterThan(0);
     for (const deposit of deposits) {
-      expect(deposit.maxHp).toBeGreaterThan(0);
-      expect(deposit.hp).toBeGreaterThan(0);
-      expect(deposit.armor).toBeGreaterThanOrEqual(0);
-      expect(deposit.attack).toBe(0);
-      expect(deposit.range).toBe(0);
-      expect(deposit.attackCooldown).toBe(0);
+      const stats = getResourceDepositCombatStats(deposit);
+      expect(stats.maxHp).toBeGreaterThan(0);
+      expect(stats.hp).toBeGreaterThan(0);
+      expect(stats.armor).toBeGreaterThanOrEqual(0);
+      expect(stats.attack).toBe(0);
+      expect(stats.range).toBe(0);
+      expect(stats.attackCooldown).toBe(0);
     }
     const defensiveTypes = new Set(Object.values(state.buildings).filter((building) => building.tribeId === "blue").map((building) => building.type));
     expect(defensiveTypes.has("wall")).toBe(true);
@@ -1020,6 +1021,56 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     expect(isTileWalkable(state, 50, 50)).toBe(true);
     expect(state.events.some((event) => event.type === "WAR_SIEGE_ORDER" && event.body.includes("test_red_wall"))).toBe(true);
     expect(state.events.some((event) => event.type === "STRUCTURE_DESTROYED" && event.body.includes("50,50"))).toBe(true);
+  });
+
+  it("applies armor-reduced damage to resource deposits and removes destroyed deposits", () => {
+    const state = createGame(984);
+    state.map[tileIndex(20, 22)] = { terrain: "hill", resource: createResourceDeposit("coal", 3) };
+
+    const first = damageResourceDeposit(state, { x: 20, y: 22 }, 3, "blue");
+    expect(first.ok).toBe(true);
+    expect(first.ok && first.destroyed).toBe(false);
+    expect(state.map[tileIndex(20, 22)].resource?.hp).toBe(2);
+    expect(state.map[tileIndex(20, 22)].resource?.amount).toBe(2);
+
+    const second = damageResourceDeposit(state, { x: 20, y: 22 }, 20, "blue");
+    expect(second.ok).toBe(true);
+    expect(second.ok && second.destroyed).toBe(true);
+    expect(state.map[tileIndex(20, 22)].resource).toBeUndefined();
+    expect(state.events.some((event) => event.type === "RESOURCE_DEPOSIT_DESTROYED" && event.body.includes("20,22"))).toBe(true);
+  });
+
+  it("lets an AI attack order raid and destroy a visible resource deposit by coordinate", () => {
+    const state = createGame(985);
+    setAllControllers(state, "human");
+    const target = { x: 21, y: 20 };
+    state.map[tileIndex(target.x, target.y)] = { terrain: "hill", resource: createResourceDeposit("iron", 6) };
+    const attackers = Object.values(state.units).filter((unit) => unit.tribeId === "blue" && unit.type === "militia");
+    expect(attackers.length).toBeGreaterThan(0);
+    for (const [index, attacker] of attackers.entries()) {
+      attacker.x = 20;
+      attacker.y = 20 + index;
+      attacker.task = { kind: "idle" };
+    }
+    advanceGameTicks(state, 5);
+
+    const attack = issueSovereignOrder(state, "blue", {
+      type: "ATTACK",
+      priority: 1,
+      targetX: target.x,
+      targetY: target.y,
+      targetResourceType: "iron",
+      reason: "Deny the visible iron deposit before rivals can use it."
+    });
+
+    expect(attack.ok).toBe(true);
+    expect(attack.ok && attack.summary).toContain("iron deposit 21,20");
+    expect(attackers.some((unit) => unit.task.kind === "attackResource" && unit.task.resource === "iron")).toBe(true);
+    advanceGameTicks(state, 30);
+
+    expect(state.map[tileIndex(target.x, target.y)].resource).toBeUndefined();
+    expect(state.events.some((event) => event.type === "RESOURCE_RAID_ORDER" && event.body.includes("21,20"))).toBe(true);
+    expect(state.events.some((event) => event.type === "RESOURCE_DEPOSIT_DESTROYED" && event.body.includes("21,20"))).toBe(true);
   });
 
   it("rejects invalid explicit siege targets", () => {

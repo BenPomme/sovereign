@@ -13,6 +13,7 @@ import {
   chooseDevelopment,
   computeWealth,
   createGame,
+  createResourceDeposit,
   damageBuilding,
   getBuildingCost,
   getBuildingRepairCost,
@@ -184,6 +185,18 @@ declare global {
       destroyed?: boolean;
       beforeHp?: number;
       afterHp?: number | null;
+      attackerTasks?: string[];
+      recentEvents?: string[];
+      reason?: string;
+    };
+    force_resource_raid_for_test?: () => {
+      ok: boolean;
+      target?: { x: number; y: number; type: ResourceType };
+      beforeHp?: number;
+      beforeAmount?: number;
+      afterHp?: number | null;
+      afterAmount?: number | null;
+      destroyed?: boolean;
       attackerTasks?: string[];
       recentEvents?: string[];
       reason?: string;
@@ -898,6 +911,7 @@ function installTestHooks(): void {
   window.force_gate_state_for_test = forceGateStateForTest;
   window.force_damage_building_for_test = forceDamageBuildingForTest;
   window.force_siege_for_test = forceSiegeForTest;
+  window.force_resource_raid_for_test = forceResourceRaidForTest;
   window.force_repair_for_test = forceRepairForTest;
   window.force_visual_motion_for_test = forceVisualMotionForTest;
 }
@@ -2125,6 +2139,72 @@ function forceSiegeForTest(): {
   };
 }
 
+function forceResourceRaidForTest(): {
+  ok: boolean;
+  target?: { x: number; y: number; type: ResourceType };
+  beforeHp?: number;
+  beforeAmount?: number;
+  afterHp?: number | null;
+  afterAmount?: number | null;
+  destroyed?: boolean;
+  attackerTasks?: string[];
+  recentEvents?: string[];
+  reason?: string;
+} {
+  const target = { x: 49, y: 52 };
+  const targetIndex = tileIndex(target.x, target.y);
+  state.map[targetIndex] = { terrain: "hill", resource: createResourceDeposit("iron", 6) };
+  const resource = state.map[targetIndex].resource;
+  if (!resource) return { ok: false, target: { ...target, type: "iron" }, reason: "test resource was not created" };
+  for (const pos of [
+    target,
+    { x: 48, y: 52 },
+    { x: 48, y: 53 },
+    { x: 49, y: 53 }
+  ]) {
+    if (pos.x === target.x && pos.y === target.y) continue;
+    state.map[tileIndex(pos.x, pos.y)].terrain = "grass";
+    delete state.map[tileIndex(pos.x, pos.y)].resource;
+  }
+  const attackers = Object.values(state.units).filter((unit) => unit.tribeId === playerTribe && unit.type === "militia" && unit.hp > 0);
+  if (attackers.length === 0) return { ok: false, target: { ...target, type: "iron" }, reason: "no blue militia available" };
+  for (const [index, attacker] of attackers.entries()) {
+    attacker.x = 48;
+    attacker.y = 52 + index;
+    attacker.task = { kind: "idle" };
+  }
+  advanceSimulationTicks(5, { scheduleAi: false, render: false, visual: false });
+  const beforeHp = Math.ceil(resource.hp);
+  const beforeAmount = Math.round(resource.amount);
+  const result = issueSovereignOrder(state, playerTribe, {
+    type: "ATTACK",
+    priority: 1,
+    targetX: target.x,
+    targetY: target.y,
+    targetResourceType: "iron",
+    reason: "Browser smoke resource raid test: destroy a visible iron deposit."
+  });
+  if (!result.ok) {
+    render();
+    return { ok: false, target: { ...target, type: "iron" }, beforeHp, beforeAmount, reason: result.reason };
+  }
+  const attackerTasks = attackers.map((unit) => describeUnitTask(state, unit));
+  advanceSimulationTicks(80, { scheduleAi: false, render: false });
+  render({ forceHud: true, forceLabels: true, forceFog: true });
+  const remaining = state.map[targetIndex].resource;
+  return {
+    ok: !remaining,
+    target: { ...target, type: "iron" },
+    beforeHp,
+    beforeAmount,
+    afterHp: remaining ? Math.ceil(remaining.hp) : null,
+    afterAmount: remaining ? Math.round(remaining.amount) : null,
+    destroyed: !remaining,
+    attackerTasks,
+    recentEvents: state.events.slice(-8).map((event) => `${event.type}:${event.body}`)
+  };
+}
+
 function forceRepairForTest(): {
   ok: boolean;
   targetBuildingId?: string;
@@ -2298,14 +2378,14 @@ function collectResourceTiles(
     for (let x = 0; x < MAP_SIZE; x += 1) {
       const tile = game.map[tileIndex(x, y)];
       if (type === "wood") {
-        if (tile.resource?.type === "wood" && tile.resource.amount > 0) {
+        if (tile.resource?.type === "wood" && tile.resource.amount > 0 && tile.resource.hp > 0) {
           tiles.push({ x, y, ...tile.resource });
         } else if (tile.terrain === "forest") {
           tiles.push({ x, y, amount: 1, hp: 1, maxHp: 1, armor: 0, attack: 0, range: 0, attackCooldown: 0 });
         }
         continue;
       }
-      if (tile.resource?.type === type && tile.resource.amount > 0) {
+      if (tile.resource?.type === type && tile.resource.amount > 0 && tile.resource.hp > 0) {
         tiles.push({ x, y, ...tile.resource });
       }
     }
@@ -6049,6 +6129,10 @@ function describeUnitTask(game: GameState, unit: Unit): string {
   if (task.kind === "attack") {
     const target = game.units[task.targetUnitId];
     return target ? `Attacking ${target.name} of ${game.tribes[target.tribeId].name}` : "Attacking missing target";
+  }
+  if (task.kind === "attackResource") {
+    const resource = game.map[tileIndex(task.target.x, task.target.y)].resource;
+    return resource ? `Raiding ${resource.type} deposit at ${formatPosition(task.target)}` : `Raiding depleted ${task.resource} deposit at ${formatPosition(task.target)}`;
   }
   if (task.kind === "repair") {
     const building = game.buildings[task.targetBuildingId];

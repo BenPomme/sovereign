@@ -128,6 +128,7 @@ for (const type of ["farm", "watchtower", "wall", "gate", "turret"]) {
   }
 }
 const siegeState = await assertExplicitSiegeOrder(page);
+const resourceRaidState = await assertResourceRaidOrder(page);
 const damageState = await assertDamageVisualization(page);
 const repairState = await assertRepairOrder(page);
 
@@ -151,6 +152,7 @@ console.log(
       screenshotBytes: screenshot.size,
       buildingState,
       siegeState,
+      resourceRaidState,
       damageState,
       repairState
     },
@@ -299,6 +301,26 @@ async function assertExplicitSiegeOrder(page) {
   }
   if (!state.recentEvents?.some((event) => event.includes("STRUCTURE_DESTROYED") && event.includes("50,50"))) {
     throw new Error(`Explicit siege order did not emit destruction evidence: ${JSON.stringify(state)}`);
+  }
+  return state;
+}
+
+async function assertResourceRaidOrder(page) {
+  const state = await page.evaluate(() => {
+    if (typeof window.force_resource_raid_for_test !== "function") return { ok: false, reason: "missing resource raid hook" };
+    return window.force_resource_raid_for_test();
+  });
+  if (!state.ok || state.destroyed !== true || state.afterHp !== null || state.afterAmount !== null) {
+    throw new Error(`Resource raid order did not destroy the target deposit: ${JSON.stringify(state)}`);
+  }
+  if (!state.attackerTasks?.some((task) => task.includes("Raiding iron deposit"))) {
+    throw new Error(`Resource raid order did not expose attack-resource task text: ${JSON.stringify(state)}`);
+  }
+  if (!state.recentEvents?.some((event) => event.includes("RESOURCE_RAID_ORDER") && event.includes("iron"))) {
+    throw new Error(`Resource raid order did not emit raid-order evidence: ${JSON.stringify(state)}`);
+  }
+  if (!state.recentEvents?.some((event) => event.includes("RESOURCE_DEPOSIT_DESTROYED") && event.includes("49,52"))) {
+    throw new Error(`Resource raid order did not emit deposit destruction evidence: ${JSON.stringify(state)}`);
   }
   return state;
 }
