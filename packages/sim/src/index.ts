@@ -70,6 +70,7 @@ export type AiOrderType =
   | "SCOUT"
   | "DEFEND"
   | "ATTACK"
+  | "REPAIR"
   | "SET_GATE"
   | "PROPOSE_ALLIANCE"
   | "SET_POLICY"
@@ -232,7 +233,8 @@ export type UnitTask =
       waitUntilTick?: number;
     }
   | { kind: "attack"; targetUnitId: string; path: Position[] }
-  | { kind: "attackBuilding"; targetBuildingId: string; path: Position[] };
+  | { kind: "attackBuilding"; targetBuildingId: string; path: Position[] }
+  | { kind: "repair"; targetBuildingId: string; path: Position[] };
 
 export type Unit = {
   id: string;
@@ -482,6 +484,9 @@ const unitStats: Record<UnitType, Pick<Unit, "hp" | "maxHp" | "armor" | "speed" 
   archer: { hp: 40, maxHp: 40, armor: 1, speed: 1.0, visionRadius: 6, attack: 5, range: 4.4 }
 };
 
+const REPAIR_RANGE = 1.2;
+const REPAIR_HP_PER_TICK = 5;
+
 export const resourceTypes: readonly ResourceType[] = ["gold", "food", "wood", "stone", "clay", "limestone", "iron", "coal"] as const;
 export const developmentIds: readonly DevelopmentId[] = [
   "masonry",
@@ -549,6 +554,17 @@ const buildingCosts: Record<BuildableBuildingType, ResourceCost> = {
   wall: { wood: 20, stone: 30, clay: 25, limestone: 15 },
   gate: { wood: 35, stone: 45, clay: 20, limestone: 25, iron: 20 },
   turret: { wood: 90, stone: 100, limestone: 35, iron: 45, coal: 30, gold: 60 }
+};
+
+const buildingRepairCosts: Record<BuildingType, ResourceCost> = {
+  townHall: { wood: 30, stone: 25, clay: 10 },
+  farm: { wood: 10 },
+  barracks: { wood: 18, stone: 12 },
+  market: { wood: 15, stone: 10, gold: 5 },
+  watchtower: { wood: 20, stone: 20, limestone: 8 },
+  wall: { stone: 12, clay: 8, limestone: 5 },
+  gate: { wood: 12, stone: 16, limestone: 8, iron: 5 },
+  turret: { stone: 25, limestone: 10, iron: 12, coal: 5 }
 };
 
 const buildingDevelopmentRequirements: Record<BuildableBuildingType, DevelopmentId[]> = {
@@ -773,6 +789,8 @@ export function issueSovereignOrder(
     }
     case "ATTACK":
       return issueAttackOrder(state, tribeId, order.recipientTribeId, order.reason, order.targetBuildingId ?? order.buildingId);
+    case "REPAIR":
+      return issueRepairOrder(state, tribeId, order.targetBuildingId ?? order.buildingId);
     case "REPORT_BUG": {
       const title = clampText(order.subject ?? "AI self-report", 80);
       const body = clampText(order.body || order.reason, 260);
@@ -885,13 +903,21 @@ function issueAttackOrder(
 }
 
 function findBuildingAttackPosition(state: GameState, unit: Unit, building: Building): Position {
-  if (distance(unit, building) <= unit.range) return { x: Math.round(unit.x), y: Math.round(unit.y) };
-  const radius = Math.max(1, Math.ceil(unit.range));
+  return findBuildingInteractionPosition(state, unit, building, unit.range);
+}
+
+function findBuildingRepairPosition(state: GameState, unit: Unit, building: Building): Position {
+  return findBuildingInteractionPosition(state, unit, building, REPAIR_RANGE);
+}
+
+function findBuildingInteractionPosition(state: GameState, unit: Unit, building: Building, interactionRange: number): Position {
+  if (distance(unit, building) <= interactionRange) return { x: Math.round(unit.x), y: Math.round(unit.y) };
+  const radius = Math.max(1, Math.ceil(interactionRange));
   let best: { position: Position; pathLength: number; distance: number } | undefined;
   for (let y = building.y - radius; y <= building.y + radius; y += 1) {
     for (let x = building.x - radius; x <= building.x + radius; x += 1) {
       const position = { x, y };
-      if (distance(position, building) > unit.range) continue;
+      if (distance(position, building) > interactionRange) continue;
       if (!isWalkableForTribe(state, x, y, unit.tribeId)) continue;
       const path = findPath(state, unit, position);
       const alreadyThere = Math.round(unit.x) === x && Math.round(unit.y) === y;
@@ -901,6 +927,38 @@ function findBuildingAttackPosition(state: GameState, unit: Unit, building: Buil
     }
   }
   return best?.position ?? findNearestWalkable(state, building, unit.tribeId) ?? { x: building.x, y: building.y };
+}
+
+function issueRepairOrder(
+  state: GameState,
+  tribeId: TribeId,
+  targetBuildingId?: string
+): { ok: true; summary: string } | { ok: false; reason: string } {
+  if (!targetBuildingId) return { ok: false, reason: "missing repair target building id" };
+  const building = state.buildings[targetBuildingId];
+  if (!building || building.hp <= 0) return { ok: false, reason: "repair target is missing or destroyed" };
+  if (building.tribeId !== tribeId) return { ok: false, reason: "cannot repair another tribe's building" };
+  if (building.hp >= building.maxHp) return { ok: false, reason: "building is already fully repaired" };
+  const peons = Object.values(state.units)
+    .filter((unit) => unit.tribeId === tribeId && unit.hp > 0 && unit.type === "peon" && unit.task.kind === "idle")
+    .sort((left, right) => distance(left, building) - distance(right, building))
+    .slice(0, 2);
+  if (peons.length === 0) return { ok: false, reason: "no idle peon available for repair" };
+  const cost = getBuildingRepairCost(building);
+  if (!canAfford(state.tribes[tribeId].resources, cost)) return { ok: false, reason: `Not enough resources to repair ${building.type}. Need ${formatResourceCost(cost)}.` };
+  spendResources(state.tribes[tribeId].resources, cost);
+  for (const peon of peons) {
+    const repairPosition = findBuildingRepairPosition(state, peon, building);
+    peon.task = { kind: "repair", targetBuildingId: building.id, path: findPath(state, peon, repairPosition) };
+  }
+  addEvent(
+    state,
+    "AI_REPAIR_ORDER",
+    `${state.tribes[tribeId].name} repairs ${labelBuildingType(building.type)}`,
+    `${peons.length} peon${peons.length === 1 ? "" : "s"} repair ${building.id} at ${building.x},${building.y}. Cost: ${formatResourceCost(cost)}.`,
+    "all"
+  );
+  return { ok: true, summary: `sent ${peons.length} peon${peons.length === 1 ? "" : "s"} to repair ${building.type} ${building.id}` };
 }
 
 function declareWar(state: GameState, attacker: TribeId, defender: TribeId, reason: string): void {
@@ -1077,6 +1135,16 @@ export function getBuildingCost(buildingType: BuildableBuildingType): ResourceCo
   return { ...buildingCosts[buildingType] };
 }
 
+export function getBuildingRepairCost(buildingOrType: Pick<Building, "type" | "hp" | "maxHp"> | BuildingType): ResourceCost {
+  const type = typeof buildingOrType === "string" ? buildingOrType : buildingOrType.type;
+  const base = buildingRepairCosts[type];
+  if (typeof buildingOrType === "string") return { ...base };
+  const missingHp = Math.max(0, buildingOrType.maxHp - buildingOrType.hp);
+  if (missingHp <= 0 || buildingOrType.maxHp <= 0) return {};
+  const scale = Math.max(0.05, Math.min(1, missingHp / buildingOrType.maxHp));
+  return scaleResourceCost(base, scale);
+}
+
 export function getDevelopment(developmentId: DevelopmentId): Development {
   const development = developmentCatalog[developmentId];
   return {
@@ -1205,6 +1273,15 @@ function canAfford(resources: Resources, cost: ResourceCost): boolean {
 
 function spendResources(resources: Resources, cost: ResourceCost): void {
   for (const type of resourceTypes) resources[type] -= cost[type] ?? 0;
+}
+
+function scaleResourceCost(cost: ResourceCost, scale: number): ResourceCost {
+  const scaled: ResourceCost = {};
+  for (const type of resourceTypes) {
+    const amount = cost[type] ?? 0;
+    if (amount > 0) scaled[type] = Math.max(1, Math.ceil(amount * scale));
+  }
+  return scaled;
 }
 
 function formatResourceCost(cost: ResourceCost): string {
@@ -1772,6 +1849,9 @@ function updateUnits(state: GameState): void {
       case "attackBuilding":
         updateAttacker(state, unit);
         break;
+      case "repair":
+        updateRepairer(state, unit);
+        break;
     }
   }
 }
@@ -1993,6 +2073,43 @@ function updateAttacker(state: GameState, unit: Unit): void {
   if (distance(unit, target) <= unit.range) return;
   if (unit.task.path.length === 0) unit.task.path = findPath(state, unit, findBuildingAttackPosition(state, unit, target));
   moveAlongPath(state, unit, unit.task.path);
+}
+
+function updateRepairer(state: GameState, unit: Unit): void {
+  if (unit.task.kind !== "repair") return;
+  const building = state.buildings[unit.task.targetBuildingId];
+  if (!building || building.hp <= 0 || building.tribeId !== unit.tribeId) {
+    unit.task = { kind: "idle" };
+    return;
+  }
+  if (building.hp >= building.maxHp) {
+    unit.task = { kind: "idle" };
+    return;
+  }
+  if (distance(unit, building) > REPAIR_RANGE) {
+    if (unit.task.path.length === 0) unit.task.path = findPath(state, unit, findBuildingRepairPosition(state, unit, building));
+    moveAlongPath(state, unit, unit.task.path);
+    if (unit.task.path.length === 0 && distance(unit, building) > REPAIR_RANGE) {
+      const refreshed = findPath(state, unit, findBuildingRepairPosition(state, unit, building));
+      if (!pathArrives(refreshed, findBuildingRepairPosition(state, unit, building))) {
+        unit.task = { kind: "idle" };
+        return;
+      }
+      unit.task.path = refreshed;
+    }
+    return;
+  }
+  building.hp = Math.min(building.maxHp, building.hp + REPAIR_HP_PER_TICK);
+  if (building.hp < building.maxHp) return;
+  addEvent(
+    state,
+    "STRUCTURE_REPAIRED",
+    `${state.tribes[unit.tribeId].name} repairs ${labelBuildingType(building.type)}`,
+    `${building.id} at ${building.x},${building.y} is back to full strength.`,
+    "all"
+  );
+  unit.task = { kind: "idle" };
+  updateVisibility(state);
 }
 
 function updateCombat(state: GameState): void {

@@ -84,13 +84,16 @@ http://localhost:5173/
   - assign selected peons to gather food, wood, stone, clay, limestone, iron, coal, or gold
   - send a physical peace offer or warning by messenger
 - Baseline simulation AI for gathering, scouting, and training.
-- LLM sovereign layer for messenger diplomacy, recruiting, building, scouting,
-  defense, negotiated alliances, attack/war declarations, and policy orders.
+- LLM sovereign layer for messenger diplomacy, recruiting, building, repairing,
+  scouting, defense, negotiated alliances, attack/war declarations, and policy
+  orders.
 - Defensive construction:
   - walls block movement until destroyed
+  - gates are buildable, can be open/closed/locked, and open gates follow access policies
   - walls are drawn as high-contrast segmented barrier tiles and selected/new walls get a bright construction pulse, centered camera, selected-panel confirmation, and recent-construction labels so rapid builds remain visible
   - optional defense overlay outlines wall tiles and shows turret range
   - hostile units can damage and destroy structures in range
+  - damaged owned buildings can be repaired by idle peons through `REPAIR` orders with scaled repair costs
   - turrets fire on hostile units near the kingdom
   - farms, watchtowers, walls, and turrets use shared construction-cost rules tied to wood, stone, clay, limestone, iron, coal, and gold
   - starting iron and coal are below turret cost so scarce deposits matter for early defensive escalation
@@ -198,7 +201,7 @@ sample.
 `pnpm smoke` loads the running dev server with Playwright and uses deterministic
 Playwright Ollama route mocks for identity setup, decision, and reply. It checks
 the observer HUD, diplomacy chat panel, tribe identity panel, legend, hover tooltip, browser QA hooks,
-farm/watchtower/wall/turret construction visibility, recent construction markers, construction-resource exposure, explicit `REPORT_BUG`
+farm/watchtower/wall/gate/turret construction visibility, recent construction markers, construction-resource exposure, explicit siege and repair orders, explicit `REPORT_BUG`
 self-report persistence, `REQUEST_INFO` answer generation and queue isolation, persisted AI report
 review summary, bucket currentness/proof, source/context fields, compact snapshot previews/links, severity/provider/model filters, source/context search, and triage controls, public Victory Pressure panel/hook state, AI bug-report
 endpoint, persisted post-game learning across reload, contested-resource hook state, map-layer controls, construction-cost legend, parser recovery coverage, LLM transport/parser bug categorization, and event log, and saves:

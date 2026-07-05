@@ -124,6 +124,7 @@ for (const type of ["farm", "watchtower", "wall", "gate", "turret"]) {
   }
 }
 const siegeState = await assertExplicitSiegeOrder(page);
+const repairState = await assertRepairOrder(page);
 
 await page.screenshot({ path: screenshotPath, fullPage: true });
 const screenshot = await stat(screenshotPath);
@@ -144,7 +145,8 @@ console.log(
       screenshotPath,
       screenshotBytes: screenshot.size,
       buildingState,
-      siegeState
+      siegeState,
+      repairState
     },
     null,
     2
@@ -275,6 +277,29 @@ async function assertExplicitSiegeOrder(page) {
   }
   if (!state.recentEvents?.some((event) => event.includes("STRUCTURE_DESTROYED") && event.includes("50,50"))) {
     throw new Error(`Explicit siege order did not emit destruction evidence: ${JSON.stringify(state)}`);
+  }
+  return state;
+}
+
+async function assertRepairOrder(page) {
+  const state = await page.evaluate(() => {
+    if (typeof window.force_repair_for_test !== "function") return { ok: false, reason: "missing repair hook" };
+    return window.force_repair_for_test();
+  });
+  if (!state.ok || typeof state.beforeHp !== "number" || typeof state.afterHp !== "number" || state.afterHp <= state.beforeHp) {
+    throw new Error(`Repair order did not increase owned structure health: ${JSON.stringify(state)}`);
+  }
+  if (!state.completed) {
+    throw new Error(`Repair order did not complete within smoke window: ${JSON.stringify(state)}`);
+  }
+  if (!state.repairerTasks?.some((task) => task.includes("Repairing"))) {
+    throw new Error(`Repair order did not expose repair task text: ${JSON.stringify(state)}`);
+  }
+  if (!state.recentEvents?.some((event) => event.includes("AI_REPAIR_ORDER"))) {
+    throw new Error(`Repair order did not emit repair-order evidence: ${JSON.stringify(state)}`);
+  }
+  if (!state.recentEvents?.some((event) => event.includes("STRUCTURE_REPAIRED"))) {
+    throw new Error(`Repair order did not emit repaired evidence: ${JSON.stringify(state)}`);
   }
   return state;
 }

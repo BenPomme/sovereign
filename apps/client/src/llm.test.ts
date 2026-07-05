@@ -1890,6 +1890,66 @@ describe("Ollama JSON recovery", () => {
     });
   });
 
+  it("preserves LLM-authored repair targets and exposes damaged owned building ids", async () => {
+    const game = createGame(20260706);
+    game.buildings.blue_test_wall = {
+      id: "blue_test_wall",
+      type: "wall",
+      tribeId: "blue",
+      x: 22,
+      y: 20,
+      hp: 160,
+      maxHp: 240,
+      armor: 6,
+      attack: 0,
+      range: 0,
+      attackCooldown: 0
+    };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        response: JSON.stringify({
+          freeformStrategy: "The eastern wall is damaged; repair it before I risk messengers or a new war.",
+          strategySummary: "Repair the damaged wall.",
+          memoryNote: "Blue wall blue_test_wall needs maintenance under threat.",
+          orders: [
+            {
+              type: "REPAIR",
+              priority: 1,
+              targetBuildingId: "blue_test_wall",
+              messageType: "LETTER",
+              diplomacyIntent: "NONE",
+              subject: "",
+              body: "",
+              reason: "Restore blue_test_wall before enemies exploit the breach."
+            }
+          ],
+          unitNames: [],
+          bugReport: "",
+          bugSeverity: "low"
+        })
+      })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("window", {
+      setTimeout: globalThis.setTimeout,
+      clearTimeout: globalThis.clearTimeout
+    });
+
+    const decision = await requestSovereignDecision(game, "blue", "qwen3.5:9b-mlx");
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+
+    expect(body.prompt).toContain("Own buildings:");
+    expect(body.prompt).toContain("blue_test_wall: wall at 22,20 hp 160/240 armor 6");
+    expect(body.prompt).toContain("REPAIR available");
+    expect(body.prompt).toContain("blue_test_wall:wall:hp160/240");
+    expect(body.format.properties.orders.items.properties.type.enum).toContain("REPAIR");
+    expect(decision.orders[0]).toMatchObject({
+      type: "REPAIR",
+      targetBuildingId: "blue_test_wall"
+    });
+  });
+
   it("uses the chat endpoint for gpt-oss and reads JSON from message content", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

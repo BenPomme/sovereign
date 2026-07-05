@@ -14,6 +14,7 @@ import {
   computeWealth,
   createGame,
   getBuildingCost,
+  getBuildingRepairCost,
   getBuildingRequirements,
   getDevelopment,
   getMissingBuildingDevelopments,
@@ -170,6 +171,16 @@ declare global {
       beforeHp?: number;
       afterHp?: number | null;
       attackerTasks?: string[];
+      recentEvents?: string[];
+      reason?: string;
+    };
+    force_repair_for_test?: () => {
+      ok: boolean;
+      targetBuildingId?: string;
+      beforeHp?: number;
+      afterHp?: number | null;
+      completed?: boolean;
+      repairerTasks?: string[];
       recentEvents?: string[];
       reason?: string;
     };
@@ -853,6 +864,7 @@ function installTestHooks(): void {
   window.force_development_for_test = forceDevelopmentForTest;
   window.force_gate_state_for_test = forceGateStateForTest;
   window.force_siege_for_test = forceSiegeForTest;
+  window.force_repair_for_test = forceRepairForTest;
   window.force_visual_motion_for_test = forceVisualMotionForTest;
 }
 
@@ -1934,6 +1946,74 @@ function forceSiegeForTest(): {
     beforeHp: 2,
     afterHp: remaining?.hp ?? null,
     attackerTasks,
+    recentEvents: state.events.slice(-8).map((event) => `${event.type}:${event.body}`)
+  };
+}
+
+function forceRepairForTest(): {
+  ok: boolean;
+  targetBuildingId?: string;
+  beforeHp?: number;
+  afterHp?: number | null;
+  completed?: boolean;
+  repairerTasks?: string[];
+  recentEvents?: string[];
+  reason?: string;
+} {
+  const tribe = state.tribes[playerTribe];
+  for (const type of resourceTypes) tribe.resources[type] = Math.max(tribe.resources[type], 500);
+  if (!tribe.developments.includes("masonry")) tribe.developments.push("masonry");
+  let building = Object.values(state.buildings)
+    .filter((candidate) => candidate.tribeId === playerTribe && candidate.hp > 0 && (candidate.type === "wall" || candidate.type === "gate" || candidate.type === "turret"))
+    .sort((left, right) => left.id.localeCompare(right.id))[0];
+  if (!building) {
+    const built = buildStructure(state, playerTribe, "wall", getTownHall(state, playerTribe));
+    if (!built.ok) {
+      render();
+      return { ok: false, reason: built.reason };
+    }
+    building = state.buildings[built.buildingId];
+  }
+  building.hp = Math.max(1, building.maxHp - 80);
+  const repairCost = getBuildingRepairCost(building);
+  for (const type of resourceTypes) {
+    const needed = repairCost[type] ?? 0;
+    if (tribe.resources[type] < needed) tribe.resources[type] = needed;
+  }
+  const repairers = Object.values(state.units)
+    .filter((unit) => unit.tribeId === playerTribe && unit.type === "peon" && unit.hp > 0)
+    .slice(0, 2);
+  if (repairers.length === 0) {
+    render();
+    return { ok: false, targetBuildingId: building.id, reason: "no blue peon available" };
+  }
+  for (const [index, peon] of repairers.entries()) {
+    peon.x = building.x + 1;
+    peon.y = building.y + index;
+    peon.task = { kind: "idle" };
+  }
+  const beforeHp = Math.ceil(building.hp);
+  const result = issueSovereignOrder(state, playerTribe, {
+    type: "REPAIR",
+    priority: 1,
+    targetBuildingId: building.id,
+    reason: "Browser smoke repair test: restore a damaged owned structure."
+  });
+  if (!result.ok) {
+    render();
+    return { ok: false, targetBuildingId: building.id, beforeHp, reason: result.reason };
+  }
+  const repairerTasks = repairers.map((unit) => describeUnitTask(state, unit));
+  advanceSimulationTicks(80, { scheduleAi: false, render: false });
+  render({ forceHud: true, forceLabels: true, forceFog: true });
+  const repaired = state.buildings[building.id];
+  return {
+    ok: Boolean(repaired && repaired.hp > beforeHp),
+    targetBuildingId: building.id,
+    beforeHp,
+    afterHp: repaired ? Math.ceil(repaired.hp) : null,
+    completed: repaired ? repaired.hp >= repaired.maxHp : false,
+    repairerTasks,
     recentEvents: state.events.slice(-8).map((event) => `${event.type}:${event.body}`)
   };
 }
@@ -4305,6 +4385,7 @@ function selectedMarkup(game: GameState): string {
           : ""
       }
       ${isBuildableBuilding(building.type) ? `<div class="selected-row">Build cost: ${formatCost(getBuildingCost(building.type))}</div>` : ""}
+      ${building.hp < building.maxHp ? `<div class="selected-row">Repair cost: ${formatCost(getBuildingRepairCost(building))}</div>` : ""}
       <div class="selected-row">${buildingRole(building.type)}</div>
     `;
   }
@@ -5674,6 +5755,10 @@ function describeUnitTask(game: GameState, unit: Unit): string {
   if (task.kind === "attack") {
     const target = game.units[task.targetUnitId];
     return target ? `Attacking ${target.name} of ${game.tribes[target.tribeId].name}` : "Attacking missing target";
+  }
+  if (task.kind === "repair") {
+    const building = game.buildings[task.targetBuildingId];
+    return building ? `Repairing ${building.type} ${building.id}` : "Repairing missing building";
   }
   const building = game.buildings[task.targetBuildingId];
   return building

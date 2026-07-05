@@ -5,6 +5,7 @@ import {
   developmentCatalog,
   developmentIds,
   getBuildingCost,
+  getBuildingRepairCost,
   getBuildingRequirements,
   getDevelopment,
   getMissingBuildingDevelopments,
@@ -139,7 +140,7 @@ const decisionSchema = {
         properties: {
           type: {
             type: "string",
-            enum: ["SEND_MESSENGER", "RECRUIT", "BUILD", "DEVELOP", "SCOUT", "DEFEND", "ATTACK", "SET_GATE", "SET_POLICY", "REPORT_BUG", "REQUEST_INFO"]
+            enum: ["SEND_MESSENGER", "RECRUIT", "BUILD", "DEVELOP", "SCOUT", "DEFEND", "ATTACK", "REPAIR", "SET_GATE", "SET_POLICY", "REPORT_BUG", "REQUEST_INFO"]
           },
           priority: { type: "integer" },
           recipientTribeId: { type: "string", enum: tribeIds },
@@ -1030,6 +1031,7 @@ Naming rule: you may rename your own villagers and units through unitNames. Keep
 Alliance rule: alliances are formed only through chat. Send a SEND_MESSENGER order with messageType TREATY_PROPOSAL and diplomacyIntent ALLIANCE_OFFER if you want to ask for an alliance. If you already have an alliance, do not ask for another.
 War rule: ATTACK with recipientTribeId declares war, breaks any alliance with that target, and sends available military units. To intentionally breach a visible wall, gate, turret, or building, include its exact targetBuildingId from Visible foreign buildings. Use it when your doctrine calls for betrayal, preemption, conquest, retaliation, or opening a blocked route.
 Defense rule: walls block movement for everyone until destroyed, including your own people. Gates are the only intended passage through walls: open gates follow an access policy of all, owner_allies, or owner_only; closed or locked gates block everyone. Turrets shoot hostile units near your kingdom. Use them when they fit your doctrine and resources.
+Repair rule: damaged owned buildings can be repaired by idle peons. Use REPAIR with targetBuildingId or buildingId from Own buildings when a wall, gate, turret, or other structure is damaged and keeping it alive matters.
 Development rule: choose developments with DEVELOP before building locked fortifications. Masonry unlocks walls. Masonry plus Ironworking unlock gates and locks. Ironworking plus Ballistics unlock turrets. You may pick development paths for your own doctrine; this is a strategic choice, not a fixed build order.
 Survival pressure: exact rival wealth is hidden. You may ask another sovereign how wealthy or safe they are, but they may answer truthfully, refuse, exaggerate, or lie. Use scouting, messenger questions, trade offers, threats, raids, alliances, and deception to infer who may be vulnerable before each century review. Never treat review elimination as an acceptable loss for your own people.
 Information rule: use REQUEST_INFO when you need strategic information, map intelligence, economic data, enemy intent, or world-state context that is not currently visible. This is a request for future intelligence, not a bug.
@@ -1073,11 +1075,12 @@ Legal order types:
 - SCOUT
 - DEFEND
 - ATTACK with recipientTribeId, and optional targetBuildingId for a visible hostile wall, gate, turret, or building
+- REPAIR with targetBuildingId or buildingId for a damaged owned building
 - SET_POLICY
 - REPORT_BUG with subject, body, reason, suspectedArea, expectedBehavior, actualBehavior, reproductionSteps, strategyImpact, bugSeverity
 - REQUEST_INFO with subject, body, and reason
 
-Return JSON only with freeformStrategy, strategySummary, memoryNote, orders, unitNames, bugReport, and bugSeverity. Keep memoryNote under 220 characters. Keep message bodies specific and under 500 characters. Use at most two orders. For SEND_MESSENGER, subject/body/messageType/diplomacyIntent must be meaningful and non-empty. For DEVELOP, set developmentId to the chosen development. For BUILD, set buildingType and include targetX/targetY when you want the structure near a specific tile. For SET_GATE, set gateState and optionally buildingId and gateAccessPolicy. For ATTACK, set recipientTribeId and optionally targetBuildingId if you want soldiers to breach a specific visible fortification. For REPORT_BUG, use subject as the issue title, body as the specific problem, expectedBehavior/actualBehavior for the mismatch, reproductionSteps for how to observe it again, suspectedArea for the likely system, and strategyImpact for why it blocks sovereign planning. For REQUEST_INFO, use subject as the question title and body as the precise information wanted. For other non-message orders, subject and body can be empty strings.
+Return JSON only with freeformStrategy, strategySummary, memoryNote, orders, unitNames, bugReport, and bugSeverity. Keep memoryNote under 220 characters. Keep message bodies specific and under 500 characters. Use at most two orders. For SEND_MESSENGER, subject/body/messageType/diplomacyIntent must be meaningful and non-empty. For DEVELOP, set developmentId to the chosen development. For BUILD, set buildingType and include targetX and targetY when you want the structure near a specific tile. For SET_GATE, set gateState and optionally buildingId and gateAccessPolicy. For ATTACK, set recipientTribeId and optionally targetBuildingId if you want soldiers to breach a specific visible fortification. For REPAIR, set targetBuildingId or buildingId to the exact damaged owned building id. For REPORT_BUG, use subject as the issue title, body as the specific problem, expectedBehavior/actualBehavior for the mismatch, reproductionSteps for how to observe it again, suspectedArea for the likely system, and strategyImpact for why it blocks sovereign planning. For REQUEST_INFO, use subject as the question title and body as the precise information wanted. For other non-message orders, subject and body can be empty strings.
 `;
 }
 
@@ -1123,7 +1126,7 @@ Return fields:
 - freeformStrategy: 1-2 sentences of independent doctrine. You are not limited to algorithmic choices.
 - strategySummary: one short sentence.
 - memoryNote: one private note or empty string.
-- orders: up to two legal immediate orders. Use SET_POLICY if unsure. Use DEVELOP with developmentId for prerequisite choices. Use BUILD with buildingType and optional targetX/targetY for chosen placement. Use SET_GATE with gateState open/closed/locked and gateAccessPolicy all/owner_allies/owner_only for owned gates. Use ATTACK with targetBuildingId when breaching a visible wall/gate/building is the immediate executable step. For SEND_MESSENGER, write a real first-person message.
+- orders: up to two legal immediate orders. Use SET_POLICY if unsure. Use DEVELOP with developmentId for prerequisite choices. Use BUILD with buildingType and optional targetX/targetY for chosen placement. Use SET_GATE with gateState open/closed/locked and gateAccessPolicy all/owner_allies/owner_only for owned gates. Use ATTACK with targetBuildingId when breaching a visible wall/gate/building is the immediate executable step. Use REPAIR with targetBuildingId or buildingId when a damaged owned building must be saved. For SEND_MESSENGER, write a real first-person message.
 - unitNames: optional own unit renames, can be empty.
 - bugReport: empty unless world behavior is impossible or broken. If using a REPORT_BUG order, include subject, body, suspectedArea, expectedBehavior, actualBehavior, reproductionSteps, strategyImpact, and bugSeverity.
 - bugSeverity: low, medium, or high.
@@ -1255,13 +1258,13 @@ function summarizeUnitRoster(units: Pick<Unit, "id" | "name" | "type" | "hp" | "
     .join("\n");
 }
 
-function summarizeOwnBuildings(buildings: Pick<Building, "type" | "hp" | "armor" | "attack" | "range" | "x" | "y" | "gateState" | "gateAccessPolicy">[]): string {
+function summarizeOwnBuildings(buildings: Pick<Building, "id" | "type" | "hp" | "maxHp" | "armor" | "attack" | "range" | "x" | "y" | "gateState" | "gateAccessPolicy">[]): string {
   return (
     buildings
       .slice(0, 24)
       .map(
         (building) =>
-          `${building.type} at ${Math.round(building.x)},${Math.round(building.y)} hp ${Math.ceil(building.hp)} armor ${building.armor} attack ${building.attack}/range ${building.range}${
+          `${building.id}: ${building.type} at ${Math.round(building.x)},${Math.round(building.y)} hp ${Math.ceil(building.hp)}/${building.maxHp} armor ${building.armor} attack ${building.attack}/range ${building.range}${
             building.type === "gate" ? ` gate ${building.gateState ?? "open"} access ${building.gateAccessPolicy ?? "owner_allies"}` : ""
           }`
       )
@@ -1509,7 +1512,12 @@ function summarizeOrderAvailability(
   const wallCost = getBuildingCost("wall");
   const gateCost = getBuildingCost("gate");
   const turretCost = getBuildingCost("turret");
+  const idlePeons = ownUnits.filter((unit) => unit.type === "peon" && unit.task?.kind === "idle").length;
   const ownGates = Object.values(state.buildings).filter((building) => building.tribeId === tribeId && building.type === "gate" && building.hp > 0);
+  const damagedOwnBuildings = Object.values(state.buildings)
+    .filter((building) => building.tribeId === tribeId && building.hp > 0 && building.hp < building.maxHp)
+    .sort((left, right) => buildingAttackPriority(right.type) - buildingAttackPriority(left.type) || left.id.localeCompare(right.id))
+    .slice(0, 8);
   const visibleSiegeTargets = getVisibleBuildings(state, tribeId)
     .filter((building) => building.tribeId !== tribeId && building.hp > 0)
     .sort((left, right) => buildingAttackPriority(right.type) - buildingAttackPriority(left.type))
@@ -1546,6 +1554,15 @@ function summarizeOrderAvailability(
       ownGates.length > 0
         ? `available for ${ownGates.map((gate) => `${gate.id}:${gate.gateState ?? "open"}:${gate.gateAccessPolicy ?? "owner_allies"}`).join("/")}`
         : "unavailable: no owned gate"
+    }`,
+    `REPAIR ${
+      damagedOwnBuildings.length > 0 && idlePeons > 0
+        ? `available with ${idlePeons} idle peon${idlePeons === 1 ? "" : "s"} for ${damagedOwnBuildings
+            .map((building) => `${building.id}:${building.type}:hp${Math.ceil(building.hp)}/${building.maxHp}:cost ${formatCost(getBuildingRepairCost(building))}`)
+            .join("/")}`
+        : damagedOwnBuildings.length > 0
+          ? `unavailable: damaged owned buildings exist (${damagedOwnBuildings.map((building) => `${building.id}:${building.type}`).join("/")}) but no idle peon`
+          : "unavailable: no damaged owned building"
     }`,
     developmentAvailability,
     `ATTACK ${

@@ -2349,3 +2349,43 @@ Original prompt: ok continue with roadmap make sure the AIs can report bugs and 
   - add damaged wall/gate visuals and breach previews,
   - add gate diplomacy around safe-passage treaties, tolls, betrayal, sabotage, and ambushes,
   - improve PixiJS silhouettes and zoom-aware construction labels.
+
+### 2026-07-05 Repair Orders And Combat Stat Contract
+
+- Completed the first structure-repair slice:
+  - `REPAIR` is now a real sovereign order, not only a type placeholder,
+  - damaged owned buildings can be targeted by `targetBuildingId` or `buildingId`,
+  - idle peons path to an adjacent repair tile and restore building health up to `maxHp`,
+  - repair costs scale to missing health and draw from the same construction resources that define the building tree,
+  - destroyed buildings remain deleted and cannot be resurrected,
+  - foreign buildings and full-health buildings are rejected.
+- Preserved the combat-stat contract:
+  - current units and buildings all expose health, armor, attack, and range,
+  - walls remain destroyable through normal armor-reduced combat and stop blocking once destroyed,
+  - future targetable items, siege engines, or resource-processing installations should keep the same health/armor/attack/range contract.
+- Exposed repair to AIs and the observer UI:
+  - LLM schema accepts `REPAIR`,
+  - prompts now list owned building ids with health, armor, attack/range, and gate policy,
+  - order availability shows damaged owned repair targets and scaled repair cost,
+  - selected damaged buildings show repair cost,
+  - unit task text distinguishes `Repairing ...` from attacking.
+- Browser QA:
+  - added `window.force_repair_for_test()` to damage an owned wall/gate/turret-class structure, issue a real `REPAIR` order, advance ticks, and return before/after HP, task text, and events,
+  - `pnpm smoke:buildings` now verifies construction visibility, explicit siege destruction, and successful repair in the same live-browser run.
+- QA completed:
+  - `pnpm exec tsc --noEmit` passed,
+  - focused `pnpm exec vitest run packages/sim/src/sim.test.ts apps/client/src/llm.test.ts --reporter=dot` passed: 103 tests,
+  - full `pnpm test` passed: 107 tests,
+  - `pnpm build` passed,
+  - `pnpm smoke:buildings` passed with `AI_REPAIR_ORDER` and `STRUCTURE_REPAIRED` evidence,
+  - inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-buildings.png`; construction cluster, selected turret, resource labels, and overlays remained readable,
+  - `pnpm smoke:smooth` passed with measured FPS 26.5 and visible interpolation,
+  - `pnpm smoke:mock-ollama` passed with parser/transport/cooldown recovery and gpt-oss chat adapter coverage,
+  - `pnpm smoke:ai-fairness` passed with mixed qwen/gpt-oss assignments and zero fallback decisions,
+  - full `pnpm smoke` passed with board, diplomacy, report review, info request, wall/resource, gate, learning, persistence, and screenshot checks.
+- Remaining backlog:
+  - add siege engines, breach previews, and richer multi-unit assault doctrines,
+  - add visual damage states for walls/gates/turrets so damaged defenses read at a glance,
+  - add contested field-repair behavior under fire,
+  - expand gate diplomacy around safe-passage treaties, tolls, betrayal, sabotage, and ambushes,
+  - continue PixiJS visual production work with clearer fortification silhouettes and zoom-aware construction labels.

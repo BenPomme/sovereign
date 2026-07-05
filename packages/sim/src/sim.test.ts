@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TICKS_PER_GAME_YEAR, TICK_RATE, advanceGame, advanceGameTicks, appendSovereignMemory, applyTribeIdentity, assignGathering, attachReplyToPacket, buildStructure, createGame, damageBuilding, formAlliance, getCurrentYear, getBuildingCost, getTownHall, getVictoryPressure, getVisibleUnits, isTileWalkable, issueSovereignOrder, recordAiDecision, renameUnits, sendPlayerMessage, setAllControllers, setGateState, summarizeDiplomaticIntel, summarizeSovereignMemory, tileIndex, worldSignature } from "./index";
+import { TICKS_PER_GAME_YEAR, TICK_RATE, advanceGame, advanceGameTicks, appendSovereignMemory, applyTribeIdentity, assignGathering, attachReplyToPacket, buildStructure, createGame, damageBuilding, formAlliance, getCurrentYear, getBuildingCost, getBuildingRepairCost, getTownHall, getVictoryPressure, getVisibleUnits, isTileWalkable, issueSovereignOrder, recordAiDecision, renameUnits, sendPlayerMessage, setAllControllers, setGateState, summarizeDiplomaticIntel, summarizeSovereignMemory, tileIndex, worldSignature } from "./index";
 
 describe("Sovereign Worlds vertical slice simulation", () => {
   it("is deterministic for the same seed and elapsed time", () => {
@@ -457,6 +457,95 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     expect(state.buildings[wall.id]).toBeUndefined();
     expect(isTileWalkable(state, wall.x, wall.y)).toBe(true);
     expect(state.events.some((event) => event.type === "STRUCTURE_DESTROYED" && event.title.includes("wall"))).toBe(true);
+  });
+
+  it("lets a sovereign repair a damaged owned wall with idle peons", () => {
+    const state = createGame(937);
+    state.tribes.blue.resources = { gold: 500, food: 500, wood: 500, stone: 500, clay: 500, limestone: 500, iron: 500, coal: 500 };
+    expect(issueSovereignOrder(state, "blue", { type: "DEVELOP", priority: 1, developmentId: "masonry", reason: "Unlock wall repair test structure." }).ok).toBe(true);
+    const built = buildStructure(state, "blue", "wall", getTownHall(state, "blue"));
+    expect(built.ok).toBe(true);
+    if (!built.ok) throw new Error("Wall unexpectedly failed to build");
+    const wall = state.buildings[built.buildingId];
+    wall.hp = wall.maxHp - 40;
+    const beforeHp = wall.hp;
+    const cost = getBuildingRepairCost(wall);
+    const beforeResources = { ...state.tribes.blue.resources };
+    const repairers = Object.values(state.units).filter((unit) => unit.tribeId === "blue" && unit.type === "peon").slice(0, 2);
+    for (const [index, peon] of repairers.entries()) {
+      peon.x = wall.x + 1;
+      peon.y = wall.y + index;
+      peon.task = { kind: "idle" };
+    }
+
+    const repaired = issueSovereignOrder(state, "blue", {
+      type: "REPAIR",
+      priority: 1,
+      targetBuildingId: wall.id,
+      reason: "Restore the damaged wall before a breach."
+    });
+
+    expect(repaired.ok).toBe(true);
+    expect(state.tribes.blue.resources.stone).toBe(beforeResources.stone - (cost.stone ?? 0));
+    expect(state.tribes.blue.resources.clay).toBe(beforeResources.clay - (cost.clay ?? 0));
+    expect(state.tribes.blue.resources.limestone).toBe(beforeResources.limestone - (cost.limestone ?? 0));
+    expect(repairers.some((unit) => unit.task.kind === "repair" && unit.task.targetBuildingId === wall.id)).toBe(true);
+
+    advanceGameTicks(state, 30);
+
+    expect(state.buildings[wall.id].hp).toBe(wall.maxHp);
+    expect(state.buildings[wall.id].hp).toBeGreaterThan(beforeHp);
+    expect(repairers.every((unit) => unit.task.kind === "idle")).toBe(true);
+    expect(state.events.some((event) => event.type === "AI_REPAIR_ORDER" && event.body.includes(wall.id))).toBe(true);
+    expect(state.events.some((event) => event.type === "STRUCTURE_REPAIRED" && event.body.includes(wall.id))).toBe(true);
+  });
+
+  it("rejects repair orders for missing, foreign, destroyed, and full-health buildings", () => {
+    const state = createGame(938);
+    const ownTownHall = getTownHall(state, "blue");
+    const redTownHall = getTownHall(state, "red");
+
+    const missing = issueSovereignOrder(state, "blue", {
+      type: "REPAIR",
+      priority: 1,
+      targetBuildingId: "missing_building",
+      reason: "Repair a missing building."
+    });
+    expect(missing.ok).toBe(false);
+    if (missing.ok) throw new Error("Missing repair unexpectedly accepted");
+    expect(missing.reason).toContain("missing or destroyed");
+
+    const foreign = issueSovereignOrder(state, "blue", {
+      type: "REPAIR",
+      priority: 1,
+      targetBuildingId: redTownHall.id,
+      reason: "Repair an enemy building."
+    });
+    expect(foreign.ok).toBe(false);
+    if (foreign.ok) throw new Error("Foreign repair unexpectedly accepted");
+    expect(foreign.reason).toContain("another tribe");
+
+    ownTownHall.hp = 0;
+    const destroyed = issueSovereignOrder(state, "blue", {
+      type: "REPAIR",
+      priority: 1,
+      targetBuildingId: ownTownHall.id,
+      reason: "Resurrect a destroyed building."
+    });
+    expect(destroyed.ok).toBe(false);
+    if (destroyed.ok) throw new Error("Destroyed repair unexpectedly accepted");
+    expect(destroyed.reason).toContain("missing or destroyed");
+
+    redTownHall.hp = redTownHall.maxHp;
+    const full = issueSovereignOrder(state, "red", {
+      type: "REPAIR",
+      priority: 1,
+      targetBuildingId: redTownHall.id,
+      reason: "Repair a full-health building."
+    });
+    expect(full.ok).toBe(false);
+    if (full.ok) throw new Error("Full-health repair unexpectedly accepted");
+    expect(full.reason).toContain("fully repaired");
   });
 
   it("makes gates passable only while open and lockable by their owner", () => {
