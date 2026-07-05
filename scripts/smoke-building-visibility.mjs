@@ -57,8 +57,11 @@ await page.click("#buildGateButton");
 await page.waitForTimeout(250);
 await assertCreatedBuildingVisible(page, "gate");
 await assertCreatedBuildingPainted(page, "gate");
-await forceGateState(page, "locked");
-await assertSelectedGateState(page, "locked");
+await assertSelectedGatePolicy(page, "owner_allies", ["blue"]);
+await forceGateState(page, "open", "owner_only");
+await assertSelectedGatePolicy(page, "owner_only", ["blue"]);
+await forceGateState(page, "locked", "owner_only");
+await assertSelectedGateState(page, "locked", "owner_only");
 
 await forceDevelopment(page, "ballistics");
 await assertBuildingRequirementState(page, "turret", []);
@@ -82,6 +85,8 @@ const buildingState = await page.evaluate(() => {
       screenY: building.screenY,
       blocksMovement: building.blocksMovement,
       gateState: building.gateState,
+      gateAccessPolicy: building.gateAccessPolicy,
+      gatePassableBy: building.gatePassableBy,
       hp: building.hp,
       maxHp: building.maxHp,
       armor: building.armor,
@@ -174,7 +179,7 @@ async function assertCreatedBuildingVisible(page, type) {
   if (type === "wall" && !state.panel.includes("Blocks movement")) {
     throw new Error(`Created wall selected panel did not confirm blocking behavior: ${JSON.stringify(state)}`);
   }
-  if (type === "gate" && (!state.panel.includes("Gate: open") || !state.panel.includes("Open gates can be crossed"))) {
+  if (type === "gate" && (!state.panel.includes("Gate: open") || !state.panel.includes("Open gates follow their access policy"))) {
     throw new Error(`Created gate selected panel did not confirm open gate behavior: ${JSON.stringify(state)}`);
   }
   if (type === "turret" && !state.panel.includes("Fires on hostile units")) {
@@ -211,22 +216,40 @@ async function forceResourceBoost(page, resources) {
   if (!result.ok) throw new Error(`Resource boost hook failed: ${JSON.stringify(result)}`);
 }
 
-async function forceGateState(page, gateState) {
-  const result = await page.evaluate((state) => {
+async function forceGateState(page, gateState, accessPolicy) {
+  const result = await page.evaluate(({ state, policy }) => {
     if (typeof window.force_gate_state_for_test !== "function") return { ok: false, reason: "missing gate state hook" };
-    return window.force_gate_state_for_test("blue", state);
-  }, gateState);
+    return window.force_gate_state_for_test("blue", state, undefined, policy);
+  }, { state: gateState, policy: accessPolicy });
   if (!result.ok) throw new Error(`Gate state hook failed: ${JSON.stringify(result)}`);
 }
 
-async function assertSelectedGateState(page, expectedState) {
-  const state = await page.evaluate((gateState) => {
+async function assertSelectedGatePolicy(page, expectedPolicy, expectedPassableBy) {
+  const state = await page.evaluate((policy) => {
     const parsed = JSON.parse(window.render_game_to_text());
     const selected = parsed.visibleBuildings.find((building) => building.id === parsed.selected.buildingId);
     const panel = document.querySelector("#selectedPanel")?.textContent ?? "";
-    return { gateState, selected, panel };
-  }, expectedState);
-  if (state.selected?.type !== "gate" || state.selected.gateState !== expectedState || state.selected.blocksMovement !== true) {
+    return { policy, selected, panel };
+  }, expectedPolicy);
+  if (state.selected?.type !== "gate" || state.selected.gateAccessPolicy !== expectedPolicy) {
+    throw new Error(`Selected gate did not expose access policy ${expectedPolicy}: ${JSON.stringify(state)}`);
+  }
+  if (JSON.stringify(state.selected.gatePassableBy) !== JSON.stringify(expectedPassableBy)) {
+    throw new Error(`Selected gate did not expose passable tribes ${JSON.stringify(expectedPassableBy)}: ${JSON.stringify(state)}`);
+  }
+  if (!state.panel.includes(`access ${expectedPolicy === "owner_only" ? "owner only" : "owner and allies"}`)) {
+    throw new Error(`Selected gate panel did not expose access policy ${expectedPolicy}: ${JSON.stringify(state)}`);
+  }
+}
+
+async function assertSelectedGateState(page, expectedState, expectedPolicy) {
+  const state = await page.evaluate(({ gateState, policy }) => {
+    const parsed = JSON.parse(window.render_game_to_text());
+    const selected = parsed.visibleBuildings.find((building) => building.id === parsed.selected.buildingId);
+    const panel = document.querySelector("#selectedPanel")?.textContent ?? "";
+    return { gateState, policy, selected, panel };
+  }, { gateState: expectedState, policy: expectedPolicy });
+  if (state.selected?.type !== "gate" || state.selected.gateState !== expectedState || state.selected.gateAccessPolicy !== expectedPolicy || state.selected.blocksMovement !== true) {
     throw new Error(`Selected gate did not expose locked blocking state: ${JSON.stringify(state)}`);
   }
   if (!state.panel.includes(`Gate: ${expectedState}`)) {

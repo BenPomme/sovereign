@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { advanceGame, advanceGameTicks, appendSovereignMemory, attachReplyToPacket, createGame, getTownHall, issueSovereignOrder, recordAiDecision, sendPlayerMessage, setAllControllers } from "../../../packages/sim/src";
+import { advanceGame, advanceGameTicks, appendSovereignMemory, attachReplyToPacket, buildStructure, createGame, getTownHall, issueSovereignOrder, recordAiDecision, sendPlayerMessage, setAllControllers } from "../../../packages/sim/src";
 import {
   OllamaRequestError,
   chooseDefaultModel,
@@ -360,6 +360,58 @@ describe("Ollama JSON recovery", () => {
       buildingType: "gate",
       targetX: 19,
       targetY: 16
+    });
+  });
+
+  it("preserves LLM-authored gate access policy orders for owned gates", async () => {
+    const game = createGame(20260704);
+    game.tribes.blue.resources = { gold: 500, food: 500, wood: 500, stone: 500, clay: 500, limestone: 500, iron: 500, coal: 500 };
+    expect(issueSovereignOrder(game, "blue", { type: "DEVELOP", priority: 1, developmentId: "masonry", reason: "Unlock stone gates." }).ok).toBe(true);
+    expect(issueSovereignOrder(game, "blue", { type: "DEVELOP", priority: 1, developmentId: "ironworking", reason: "Unlock gate hardware." }).ok).toBe(true);
+    const built = buildStructure(game, "blue", "gate", getTownHall(game, "blue"));
+    expect(built.ok).toBe(true);
+    if (!built.ok) throw new Error("Gate unexpectedly failed to build");
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        response: JSON.stringify({
+          freeformStrategy: "I will stop all allied passage until the treaty terms become explicit.",
+          strategySummary: "Restrict gate access.",
+          memoryNote: "Gate policy is leverage in negotiations.",
+          orders: [
+            {
+              type: "SET_GATE",
+              priority: 1,
+              buildingId: built.buildingId,
+              gateState: "open",
+              gateAccessPolicy: "owner_only",
+              messageType: "LETTER",
+              diplomacyIntent: "NONE",
+              subject: "",
+              body: "",
+              reason: "Keep the gate open for Blue only while talks continue."
+            }
+          ],
+          unitNames: [],
+          bugReport: "",
+          bugSeverity: "low"
+        })
+      })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("window", {
+      setTimeout: globalThis.setTimeout,
+      clearTimeout: globalThis.clearTimeout
+    });
+
+    const decision = await requestSovereignDecision(game, "blue", "qwen3.5:9b-mlx");
+
+    expect(decision.orders[0]).toMatchObject({
+      type: "SET_GATE",
+      buildingId: built.buildingId,
+      gateState: "open",
+      gateAccessPolicy: "owner_only"
     });
   });
 

@@ -22,6 +22,7 @@ import {
   type BuildableBuildingType,
   type DevelopmentId,
   type DiplomacyIntent,
+  type GateAccessPolicy,
   type ForeignObservation,
   type GameState,
   type Message,
@@ -146,6 +147,7 @@ const decisionSchema = {
           buildingType: { type: "string", enum: ["farm", "watchtower", "wall", "gate", "turret"] },
           buildingId: { type: "string" },
           gateState: { type: "string", enum: ["open", "closed", "locked"] },
+          gateAccessPolicy: { type: "string", enum: ["all", "owner_allies", "owner_only"] },
           targetX: { type: "integer" },
           targetY: { type: "integer" },
           developmentId: { type: "string", enum: developmentIds },
@@ -1026,7 +1028,7 @@ Message rule: write real first-person diplomatic messages. You may ask questions
 Naming rule: you may rename your own villagers and units through unitNames. Keep names consistent with your naming style. Use exact unitId values. Rename new generic units when useful; an empty unitNames array is allowed.
 Alliance rule: alliances are formed only through chat. Send a SEND_MESSENGER order with messageType TREATY_PROPOSAL and diplomacyIntent ALLIANCE_OFFER if you want to ask for an alliance. If you already have an alliance, do not ask for another.
 War rule: ATTACK with recipientTribeId declares war, breaks any alliance with that target, and sends available military units. Use it when your doctrine calls for betrayal, preemption, conquest, or retaliation.
-Defense rule: walls block movement for everyone until destroyed, including your own people. Gates are the only intended passage through walls: open gates can be crossed, while closed or locked gates block movement. Turrets shoot hostile units near your kingdom. Use them when they fit your doctrine and resources.
+Defense rule: walls block movement for everyone until destroyed, including your own people. Gates are the only intended passage through walls: open gates follow an access policy of all, owner_allies, or owner_only; closed or locked gates block everyone. Turrets shoot hostile units near your kingdom. Use them when they fit your doctrine and resources.
 Development rule: choose developments with DEVELOP before building locked fortifications. Masonry unlocks walls. Masonry plus Ironworking unlock gates and locks. Ironworking plus Ballistics unlock turrets. You may pick development paths for your own doctrine; this is a strategic choice, not a fixed build order.
 Survival pressure: exact rival wealth is hidden. You may ask another sovereign how wealthy or safe they are, but they may answer truthfully, refuse, exaggerate, or lie. Use scouting, messenger questions, trade offers, threats, raids, alliances, and deception to infer who may be vulnerable before each century review. Never treat review elimination as an acceptable loss for your own people.
 Information rule: use REQUEST_INFO when you need strategic information, map intelligence, economic data, enemy intent, or world-state context that is not currently visible. This is a request for future intelligence, not a bug.
@@ -1065,7 +1067,7 @@ Legal order types:
 - SEND_MESSENGER with recipientTribeId, messageType, diplomacyIntent, subject, body
 - RECRUIT with unitType peon, militia, archer, messenger, or sentinel
 - BUILD with buildingType farm, watchtower, wall, gate, or turret. You may include targetX and targetY map coordinates; use them for deliberate wall/gate/turret placement.
-- SET_GATE with gateState open, closed, or locked, and optional buildingId for a specific owned gate.
+- SET_GATE with gateState open, closed, or locked, optional buildingId for a specific owned gate, and optional gateAccessPolicy all, owner_allies, or owner_only.
 - DEVELOP with developmentId masonry, brick_kilns, ironworking, ballistics, military_architecture, or public_works
 - SCOUT
 - DEFEND
@@ -1074,7 +1076,7 @@ Legal order types:
 - REPORT_BUG with subject, body, reason, suspectedArea, expectedBehavior, actualBehavior, reproductionSteps, strategyImpact, bugSeverity
 - REQUEST_INFO with subject, body, and reason
 
-Return JSON only with freeformStrategy, strategySummary, memoryNote, orders, unitNames, bugReport, and bugSeverity. Keep memoryNote under 220 characters. Keep message bodies specific and under 500 characters. Use at most two orders. For SEND_MESSENGER, subject/body/messageType/diplomacyIntent must be meaningful and non-empty. For DEVELOP, set developmentId to the chosen development. For BUILD, set buildingType and include targetX/targetY when you want the structure near a specific tile. For SET_GATE, set gateState and optionally buildingId. For REPORT_BUG, use subject as the issue title, body as the specific problem, expectedBehavior/actualBehavior for the mismatch, reproductionSteps for how to observe it again, suspectedArea for the likely system, and strategyImpact for why it blocks sovereign planning. For REQUEST_INFO, use subject as the question title and body as the precise information wanted. For other non-message orders, subject and body can be empty strings.
+Return JSON only with freeformStrategy, strategySummary, memoryNote, orders, unitNames, bugReport, and bugSeverity. Keep memoryNote under 220 characters. Keep message bodies specific and under 500 characters. Use at most two orders. For SEND_MESSENGER, subject/body/messageType/diplomacyIntent must be meaningful and non-empty. For DEVELOP, set developmentId to the chosen development. For BUILD, set buildingType and include targetX/targetY when you want the structure near a specific tile. For SET_GATE, set gateState and optionally buildingId and gateAccessPolicy. For REPORT_BUG, use subject as the issue title, body as the specific problem, expectedBehavior/actualBehavior for the mismatch, reproductionSteps for how to observe it again, suspectedArea for the likely system, and strategyImpact for why it blocks sovereign planning. For REQUEST_INFO, use subject as the question title and body as the precise information wanted. For other non-message orders, subject and body can be empty strings.
 `;
 }
 
@@ -1120,7 +1122,7 @@ Return fields:
 - freeformStrategy: 1-2 sentences of independent doctrine. You are not limited to algorithmic choices.
 - strategySummary: one short sentence.
 - memoryNote: one private note or empty string.
-- orders: up to two legal immediate orders. Use SET_POLICY if unsure. Use DEVELOP with developmentId for prerequisite choices. Use BUILD with buildingType and optional targetX/targetY for chosen placement. Use SET_GATE with gateState open/closed/locked for owned gates. For SEND_MESSENGER, write a real first-person message.
+- orders: up to two legal immediate orders. Use SET_POLICY if unsure. Use DEVELOP with developmentId for prerequisite choices. Use BUILD with buildingType and optional targetX/targetY for chosen placement. Use SET_GATE with gateState open/closed/locked and gateAccessPolicy all/owner_allies/owner_only for owned gates. For SEND_MESSENGER, write a real first-person message.
 - unitNames: optional own unit renames, can be empty.
 - bugReport: empty unless world behavior is impossible or broken. If using a REPORT_BUG order, include subject, body, suspectedArea, expectedBehavior, actualBehavior, reproductionSteps, strategyImpact, and bugSeverity.
 - bugSeverity: low, medium, or high.
@@ -1252,14 +1254,14 @@ function summarizeUnitRoster(units: Pick<Unit, "id" | "name" | "type" | "hp" | "
     .join("\n");
 }
 
-function summarizeOwnBuildings(buildings: Pick<Building, "type" | "hp" | "armor" | "attack" | "range" | "x" | "y" | "gateState">[]): string {
+function summarizeOwnBuildings(buildings: Pick<Building, "type" | "hp" | "armor" | "attack" | "range" | "x" | "y" | "gateState" | "gateAccessPolicy">[]): string {
   return (
     buildings
       .slice(0, 24)
       .map(
         (building) =>
           `${building.type} at ${Math.round(building.x)},${Math.round(building.y)} hp ${Math.ceil(building.hp)} armor ${building.armor} attack ${building.attack}/range ${building.range}${
-            building.type === "gate" ? ` gate ${building.gateState ?? "open"}` : ""
+            building.type === "gate" ? ` gate ${building.gateState ?? "open"} access ${building.gateAccessPolicy ?? "owner_allies"}` : ""
           }`
       )
       .join("; ") || "none"
@@ -1519,7 +1521,11 @@ function summarizeOrderAvailability(
     `BUILD wall ${buildAvailability(state, tribeId, "wall", wallCost)}`,
     `BUILD gate ${buildAvailability(state, tribeId, "gate", gateCost)}`,
     `BUILD turret ${buildAvailability(state, tribeId, "turret", turretCost)}`,
-    `SET_GATE ${ownGates.length > 0 ? `available for ${ownGates.map((gate) => `${gate.id}:${gate.gateState ?? "open"}`).join("/")}` : "unavailable: no owned gate"}`,
+    `SET_GATE ${
+      ownGates.length > 0
+        ? `available for ${ownGates.map((gate) => `${gate.id}:${gate.gateState ?? "open"}:${gate.gateAccessPolicy ?? "owner_allies"}`).join("/")}`
+        : "unavailable: no owned gate"
+    }`,
     developmentAvailability,
     `ATTACK ${canAttack ? "available" : "unavailable"}`,
     "REQUEST_INFO available for strategic questions or desired intelligence",
@@ -1573,6 +1579,7 @@ function normalizeOrder(raw: RawOrder, state: GameState, self: TribeId): AiStrat
     buildingType: normalizeBuildingType(raw.buildingType),
     buildingId: raw.buildingId ? cleanText(raw.buildingId, 80) : undefined,
     gateState: normalizeGateState(raw.gateState),
+    gateAccessPolicy: normalizeGateAccessPolicy(raw.gateAccessPolicy),
     developmentId: normalizeDevelopmentId(raw.developmentId),
     messageType: normalizeMessageType(raw.messageType),
     diplomacyIntent: normalizeDiplomacyIntent(raw.diplomacyIntent),
@@ -1775,6 +1782,10 @@ function normalizeBuildingType(value: unknown): BuildableBuildingType | undefine
 
 function normalizeGateState(value: unknown): "open" | "closed" | "locked" | undefined {
   return value === "open" || value === "closed" || value === "locked" ? value : undefined;
+}
+
+function normalizeGateAccessPolicy(value: unknown): GateAccessPolicy | undefined {
+  return value === "all" || value === "owner_allies" || value === "owner_only" ? value : undefined;
 }
 
 function normalizeDevelopmentId(value: unknown): DevelopmentId | undefined {

@@ -2275,7 +2275,42 @@ Original prompt: ok continue with roadmap make sure the AIs can report bugs and 
   - full `pnpm smoke` passed after updating gate labels and map-layer text,
   - `pnpm smoke:mock-ollama` passed and verified the schema/report path with `gates=0` in turn context.
 - Remaining backlog:
-  - add gate access policies for owner/allied/neutral/enemy passage rather than only open/closed/locked global blocking,
+  - expand gate access policies beyond the first `all` / `owner_allies` / `owner_only` layer into richer diplomacy, sabotage, toll, and automation rules,
   - add explicit attack-building / attack-wall / attack-gate siege orders,
   - add gate diplomacy behaviors: safe passage treaties, betrayal by locking gates, tolls, ambushes, and sabotage,
   - continue the PixiJS graphics production pass with sprite/texture assets and clearer wall/gate/turret silhouettes.
+
+### 2026-07-05 Gate Access Policies And Destroyable-Wall Combat QA
+
+- Implemented the first gate access-policy layer:
+  - open gates now support `all`, `owner_allies`, and `owner_only`,
+  - gates default to `owner_allies`,
+  - closed and locked gates still block everyone, including the owning tribe,
+  - pathfinding and in-progress movement now evaluate gate access from the moving unit's tribe,
+  - units recover cleanly if a gate becomes forbidden while they are en route.
+- Exposed the policy to AIs and the observer UI:
+  - `SET_GATE` orders can include `gateAccessPolicy`,
+  - LLM schema, prompt text, order normalization, building summaries, and order availability include gate policy,
+  - selected-panel text, hover text, and `render_game_to_text()` expose policy and passable tribes.
+- Strengthened the stat/destruction contract:
+  - current combat-relevant board entities are units and buildings; both carry health, armor, attack, and range,
+  - future targetable items or siege objects should inherit the same stat contract,
+  - added regression coverage that a hostile militia destroys a wall through normal combat ticks, proving walls are destructible in play.
+- Browser QA:
+  - `pnpm smoke:buildings` now builds farm, watchtower, wall, gate, and turret, verifies gate policy in the panel/hook, locks the gate, and confirms stat exposure.
+  - Visual inspection of `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-buildings.png` confirmed the buildings render, though clustered `NEW` labels remain visually busy near the town hall.
+- QA completed:
+  - `pnpm exec tsc --noEmit` passed,
+  - `pnpm exec vitest run packages/sim/src/sim.test.ts --reporter=dot` passed: 41 tests,
+  - full `pnpm test` passed: 101 tests,
+  - `pnpm build` passed,
+  - `pnpm smoke:buildings` passed,
+  - `pnpm smoke:smooth` passed with measured FPS 28.3 and smooth visual interpolation,
+  - `pnpm smoke:mock-ollama` passed with parser/transport/cooldown recovery and gpt-oss chat adapter coverage,
+  - `pnpm smoke:ai-fairness` passed with mixed qwen/gpt-oss assignments and zero fallback decisions,
+  - full `pnpm smoke` passed with board, diplomacy, report review, info request, wall/resource, gate, learning, persistence, and screenshot checks.
+- Remaining backlog:
+  - add explicit attack-building / attack-wall / attack-gate siege orders so AIs can intentionally breach fortifications,
+  - add gate diplomacy mechanics around safe-passage treaties, tolls, betrayal, sabotage, and ambushes,
+  - improve PixiJS visuals with clearer wall/gate/turret silhouettes and zoom-aware construction labels,
+  - keep all future targetable items on the health/armor/attack/range stat contract.

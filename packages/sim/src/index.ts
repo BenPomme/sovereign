@@ -16,6 +16,7 @@ export type UnitType =
   | "militia"
   | "archer";
 export type GateState = "open" | "closed" | "locked";
+export type GateAccessPolicy = "all" | "owner_allies" | "owner_only";
 export type BuildingType = "townHall" | "farm" | "barracks" | "market" | "watchtower" | "wall" | "gate" | "turret";
 export type BuildableBuildingType = "farm" | "watchtower" | "wall" | "gate" | "turret";
 export type DevelopmentId = "masonry" | "brick_kilns" | "ironworking" | "ballistics" | "military_architecture" | "public_works";
@@ -83,6 +84,7 @@ export type AiStrategicOrder = {
   buildingType?: BuildableBuildingType;
   buildingId?: string;
   gateState?: GateState;
+  gateAccessPolicy?: GateAccessPolicy;
   targetX?: number;
   targetY?: number;
   developmentId?: DevelopmentId;
@@ -262,6 +264,7 @@ export type Building = {
   range: number;
   attackCooldown: number;
   gateState?: GateState;
+  gateAccessPolicy?: GateAccessPolicy;
 };
 
 export type Message = {
@@ -734,7 +737,7 @@ export function issueSovereignOrder(
       return { ok: true, summary: `built ${order.buildingType ?? "farm"}` };
     }
     case "SET_GATE": {
-      const result = setGateState(state, tribeId, order.gateState ?? "locked", order.buildingId);
+      const result = setGateState(state, tribeId, order.gateState ?? "locked", order.buildingId, order.gateAccessPolicy);
       if (!result.ok) return { ok: false, reason: result.reason };
       return { ok: true, summary: result.summary };
     }
@@ -1110,7 +1113,8 @@ export function setGateState(
   state: GameState,
   tribeId: TribeId,
   gateState: GateState,
-  buildingId?: string
+  buildingId?: string,
+  gateAccessPolicy?: GateAccessPolicy
 ): { ok: true; buildingId: string; summary: string } | { ok: false; reason: string } {
   const gate = buildingId
     ? state.buildings[buildingId]
@@ -1121,15 +1125,19 @@ export function setGateState(
   if (gate.tribeId !== tribeId) return { ok: false, reason: "cannot control another tribe's gate" };
   if (gate.type !== "gate") return { ok: false, reason: "selected building is not a gate" };
   gate.gateState = gateState;
+  if (gateAccessPolicy) gate.gateAccessPolicy = gateAccessPolicy;
+  const accessPolicy = gate.gateAccessPolicy ?? "owner_allies";
   addEvent(
     state,
     "GATE_STATE_CHANGED",
     `${state.tribes[tribeId].name} sets a gate ${gateState}`,
-    `Gate at ${gate.x},${gate.y} is now ${gateState}. ${gateState === "open" ? "It can be crossed." : "It blocks movement."}`,
+    `Gate at ${gate.x},${gate.y} is now ${gateState} with access ${formatGateAccessPolicy(accessPolicy)}. ${
+      gateState === "open" ? "It follows that access policy." : "It blocks movement."
+    }`,
     "all"
   );
   updateVisibility(state);
-  return { ok: true, buildingId: gate.id, summary: `set gate ${gate.id} ${gateState}` };
+  return { ok: true, buildingId: gate.id, summary: `set gate ${gate.id} ${gateState} ${accessPolicy}` };
 }
 
 export function damageBuilding(
@@ -1534,7 +1542,10 @@ function addBuilding(state: GameState, tribeId: TribeId, type: BuildingType, x: 
     range: stats.range,
     attackCooldown: 0
   };
-  if (type === "gate") building.gateState = "open";
+  if (type === "gate") {
+    building.gateState = "open";
+    building.gateAccessPolicy = "owner_allies";
+  }
   state.buildings[id] = building;
   return building;
 }
@@ -1676,6 +1687,12 @@ function labelBuildingType(type: BuildingType): string {
   return type.replace(/[A-Z]/g, (letter) => ` ${letter.toLowerCase()}`);
 }
 
+function formatGateAccessPolicy(policy: GateAccessPolicy): string {
+  if (policy === "all") return "all tribes";
+  if (policy === "owner_only") return "owner only";
+  return "owner and allies";
+}
+
 function updateUnits(state: GameState): void {
   for (const unit of Object.values(state.units)) {
     if (unit.hp <= 0) continue;
@@ -1686,6 +1703,16 @@ function updateUnits(state: GameState): void {
       case "move":
       case "scout":
         moveAlongPath(state, unit, unit.task.path);
+        if (unit.task.path.length === 0 && distance(unit, unit.task.target) >= 0.35) {
+          const refreshed = findPath(state, unit, unit.task.target);
+          if (pathArrives(refreshed, unit.task.target)) {
+            unit.task.path = refreshed;
+            moveAlongPath(state, unit, unit.task.path);
+          } else {
+            unit.task = { kind: "idle" };
+            break;
+          }
+        }
         if (distance(unit, unit.task.target) < 0.35) unit.task = { kind: "idle" };
         break;
       case "gather":
@@ -1709,6 +1736,14 @@ function updateGatherer(state: GameState, unit: Unit): void {
     if (distance(unit, task.dropoff) > 0.45) {
       if (task.path.length === 0) task.path = findPath(state, unit, task.dropoff);
       moveAlongPath(state, unit, task.path);
+      if (task.path.length === 0 && distance(unit, task.dropoff) > 0.45) {
+        const refreshed = findPath(state, unit, task.dropoff);
+        if (!pathArrives(refreshed, task.dropoff)) {
+          unit.task = { kind: "idle" };
+          return;
+        }
+        task.path = refreshed;
+      }
       return;
     }
     state.tribes[unit.tribeId].resources[task.resource] += task.cargo;
@@ -1718,6 +1753,14 @@ function updateGatherer(state: GameState, unit: Unit): void {
   }
   if (distance(unit, task.target) > 0.45) {
     moveAlongPath(state, unit, task.path);
+    if (task.path.length === 0 && distance(unit, task.target) > 0.45) {
+      const refreshed = findPath(state, unit, task.target);
+      if (!pathArrives(refreshed, task.target)) {
+        unit.task = { kind: "idle" };
+        return;
+      }
+      task.path = refreshed;
+    }
     return;
   }
   if (task.resource === "wood" && targetTile.terrain === "forest") {
@@ -2523,11 +2566,11 @@ function findNearestResource(state: GameState, unit: Unit, resource: ResourceTyp
   return best;
 }
 
-function findPath(state: GameState, unit: Pick<Unit, "x" | "y">, target: Position): Position[] {
+function findPath(state: GameState, unit: Pick<Unit, "x" | "y" | "tribeId">, target: Position): Position[] {
   const start = { x: clamp(Math.round(unit.x), 0, MAP_SIZE - 1), y: clamp(Math.round(unit.y), 0, MAP_SIZE - 1) };
   let goal = { x: clamp(Math.round(target.x), 0, MAP_SIZE - 1), y: clamp(Math.round(target.y), 0, MAP_SIZE - 1) };
-  if (!isWalkable(state, goal.x, goal.y)) {
-    const alternate = findNearestWalkable(state, goal);
+  if (!isWalkableForTribe(state, goal.x, goal.y, unit.tribeId)) {
+    const alternate = findNearestWalkable(state, goal, unit.tribeId);
     if (!alternate) return [];
     goal = alternate;
   }
@@ -2550,7 +2593,7 @@ function findPath(state: GameState, unit: Pick<Unit, "x" | "y">, target: Positio
     }
     if (current.x === goal.x && current.y === goal.y) return reconstruct(cameFrom, tileIndex(current.x, current.y)).map(indexToPosition);
     for (const next of neighbors(current)) {
-      if (!isWalkable(state, next.x, next.y)) continue;
+      if (!isWalkableForTribe(state, next.x, next.y, unit.tribeId)) continue;
       const currentIndex = tileIndex(current.x, current.y);
       const nextIndex = tileIndex(next.x, next.y);
       const tentative = (gScore.get(currentIndex) ?? Infinity) + terrainCost(state.map[nextIndex].terrain);
@@ -2573,7 +2616,7 @@ function pathArrives(path: Position[], target: Position): boolean {
 function moveAlongPath(state: GameState, unit: Unit, path: Position[]): void {
   if (path.length === 0) return;
   const target = path[0];
-  if (!isWalkable(state, target.x, target.y)) {
+  if (!isWalkableForTribe(state, target.x, target.y, unit.tribeId)) {
     path.length = 0;
     return;
   }
@@ -2769,17 +2812,21 @@ function areHostile(state: GameState, a: TribeId, b: TribeId): boolean {
 }
 
 function isWalkable(state: GameState, x: number, y: number): boolean {
+  return isWalkableForTribe(state, x, y);
+}
+
+function isWalkableForTribe(state: GameState, x: number, y: number, tribeId?: TribeId): boolean {
   if (x < 0 || y < 0 || x >= MAP_SIZE || y >= MAP_SIZE) return false;
   const terrain = state.map[tileIndex(x, y)].terrain;
-  return terrain !== "water" && terrain !== "mountain" && !isBlockingBuildingAt(state, x, y);
+  return terrain !== "water" && terrain !== "mountain" && !isBlockingBuildingAt(state, x, y, tribeId);
 }
 
-export function isTileWalkable(state: GameState, x: number, y: number): boolean {
-  return isWalkable(state, x, y);
+export function isTileWalkable(state: GameState, x: number, y: number, tribeId?: TribeId): boolean {
+  return isWalkableForTribe(state, x, y, tribeId);
 }
 
-function isBlockingBuildingAt(state: GameState, x: number, y: number): boolean {
-  return Object.values(state.buildings).some((building) => building.x === x && building.y === y && isBuildingMovementBlocking(building));
+function isBlockingBuildingAt(state: GameState, x: number, y: number, tribeId?: TribeId): boolean {
+  return Object.values(state.buildings).some((building) => building.x === x && building.y === y && isBuildingMovementBlockingForTribe(state, building, tribeId));
 }
 
 export function isBuildingMovementBlocking(building: Building): boolean {
@@ -2788,14 +2835,25 @@ export function isBuildingMovementBlocking(building: Building): boolean {
   return buildingStats[building.type].blocksMovement;
 }
 
-function findNearestWalkable(state: GameState, target: Position): Position | undefined {
+function isBuildingMovementBlockingForTribe(state: GameState, building: Building, tribeId?: TribeId): boolean {
+  if (building.hp <= 0) return false;
+  if (building.type !== "gate") return buildingStats[building.type].blocksMovement;
+  if (building.gateState !== "open") return true;
+  if (!tribeId) return false;
+  const policy = building.gateAccessPolicy ?? "owner_allies";
+  if (policy === "all") return false;
+  if (policy === "owner_only") return tribeId !== building.tribeId;
+  return tribeId !== building.tribeId && state.alliances[building.tribeId] !== tribeId && state.alliances[tribeId] !== building.tribeId;
+}
+
+function findNearestWalkable(state: GameState, target: Position, tribeId?: TribeId): Position | undefined {
   let best: Position | undefined;
   let bestDistance = Number.POSITIVE_INFINITY;
   for (let radius = 1; radius <= 8; radius += 1) {
     for (let y = target.y - radius; y <= target.y + radius; y += 1) {
       for (let x = target.x - radius; x <= target.x + radius; x += 1) {
         if (Math.abs(target.x - x) !== radius && Math.abs(target.y - y) !== radius) continue;
-        if (!isWalkable(state, x, y)) continue;
+        if (!isWalkableForTribe(state, x, y, tribeId)) continue;
         const distanceToTarget = manhattan(target, { x, y });
         if (distanceToTarget >= bestDistance) continue;
         best = { x, y };

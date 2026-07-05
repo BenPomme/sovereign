@@ -66,11 +66,13 @@ This roadmap must stay tied to the visible board. Development choices should cha
 
 **Delivered first gate/armor slice on July 5, 2026:** walls remain absolute movement blockers for everyone until destroyed; gates are buildable after Masonry plus Ironworking, default open, can be closed or locked, and closed/locked gates block movement. Units and buildings now expose health, armor, attack, and range stats, and armor reduces incoming damage while keeping walls/gates destroyable.
 
-1. **Building-tree prerequisites:** extend per-tribe development state beyond current walls, gates, and turrets into stronger walls, siege tools, road upgrades, access policies, and later fortification variants behind masonry, brick kilns, ironworking, ballistics, and military architecture.
+**Delivered gate access-policy slice on July 5, 2026:** open gates now support `all`, `owner_allies`, and `owner_only` passage policies. Pathfinding, movement recovery, AI order schema, LLM prompts, selected-panel UI, hover text, browser hooks, and building smoke QA all expose the policy. Walls are also proven destroyable through the normal combat loop, not only direct damage helpers.
+
+1. **Building-tree prerequisites:** extend per-tribe development state beyond current walls, gates, and turrets into stronger walls, siege tools, road upgrades, gate automation, and later fortification variants behind masonry, brick kilns, ironworking, ballistics, and military architecture.
 2. **Chosen placement:** let LLMs choose perimeter/fortification intent and later add human tile previews only after the human play model is decided.
 3. **Siege behavior:** add explicit attack-building / attack-blocking-wall orders so hostile units can break fortifications that cut routes.
-4. **Gate access policies:** add owner/allied/neutral/enemy passage rules on top of the current open/closed/locked gate state. A locked gate currently blocks enemies, neutral tribes, allies, and the owning tribe until unlocked/opened or destroyed; future policy logic should authorize passage, diplomacy, sabotage, or automation.
-5. **Gate diplomacy and strategy:** let sovereigns negotiate gate access, lie about open routes, lock allies out, create safe-passage treaties, stage ambushes at gates, or deliberately sacrifice a gate to delay pursuit.
+4. **Gate diplomacy and strategy:** let sovereigns negotiate gate access, lie about open routes, lock allies out, create safe-passage treaties, stage ambushes at gates, charge tolls, sabotage controls, or deliberately sacrifice a gate to delay pursuit.
+5. **Fortification stat contract:** any future board item, siege engine, inventory object, or resource-processing installation must declare health, armor, attack, range, and destruction behavior when it can be targeted or can affect combat.
 6. **PixiJS graphics upgrade:** replace the current conceptual debug-board style with a production-oriented PixiJS visual pass: terrain/resource sprites, building silhouettes, wall/gate state art, animated units, selection/route previews, construction/damage/firing effects, and zoom-aware overlays.
 7. **Survival scoring:** make century reviews and AI prompts account for controlled coal, iron, limestone, clay, stone, food, wood, and gold deposits, defended logistics routes, happiness, safety, tribute, embargoes, and raided/denied deposits.
 8. **Map readability overlays:** add optional overlays for contested resources, wall/turret/gate networks, war fronts, and blocked routes, with zoom-aware labels to reduce clutter.
@@ -987,7 +989,7 @@ This roadmap must stay tied to the visible board. Development choices should cha
   - **Phase:** P4.
 
 - **SW-127A — Lockable Gatehouses**
-  - **Mechanics:** gate buildings with open, closed, locked, damaged, and destroyed states are implemented for the first slice; owner/allied/neutral/enemy access policies remain the next layer.
+  - **Mechanics:** gate buildings with open, closed, locked, damaged, and destroyed states are implemented for the first slice; open gates support `all`, `owner_allies`, and `owner_only` access policies.
   - **Effects:** route control and border security improve; bad locking decisions can trap workers, block reinforcements, or break trade.
   - **Prereqs/Tradeoffs:** requires fortress walls, iron hardware, and trained gatekeepers or automation.
   - **AI Hook:** negotiate, deceive, revoke, or enforce passage rights; use gates for traps, embargoes, retreats, and siege defense.

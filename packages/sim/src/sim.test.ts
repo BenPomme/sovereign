@@ -428,6 +428,37 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     expect(isTileWalkable(state, wall.x, wall.y)).toBe(true);
   });
 
+  it("lets hostile units destroy walls through normal combat", () => {
+    const state = createGame(936);
+    state.tribes.blue.resources = { gold: 500, food: 500, wood: 500, stone: 500, clay: 500, limestone: 500, iron: 500, coal: 500 };
+    const developed = issueSovereignOrder(state, "blue", {
+      type: "DEVELOP",
+      priority: 1,
+      developmentId: "masonry",
+      reason: "Unlock wall construction."
+    });
+    expect(developed.ok).toBe(true);
+    const built = buildStructure(state, "blue", "wall", getTownHall(state, "blue"));
+    expect(built.ok).toBe(true);
+    if (!built.ok) throw new Error("Wall unexpectedly failed to build");
+    const wall = state.buildings[built.buildingId];
+    wall.x = 50;
+    wall.y = 50;
+    wall.hp = 2;
+    state.map[tileIndex(wall.x, wall.y)].terrain = "grass";
+    const attacker = Object.values(state.units).find((unit) => unit.tribeId === "red" && unit.type === "militia");
+    if (!attacker) throw new Error("Expected Red militia");
+    attacker.x = wall.x + 1;
+    attacker.y = wall.y;
+    attacker.task = { kind: "idle" };
+
+    advanceGameTicks(state, 30);
+
+    expect(state.buildings[wall.id]).toBeUndefined();
+    expect(isTileWalkable(state, wall.x, wall.y)).toBe(true);
+    expect(state.events.some((event) => event.type === "STRUCTURE_DESTROYED" && event.title.includes("wall"))).toBe(true);
+  });
+
   it("makes gates passable only while open and lockable by their owner", () => {
     const state = createGame(934);
     state.tribes.blue.resources = { gold: 500, food: 500, wood: 500, stone: 500, clay: 500, limestone: 500, iron: 500, coal: 500 };
@@ -443,26 +474,43 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     const gate = state.buildings[built.buildingId];
     expect(gate.type).toBe("gate");
     expect(gate.gateState).toBe("open");
+    expect(gate.gateAccessPolicy).toBe("owner_allies");
     expect(state.tribes.blue.resources.wood).toBe(before.wood - 35);
     expect(state.tribes.blue.resources.stone).toBe(before.stone - 45);
     expect(state.tribes.blue.resources.clay).toBe(before.clay - 20);
     expect(state.tribes.blue.resources.limestone).toBe(before.limestone - 25);
     expect(state.tribes.blue.resources.iron).toBe(before.iron - 20);
     expect(isTileWalkable(state, gate.x, gate.y)).toBe(true);
+    expect(isTileWalkable(state, gate.x, gate.y, "blue")).toBe(true);
+    expect(isTileWalkable(state, gate.x, gate.y, "red")).toBe(false);
+
+    expect(formAlliance(state, "blue", "red").ok).toBe(true);
+    expect(isTileWalkable(state, gate.x, gate.y, "red")).toBe(true);
+
+    const ownerOnly = setGateState(state, "blue", "open", gate.id, "owner_only");
+    expect(ownerOnly.ok).toBe(true);
+    expect(isTileWalkable(state, gate.x, gate.y, "blue")).toBe(true);
+    expect(isTileWalkable(state, gate.x, gate.y, "red")).toBe(false);
+
+    const allAccess = setGateState(state, "blue", "open", gate.id, "all");
+    expect(allAccess.ok).toBe(true);
+    expect(isTileWalkable(state, gate.x, gate.y, "yellow")).toBe(true);
 
     const closed = setGateState(state, "blue", "closed", gate.id);
     expect(closed.ok).toBe(true);
     expect(isTileWalkable(state, gate.x, gate.y)).toBe(false);
+    expect(isTileWalkable(state, gate.x, gate.y, "blue")).toBe(false);
 
     const opened = issueSovereignOrder(state, "blue", {
       type: "SET_GATE",
       priority: 1,
       buildingId: gate.id,
       gateState: "open",
+      gateAccessPolicy: "owner_allies",
       reason: "Open the controlled passage."
     });
     expect(opened.ok).toBe(true);
-    expect(isTileWalkable(state, gate.x, gate.y)).toBe(true);
+    expect(isTileWalkable(state, gate.x, gate.y, "red")).toBe(true);
 
     const locked = issueSovereignOrder(state, "blue", {
       type: "SET_GATE",
@@ -479,6 +527,26 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     expect(damaged.ok).toBe(true);
     expect(damaged.ok && damaged.destroyed).toBe(true);
     expect(isTileWalkable(state, gate.x, gate.y)).toBe(true);
+  });
+
+  it("idles a moving unit cleanly when a gate becomes forbidden mid-route", () => {
+    const state = createGame(935);
+    state.tribes.blue.resources = { gold: 500, food: 500, wood: 500, stone: 500, clay: 500, limestone: 500, iron: 500, coal: 500 };
+    expect(issueSovereignOrder(state, "blue", { type: "DEVELOP", priority: 1, developmentId: "masonry", reason: "Unlock gate foundations." }).ok).toBe(true);
+    expect(issueSovereignOrder(state, "blue", { type: "DEVELOP", priority: 1, developmentId: "ironworking", reason: "Unlock gate locks." }).ok).toBe(true);
+    const built = buildStructure(state, "blue", "gate", getTownHall(state, "blue"));
+    expect(built.ok).toBe(true);
+    if (!built.ok) throw new Error("Gate unexpectedly failed to build");
+    const gate = state.buildings[built.buildingId];
+    const peon = Object.values(state.units).find((unit) => unit.tribeId === "blue" && unit.type === "peon");
+    if (!peon) throw new Error("Expected Blue peon");
+    peon.task = { kind: "move", target: { x: gate.x, y: gate.y }, path: [{ x: gate.x, y: gate.y }] };
+
+    const locked = setGateState(state, "blue", "locked", gate.id);
+    expect(locked.ok).toBe(true);
+    advanceGameTicks(state, 1);
+
+    expect(peon.task.kind).toBe("idle");
   });
 
   it("places AI-built walls near requested build coordinates", () => {

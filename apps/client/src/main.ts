@@ -43,6 +43,7 @@ import {
   type BuildableBuildingType,
   type DevelopmentId,
   type DiplomacyIntent,
+  type GateAccessPolicy,
   type GateState,
   type GameState,
   type Packet,
@@ -159,8 +160,9 @@ declare global {
     force_gate_state_for_test?: (
       tribeId?: TribeId,
       gateState?: GateState,
-      buildingId?: string
-    ) => { ok: boolean; buildingId?: string; gateState?: GateState; reason?: string };
+      buildingId?: string,
+      gateAccessPolicy?: GateAccessPolicy
+    ) => { ok: boolean; buildingId?: string; gateState?: GateState; gateAccessPolicy?: GateAccessPolicy; reason?: string };
     force_visual_motion_for_test?: () => { ok: boolean; unitId?: string; reason?: string };
   }
 }
@@ -1665,6 +1667,8 @@ function renderGameToText(): string {
       attack: building.attack,
       range: building.range,
       gateState: building.type === "gate" ? building.gateState ?? "open" : null,
+      gateAccessPolicy: building.type === "gate" ? building.gateAccessPolicy ?? "owner_allies" : null,
+      gatePassableBy: building.type === "gate" ? tribeIds.filter((tribeId) => !isBuildingMovementBlockingForDisplay(building, tribeId)) : [],
       blocksMovement: isBuildingMovementBlocking(building),
       requirements: isBuildableBuilding(building.type) ? getBuildingRequirements(building.type) : [],
       selected: building.id === selectedBuildingId,
@@ -1842,13 +1846,20 @@ function forceDevelopmentForTest(
 function forceGateStateForTest(
   tribeId: TribeId = playerTribe,
   gateState: GateState = "locked",
-  buildingId?: string
-): { ok: boolean; buildingId?: string; gateState?: GateState; reason?: string } {
+  buildingId?: string,
+  gateAccessPolicy?: GateAccessPolicy
+): { ok: boolean; buildingId?: string; gateState?: GateState; gateAccessPolicy?: GateAccessPolicy; reason?: string } {
   if (!validTribeId(tribeId)) return { ok: false, reason: "unknown tribe" };
   if (gateState !== "open" && gateState !== "closed" && gateState !== "locked") return { ok: false, reason: "invalid gate state" };
-  const result = setGateState(state, tribeId, gateState, buildingId);
+  if (gateAccessPolicy && gateAccessPolicy !== "all" && gateAccessPolicy !== "owner_allies" && gateAccessPolicy !== "owner_only") {
+    return { ok: false, reason: "invalid gate access policy" };
+  }
+  const result = setGateState(state, tribeId, gateState, buildingId, gateAccessPolicy);
   render();
-  return result.ok ? { ok: true, buildingId: result.buildingId, gateState } : { ok: false, reason: result.reason };
+  const gate = result.ok ? state.buildings[result.buildingId] : undefined;
+  return result.ok
+    ? { ok: true, buildingId: result.buildingId, gateState, gateAccessPolicy: gate?.type === "gate" ? gate.gateAccessPolicy ?? "owner_allies" : undefined }
+    : { ok: false, reason: result.reason };
 }
 
 function summarizeResourceTiles(game: GameState, type: ResourceType): {
@@ -4212,7 +4223,11 @@ function selectedMarkup(game: GameState): string {
       <div class="selected-row">Health: ${building.hp} / ${building.maxHp}</div>
       <div class="selected-row">Armor: ${building.armor}</div>
       <div class="selected-row">Attack: ${building.attack} / range ${building.range}</div>
-      ${building.type === "gate" ? `<div class="selected-row">Gate: ${building.gateState ?? "open"}</div>` : ""}
+      ${
+        building.type === "gate"
+          ? `<div class="selected-row">Gate: ${building.gateState ?? "open"}; access ${formatGateAccessPolicy(building.gateAccessPolicy ?? "owner_allies")}</div>`
+          : ""
+      }
       ${isBuildableBuilding(building.type) ? `<div class="selected-row">Build cost: ${formatCost(getBuildingCost(building.type))}</div>` : ""}
       <div class="selected-row">${buildingRole(building.type)}</div>
     `;
@@ -4727,6 +4742,16 @@ function normalizeReportStatusFilter(value: unknown): AiReportFilterStatus {
 
 function normalizeReportScopeFilter(value: unknown): AiReportScopeFilter {
   return value === "synthetic" || value === "all" || value === "live" ? value : "live";
+}
+
+function isBuildingMovementBlockingForDisplay(building: Building, tribeId: TribeId): boolean {
+  if (building.hp <= 0) return false;
+  if (building.type !== "gate") return isBuildingMovementBlocking(building);
+  if (building.gateState !== "open") return true;
+  const policy = building.gateAccessPolicy ?? "owner_allies";
+  if (policy === "all") return false;
+  if (policy === "owner_only") return tribeId !== building.tribeId;
+  return tribeId !== building.tribeId && state.alliances[building.tribeId] !== tribeId && state.alliances[tribeId] !== building.tribeId;
 }
 
 async function previewAiSnapshot(url: string, id: string): Promise<void> {
@@ -5335,7 +5360,7 @@ function hoverMarkup(target: HoverTarget): string {
       <div>Health: ${Math.ceil(building.hp)} / ${building.maxHp}</div>
       <div>Armor: ${building.armor}</div>
       <div>Attack: ${building.attack} / range ${building.range}</div>
-      ${building.type === "gate" ? `<div>Gate: ${building.gateState ?? "open"}</div>` : ""}
+      ${building.type === "gate" ? `<div>Gate: ${building.gateState ?? "open"}; access ${formatGateAccessPolicy(building.gateAccessPolicy ?? "owner_allies")}</div>` : ""}
       <div>Position: ${building.x}, ${building.y}</div>
       <div>${buildingRole(building.type)}</div>
     `;
@@ -5600,10 +5625,16 @@ function formatCost(cost: ResourceCost): string {
 
 function buildingRole(type: Building["type"]): string {
   if (type === "wall") return "Blocks movement for everyone until destroyed.";
-  if (type === "gate") return "Open gates can be crossed; closed or locked gates block movement.";
+  if (type === "gate") return "Open gates follow their access policy; closed or locked gates block movement.";
   if (type === "turret") return "Fires on hostile units in range.";
   if (type === "watchtower") return "Extends local vision.";
   return "Kingdom structure.";
+}
+
+function formatGateAccessPolicy(policy: GateAccessPolicy): string {
+  if (policy === "all") return "all tribes";
+  if (policy === "owner_only") return "owner only";
+  return "owner and allies";
 }
 
 function resourceRole(type: ResourceType): string {
