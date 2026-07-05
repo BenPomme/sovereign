@@ -21,8 +21,10 @@ import {
   getDevelopment,
   getMissingBuildingDevelopments,
   getRecentVisibleEvents,
+  getResourceControlSummary,
   getTownHall,
   getVictoryPressure,
+  getVisibleResourceDepositIntel,
   getVisibleBuildings,
   getVisibleUnits,
   getBuildingTypeCombatStats,
@@ -202,6 +204,11 @@ declare global {
       afterHp?: number | null;
       afterAmount?: number | null;
       destroyed?: boolean;
+      beforePosture?: unknown;
+      afterPosture?: unknown;
+      resourceControlBefore?: unknown;
+      resourceControlAfter?: unknown;
+      resourceDenials?: unknown[];
       attackerTasks?: string[];
       recentEvents?: string[];
       reason?: string;
@@ -1839,6 +1846,8 @@ function renderGameToText(): string {
     })),
     resourceTiles: resourceTypes.map((type) => summarizeResourceTiles(state, type)),
     contestedResourceSites: summarizeContestedResourceSites(state),
+    resourceControl: tribeIds.map((tribeId) => getResourceControlSummary(state, tribeId)),
+    visibleResourceDepositsForPlayer: getVisibleResourceDepositIntel(state, playerTribe, 20),
     packets: Object.values(state.packets)
       .slice(-20)
       .map((packet) => ({
@@ -2168,6 +2177,11 @@ function forceResourceRaidForTest(): {
   afterHp?: number | null;
   afterAmount?: number | null;
   destroyed?: boolean;
+  beforePosture?: unknown;
+  afterPosture?: unknown;
+  resourceControlBefore?: unknown;
+  resourceControlAfter?: unknown;
+  resourceDenials?: unknown[];
   attackerTasks?: string[];
   recentEvents?: string[];
   reason?: string;
@@ -2195,6 +2209,8 @@ function forceResourceRaidForTest(): {
     attacker.task = { kind: "idle" };
   }
   advanceSimulationTicks(5, { scheduleAi: false, render: false, visual: false });
+  const beforePosture = getVisibleResourceDepositIntel(state, playerTribe, 20).find((deposit) => deposit.x === target.x && deposit.y === target.y);
+  const resourceControlBefore = getResourceControlSummary(state, playerTribe);
   const beforeHp = Math.ceil(resource.hp);
   const beforeAmount = Math.round(resource.amount);
   const result = issueSovereignOrder(state, playerTribe, {
@@ -2213,6 +2229,8 @@ function forceResourceRaidForTest(): {
   advanceSimulationTicks(80, { scheduleAi: false, render: false });
   render({ forceHud: true, forceLabels: true, forceFog: true });
   const remaining = state.map[targetIndex].resource;
+  const afterPosture = getVisibleResourceDepositIntel(state, playerTribe, 20).find((deposit) => deposit.x === target.x && deposit.y === target.y) ?? null;
+  const resourceControlAfter = getResourceControlSummary(state, playerTribe);
   return {
     ok: !remaining,
     target: { ...target, type: "iron" },
@@ -2221,6 +2239,11 @@ function forceResourceRaidForTest(): {
     afterHp: remaining ? Math.ceil(remaining.hp) : null,
     afterAmount: remaining ? Math.round(remaining.amount) : null,
     destroyed: !remaining,
+    beforePosture,
+    afterPosture,
+    resourceControlBefore,
+    resourceControlAfter,
+    resourceDenials: state.resourceDenials.slice(-5),
     attackerTasks,
     recentEvents: state.events.slice(-8).map((event) => `${event.type}:${event.body}`)
   };
@@ -2725,7 +2748,7 @@ function describeActiveLlmJobs(): string {
 
 function scheduleLlmReply(): void {
   if (!llmSchedulingStarted) return;
-  if (!hasLlmCapacity()) return;
+  if (!hasLlmCapacity(true)) return;
   const packet = Object.values(state.packets)
     .filter(
       (candidate) =>
@@ -2734,7 +2757,7 @@ function scheduleLlmReply(): void {
         state.tribes[candidate.recipientTribeId].controller === "llm" &&
         !state.tribes[candidate.recipientTribeId].eliminated &&
         !pendingReplyPacketIds.has(candidate.id) &&
-        canStartLlmJob(candidate.recipientTribeId)
+        canStartLlmJob(candidate.recipientTribeId, modelForTribe(candidate.recipientTribeId), false, true)
     )
     .sort((a, b) => a.lastStateChangeTick - b.lastStateChangeTick)[0];
   if (!packet) return;
@@ -3021,7 +3044,7 @@ async function runSovereignReply(packetId: string): Promise<void> {
   }
   const tribeId = packet.recipientTribeId;
   const tribeModel = modelForTribe(tribeId);
-  if (!beginLlmJob(tribeId, "reply")) return;
+  if (!beginLlmJob(tribeId, "reply", tribeModel, false, true)) return;
   pendingReplyPacketIds.add(packetId);
   const original = state.messages[packet.messageIds[0]];
   llmStatus = tribeModel
@@ -3591,7 +3614,9 @@ function buildAiReportSnapshot(
     visibleSummary: {
       foreignUnits: visibleUnits.filter((unit) => unit.tribeId !== decision.tribeId).length,
       foreignBuildings: visibleBuildings.filter((building) => building.tribeId !== decision.tribeId).length,
-      contestedResourceSites: summarizeContestedResourceSites(state).slice(0, 6)
+      contestedResourceSites: summarizeContestedResourceSites(state).slice(0, 6),
+      visibleResourceDeposits: getVisibleResourceDepositIntel(state, decision.tribeId, 8),
+      resourceControl: getResourceControlSummary(state, decision.tribeId)
     },
     latestAiDecisions: state.aiDecisions.slice(-6).map((item) => ({
       id: item.id,

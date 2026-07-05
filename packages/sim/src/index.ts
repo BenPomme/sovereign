@@ -57,6 +57,66 @@ export type ResourceDeposit = CombatStats & {
   amount: number;
 };
 
+export type ResourceDepositControl = "controlled" | "contested" | "foreign_controlled" | "uncontrolled";
+
+export type ResourceDepositPosture = {
+  type: ResourceType;
+  x: number;
+  y: number;
+  amount: number;
+  hp: number;
+  maxHp: number;
+  armor: number;
+  attack: number;
+  range: number;
+  distanceToTownHall: number;
+  control: ResourceDepositControl;
+  controlledBy?: TribeId;
+  nearestTribe?: TribeId;
+  nearestTribeDistance?: number;
+  defended: boolean;
+  defenseScore: number;
+  hostileDefended: boolean;
+  hostileDefenseScore: number;
+  raided: boolean;
+  underAttack: boolean;
+  raiders: TribeId[];
+  visible: boolean;
+};
+
+export type ResourceDenialRecord = {
+  id: string;
+  tick: number;
+  type: ResourceType;
+  x: number;
+  y: number;
+  amount: number;
+  maxHp: number;
+  attackerTribeId?: TribeId;
+  controlledBy?: TribeId;
+  visibleTo: TribeId[] | "all";
+};
+
+export type ResourceControlSummary = {
+  tribeId: TribeId;
+  controlledDeposits: number;
+  defendedDeposits: number;
+  vulnerableDeposits: number;
+  contestedDeposits: number;
+  raidedDeposits: number;
+  visibleDeposits: number;
+  recentDeniedDeposits: number;
+  recentDeniedLosses: number;
+  controlledValue: number;
+  defendedValue: number;
+  vulnerableValue: number;
+  contestedValue: number;
+  raidedValue: number;
+  deniedValue: number;
+  deniedLossValue: number;
+  survivalBonus: number;
+};
+
 export type Tile = {
   terrain: TerrainType;
   resource?: ResourceDeposit;
@@ -426,6 +486,7 @@ export type GameState = {
   foreignObservationMemory: Record<TribeId, ForeignObservationMemory>;
   aiInformationRequests: AiInformationRequest[];
   postGameLearnings: PostGameLearning[];
+  resourceDenials: ResourceDenialRecord[];
   sovereignMemories: Record<TribeId, SovereignMemory>;
   diplomaticIntel: Record<TribeId, DiplomaticIntelItem[]>;
   alliances: Partial<Record<TribeId, TribeId>>;
@@ -620,6 +681,7 @@ export function createGame(seed = 1337): GameState {
     foreignObservationMemory: {} as Record<TribeId, ForeignObservationMemory>,
     aiInformationRequests: [],
     postGameLearnings: [],
+    resourceDenials: [],
     sovereignMemories: {} as Record<TribeId, SovereignMemory>,
     diplomaticIntel: {} as Record<TribeId, DiplomaticIntelItem[]>,
     alliances: {},
@@ -960,13 +1022,15 @@ function issueResourceAttackOrder(
     const attackPosition = findResourceAttackPosition(state, unit, target);
     unit.task = { kind: "attackResource", resource: resource.type, target, path: findPath(state, unit, attackPosition) };
   }
+  invalidateResourceControlCache(state);
   const targetText = targetTribeId ? `${state.tribes[targetTribeId].name}'s claimed ${resource.type} deposit` : `${resource.type} deposit`;
+  const visibleTo = resourceEventVisibleTo(state, target, [tribeId, targetTribeId]);
   addEvent(
     state,
     "RESOURCE_RAID_ORDER",
     `${state.tribes[tribeId].name} raids ${resource.type}`,
     `${attackers.length} military units move to destroy the ${targetText} at ${target.x},${target.y}. ${clampText(reason ?? "No stated reason.", 180)}`,
-    "all"
+    visibleTo
   );
   return {
     ok: true,
@@ -1609,8 +1673,19 @@ export function getTribeSafetyScore(state: GameState, tribeId: TribeId): number 
   const watchtowers = ownBuildings.filter((building) => building.type === "watchtower").length;
   const activeWars = tribeIds.filter((other) => state.wars[tribeId]?.[other]).length;
   const townHall = ownBuildings.some((building) => building.type === "townHall") ? 8 : -22;
+  const resourceControl = getResourceControlSummary(state, tribeId);
   const raw =
-    34 + townHall + military * 5 + sentinels * 3 + walls * 2 + gates * 3 + turrets * 8 + watchtowers * 5 - activeWars * 10 - Math.max(0, 10 - population) * 1.5;
+    34 +
+    townHall +
+    military * 5 +
+    sentinels * 3 +
+    walls * 2 +
+    gates * 3 +
+    turrets * 8 +
+    watchtowers * 5 +
+    resourceControl.survivalBonus -
+    activeWars * 10 -
+    Math.max(0, 10 - population) * 1.5;
   return Math.round(clamp(raw, 0, 100));
 }
 
@@ -1658,6 +1733,418 @@ export function getVisibleBuildings(state: GameState, tribeId: TribeId): Buildin
   return Object.values(state.buildings).filter((building) => building.hp > 0 && visible[tileIndex(building.x, building.y)] === 2);
 }
 
+export function getResourceDepositPosturesForTribe(
+  state: GameState,
+  tribeId: TribeId,
+  options: { visibleOnly?: boolean; limit?: number } = {}
+): ResourceDepositPosture[] {
+  const visibleOnly = options.visibleOnly ?? false;
+  const knowledge: ResourceKnowledgeMode = visibleOnly ? "visible" : "full";
+  const visible = state.visibility[tribeId];
+  const subjects = collectResourceInfluenceSubjects(state, tribeId, knowledge);
+  const postures: ResourceDepositPosture[] = [];
+  for (let y = 0; y < MAP_SIZE; y += 1) {
+    for (let x = 0; x < MAP_SIZE; x += 1) {
+      const index = tileIndex(x, y);
+      const visibleNow = visible?.[index] === 2;
+      if (visibleOnly && !visibleNow) continue;
+      const resource = state.map[index].resource;
+      if (!resource || resource.amount <= 0 || resource.hp <= 0) continue;
+      postures.push(evaluateResourceDepositPosture(state, tribeId, x, y, resource, subjects, knowledge, visibleNow));
+    }
+  }
+  const scarcityRank: Record<ResourceType, number> = { coal: 8, iron: 7, gold: 6, limestone: 5, stone: 4, clay: 3, wood: 2, food: 1 };
+  const sorted = postures.sort(
+    (left, right) =>
+      Number(right.control === "controlled") - Number(left.control === "controlled") ||
+      Number(right.control === "contested") - Number(left.control === "contested") ||
+      Number(right.raided) - Number(left.raided) ||
+      scarcityRank[right.type] - scarcityRank[left.type] ||
+      right.amount - left.amount ||
+      left.distanceToTownHall - right.distanceToTownHall
+  );
+  return options.limit ? sorted.slice(0, options.limit) : sorted;
+}
+
+export function getVisibleResourceDepositIntel(state: GameState, tribeId: TribeId, limit = 10): ResourceDepositPosture[] {
+  return getResourceDepositPosturesForTribe(state, tribeId, { visibleOnly: true, limit });
+}
+
+export function getResourceControlSummary(state: GameState, tribeId: TribeId): ResourceControlSummary {
+  const cached = resourceControlSummaryCache.get(state);
+  if (cached && state.tick - cached.tick < RESOURCE_CONTROL_CACHE_TICKS && cached.byTribe[tribeId]) return cached.byTribe[tribeId];
+  const summary = computeResourceControlSummary(state, tribeId);
+  const nextCache =
+    cached && state.tick - cached.tick < RESOURCE_CONTROL_CACHE_TICKS
+      ? cached
+      : { tick: state.tick, byTribe: {} as Partial<Record<TribeId, ResourceControlSummary>> };
+  nextCache.byTribe[tribeId] = summary;
+  resourceControlSummaryCache.set(state, nextCache);
+  return summary;
+}
+
+function computeResourceControlSummary(state: GameState, tribeId: TribeId): ResourceControlSummary {
+  const postures = getResourceDepositPosturesForTribe(state, tribeId);
+  const recentDenials = getRecentResourceDenials(state);
+  const summary: ResourceControlSummary = {
+    tribeId,
+    controlledDeposits: 0,
+    defendedDeposits: 0,
+    vulnerableDeposits: 0,
+    contestedDeposits: 0,
+    raidedDeposits: 0,
+    visibleDeposits: 0,
+    recentDeniedDeposits: 0,
+    recentDeniedLosses: 0,
+    controlledValue: 0,
+    defendedValue: 0,
+    vulnerableValue: 0,
+    contestedValue: 0,
+    raidedValue: 0,
+    deniedValue: 0,
+    deniedLossValue: 0,
+    survivalBonus: 0
+  };
+  for (const posture of postures) {
+    const value = resourcePostureValue(posture);
+    if (posture.visible) summary.visibleDeposits += 1;
+    if (posture.control === "controlled") {
+      summary.controlledDeposits += 1;
+      summary.controlledValue += value;
+      if (posture.defended) {
+        summary.defendedDeposits += 1;
+        summary.defendedValue += value;
+      } else {
+        summary.vulnerableDeposits += 1;
+        summary.vulnerableValue += value;
+      }
+    }
+    if (posture.control === "contested") {
+      summary.contestedDeposits += 1;
+      summary.contestedValue += value;
+    }
+    if (posture.raided && (posture.control === "controlled" || posture.control === "contested" || posture.raiders.includes(tribeId))) {
+      summary.raidedDeposits += 1;
+      summary.raidedValue += value;
+    }
+  }
+  for (const denial of recentDenials) {
+    const value = resourceDenialValue(denial);
+    if (denial.attackerTribeId === tribeId) {
+      summary.recentDeniedDeposits += 1;
+      summary.deniedValue += value;
+    }
+    if (denial.controlledBy === tribeId && denial.attackerTribeId !== tribeId) {
+      summary.recentDeniedLosses += 1;
+      summary.deniedLossValue += value;
+    }
+  }
+  summary.controlledValue = Math.round(summary.controlledValue);
+  summary.defendedValue = Math.round(summary.defendedValue);
+  summary.vulnerableValue = Math.round(summary.vulnerableValue);
+  summary.contestedValue = Math.round(summary.contestedValue);
+  summary.raidedValue = Math.round(summary.raidedValue);
+  summary.deniedValue = Math.round(summary.deniedValue);
+  summary.deniedLossValue = Math.round(summary.deniedLossValue);
+  summary.survivalBonus = Math.round(
+    clamp(
+      summary.controlledValue * 0.015 +
+        summary.defendedValue * 0.01 -
+        summary.vulnerableValue * 0.01 -
+        summary.contestedValue * 0.008 -
+        summary.raidedValue * 0.02 +
+        summary.deniedValue * 0.004 -
+        summary.deniedLossValue * 0.025,
+      -18,
+      22
+    )
+  );
+  return summary;
+}
+
+type ResourceKnowledgeMode = "full" | "visible";
+
+type ResourceInfluenceSubject = {
+  tribeId: TribeId;
+  x: number;
+  y: number;
+  controlPower: number;
+  controlRadius: number;
+  defensePower: number;
+  defenseRadius: number;
+};
+
+const RESOURCE_DENIAL_LOOKBACK_TICKS = TICKS_PER_GAME_YEAR * 50;
+const RESOURCE_CONTROL_CACHE_TICKS = TICK_RATE * 2;
+const resourceControlSummaryCache = new WeakMap<GameState, { tick: number; byTribe: Partial<Record<TribeId, ResourceControlSummary>> }>();
+const resourceValueWeights: Record<ResourceType, number> = {
+  gold: 3.5,
+  food: 0.2,
+  wood: 0.25,
+  stone: 1.2,
+  clay: 1.2,
+  limestone: 1.6,
+  iron: 3,
+  coal: 2.8
+};
+
+function collectResourceInfluenceSubjects(state: GameState, perspectiveTribeId: TribeId, knowledge: ResourceKnowledgeMode): ResourceInfluenceSubject[] {
+  const subjects: ResourceInfluenceSubject[] = [];
+  const visible = state.visibility[perspectiveTribeId];
+  for (const unit of Object.values(state.units)) {
+    if (unit.hp <= 0 || state.tribes[unit.tribeId].eliminated) continue;
+    if (knowledge === "visible" && unit.tribeId !== perspectiveTribeId && !isPositionVisible(visible, Math.round(unit.x), Math.round(unit.y))) continue;
+    subjects.push({
+      tribeId: unit.tribeId,
+      x: unit.x,
+      y: unit.y,
+      controlPower: unitResourceControlPower(unit.type),
+      controlRadius: 7,
+      defensePower: unitResourceDefensePower(unit.type),
+      defenseRadius: unit.type === "archer" ? 8 : 6
+    });
+  }
+  for (const building of Object.values(state.buildings)) {
+    if (building.hp <= 0 || state.tribes[building.tribeId].eliminated) continue;
+    if (knowledge === "visible" && building.tribeId !== perspectiveTribeId && !isPositionVisible(visible, building.x, building.y)) continue;
+    subjects.push({
+      tribeId: building.tribeId,
+      x: building.x,
+      y: building.y,
+      controlPower: buildingResourceControlPower(building.type),
+      controlRadius: buildingResourceControlRadius(building.type),
+      defensePower: buildingResourceDefensePower(building),
+      defenseRadius: buildingResourceDefenseRadius(building)
+    });
+  }
+  return subjects;
+}
+
+function evaluateResourceDepositPosture(
+  state: GameState,
+  perspectiveTribeId: TribeId,
+  x: number,
+  y: number,
+  resource: ResourceDeposit,
+  subjects: ResourceInfluenceSubject[],
+  knowledge: ResourceKnowledgeMode,
+  visibleNow: boolean
+): ResourceDepositPosture {
+  const target = { x, y };
+  const base = findTownHall(state, perspectiveTribeId) ?? starts[perspectiveTribeId];
+  const influence = scoreResourceInfluence(subjects, target);
+  const ranked = influence.slice().sort((left, right) => right.score - left.score || left.distance - right.distance);
+  const nearest = influence.slice().sort((left, right) => left.distance - right.distance)[0];
+  const best = ranked.find((entry) => entry.score >= 1);
+  const runnerUp = ranked.find((entry) => entry.tribeId !== best?.tribeId && entry.score >= 1);
+  const contested = Boolean(best && runnerUp && runnerUp.score >= Math.max(best.score - 1.5, best.score * 0.78));
+  const controlledBy = best && !contested ? best.tribeId : undefined;
+  const control: ResourceDepositControl = !best ? "uncontrolled" : contested ? "contested" : best.tribeId === perspectiveTribeId ? "controlled" : "foreign_controlled";
+  const defenseScore = scoreResourceDefense(subjects, target, perspectiveTribeId);
+  const hostileDefenseScore = Math.max(
+    0,
+    ...tribeIds.filter((tribeId) => tribeId !== perspectiveTribeId).map((tribeId) => scoreResourceDefense(subjects, target, tribeId))
+  );
+  const raiders = resourceRaiders(state, target, resource.type, perspectiveTribeId, knowledge);
+  return {
+    type: resource.type,
+    x,
+    y,
+    amount: Math.round(resource.amount),
+    hp: Math.ceil(resource.hp),
+    maxHp: resource.maxHp,
+    armor: resource.armor,
+    attack: resource.attack,
+    range: resource.range,
+    distanceToTownHall: Math.round(distance(base, target)),
+    control,
+    controlledBy,
+    nearestTribe: nearest?.tribeId,
+    nearestTribeDistance: nearest ? Math.round(nearest.distance) : undefined,
+    defended: defenseScore >= 4,
+    defenseScore: Math.round(defenseScore),
+    hostileDefended: hostileDefenseScore >= 4,
+    hostileDefenseScore: Math.round(hostileDefenseScore),
+    raided: resource.hp < resource.maxHp || raiders.length > 0,
+    underAttack: raiders.length > 0,
+    raiders,
+    visible: visibleNow
+  };
+}
+
+function scoreResourceInfluence(subjects: ResourceInfluenceSubject[], target: Position): Array<{ tribeId: TribeId; score: number; distance: number }> {
+  const byTribe = new Map<TribeId, { score: number; distance: number }>();
+  for (const subject of subjects) {
+    const subjectDistance = distance(subject, target);
+    const current = byTribe.get(subject.tribeId) ?? { score: 0, distance: Number.POSITIVE_INFINITY };
+    if (subjectDistance < current.distance) current.distance = subjectDistance;
+    if (subjectDistance <= subject.controlRadius) {
+      current.score += subject.controlPower * (1 - subjectDistance / Math.max(1, subject.controlRadius));
+    }
+    byTribe.set(subject.tribeId, current);
+  }
+  return tribeIds
+    .filter((tribeId) => byTribe.has(tribeId))
+    .map((tribeId) => {
+      const entry = byTribe.get(tribeId)!;
+      return { tribeId, score: entry.score, distance: entry.distance };
+    });
+}
+
+function scoreResourceDefense(subjects: ResourceInfluenceSubject[], target: Position, tribeId: TribeId): number {
+  return subjects
+    .filter((subject) => subject.tribeId === tribeId)
+    .reduce((sum, subject) => {
+      const subjectDistance = distance(subject, target);
+      if (subjectDistance > subject.defenseRadius) return sum;
+      return sum + subject.defensePower * (1 - subjectDistance / Math.max(1, subject.defenseRadius));
+    }, 0);
+}
+
+function resourceRaiders(
+  state: GameState,
+  target: Position,
+  resourceType: ResourceType,
+  perspectiveTribeId: TribeId,
+  knowledge: ResourceKnowledgeMode
+): TribeId[] {
+  const visible = state.visibility[perspectiveTribeId];
+  const raiders = new Set<TribeId>();
+  for (const unit of Object.values(state.units)) {
+    if (unit.hp <= 0 || unit.task.kind !== "attackResource" || unit.task.resource !== resourceType) continue;
+    if (unit.task.target.x !== target.x || unit.task.target.y !== target.y) continue;
+    if (knowledge === "visible" && unit.tribeId !== perspectiveTribeId && !isPositionVisible(visible, Math.round(unit.x), Math.round(unit.y))) continue;
+    raiders.add(unit.tribeId);
+  }
+  return Array.from(raiders);
+}
+
+function resourcePostureValue(posture: Pick<ResourceDepositPosture, "type" | "amount" | "hp" | "maxHp">): number {
+  const condition = posture.maxHp > 0 ? clamp(posture.hp / posture.maxHp, 0.25, 1) : 1;
+  return Math.min(18, Math.sqrt(Math.max(1, posture.amount)) * resourceValueWeights[posture.type]) * condition;
+}
+
+function resourceDenialValue(denial: ResourceDenialRecord): number {
+  return Math.min(18, Math.sqrt(Math.max(1, denial.amount)) * resourceValueWeights[denial.type]);
+}
+
+function getRecentResourceDenials(state: GameState): ResourceDenialRecord[] {
+  const denials = (state as GameState & { resourceDenials?: ResourceDenialRecord[] }).resourceDenials ?? [];
+  return denials.filter((denial) => state.tick - denial.tick <= RESOURCE_DENIAL_LOOKBACK_TICKS);
+}
+
+function ensureResourceDenials(state: GameState): ResourceDenialRecord[] {
+  const mutable = state as GameState & { resourceDenials?: ResourceDenialRecord[] };
+  if (!mutable.resourceDenials) mutable.resourceDenials = [];
+  return mutable.resourceDenials;
+}
+
+function invalidateResourceControlCache(state: GameState): void {
+  resourceControlSummaryCache.delete(state);
+}
+
+function resourceEventVisibleTo(state: GameState, target: Position, extraTribes: Array<TribeId | undefined>): TribeId[] {
+  const visible = new Set<TribeId>();
+  for (const tribeId of extraTribes) if (tribeId) visible.add(tribeId);
+  const index = tileIndex(target.x, target.y);
+  for (const tribeId of tribeIds) {
+    if (state.visibility[tribeId]?.[index] === 2) visible.add(tribeId);
+  }
+  return Array.from(visible);
+}
+
+function dominantResourceController(state: GameState, target: Position, resource: ResourceDeposit): TribeId | undefined {
+  const subjects = collectResourceInfluenceSubjects(state, "blue", "full");
+  const influence = scoreResourceInfluence(subjects, target).sort((left, right) => right.score - left.score || left.distance - right.distance);
+  const best = influence.find((entry) => entry.score >= 1);
+  const runnerUp = influence.find((entry) => entry.tribeId !== best?.tribeId && entry.score >= 1);
+  if (!best) return undefined;
+  if (runnerUp && runnerUp.score >= Math.max(best.score - 1.5, best.score * 0.78)) return undefined;
+  return resource.amount > 0 ? best.tribeId : undefined;
+}
+
+function recordResourceDenial(
+  state: GameState,
+  target: Position,
+  resource: ResourceDeposit,
+  attackerTribeId: TribeId,
+  controlledBy: TribeId | undefined,
+  visibleTo: TribeId[]
+): void {
+  const denials = ensureResourceDenials(state);
+  denials.push({
+    id: nextId(state, "resource_denial"),
+    tick: state.tick,
+    type: resource.type,
+    x: target.x,
+    y: target.y,
+    amount: Math.max(1, Math.round(resource.amount)),
+    maxHp: resource.maxHp,
+    attackerTribeId,
+    controlledBy,
+    visibleTo
+  });
+  while (denials.length > 80) denials.shift();
+  invalidateResourceControlCache(state);
+}
+
+function unitResourceControlPower(type: UnitType): number {
+  if (type === "militia" || type === "archer") return 5;
+  if (type === "sentinel") return 4;
+  if (type === "sovereign") return 3.5;
+  if (type === "peon") return 3;
+  return 1.5;
+}
+
+function unitResourceDefensePower(type: UnitType): number {
+  if (type === "militia" || type === "archer") return 5;
+  if (type === "sentinel") return 2.5;
+  if (type === "sovereign") return 2;
+  return 0.5;
+}
+
+function buildingResourceControlPower(type: BuildingType): number {
+  if (type === "townHall") return 12;
+  if (type === "turret") return 8;
+  if (type === "watchtower") return 7;
+  if (type === "barracks" || type === "market") return 4;
+  if (type === "farm") return 3;
+  if (type === "gate") return 2.5;
+  if (type === "wall") return 1.5;
+  return 1;
+}
+
+function buildingResourceControlRadius(type: BuildingType): number {
+  if (type === "townHall") return 24;
+  if (type === "turret" || type === "watchtower") return 13;
+  if (type === "barracks" || type === "market") return 10;
+  if (type === "farm") return 8;
+  if (type === "gate" || type === "wall") return 5;
+  return 7;
+}
+
+function buildingResourceDefensePower(building: Building): number {
+  if (building.type === "turret") return 12;
+  if (building.type === "watchtower") return 5;
+  if (building.type === "barracks") return 3;
+  if (building.type === "gate") return 2;
+  if (building.type === "wall") return 1.5;
+  return building.type === "townHall" ? 2 : 0;
+}
+
+function buildingResourceDefenseRadius(building: Building): number {
+  if (building.type === "turret") return Math.max(8, building.range + 2);
+  if (building.type === "watchtower") return 9;
+  if (building.type === "barracks") return 8;
+  if (building.type === "wall" || building.type === "gate") return 5;
+  return building.type === "townHall" ? 10 : 3;
+}
+
+function isPositionVisible(visible: Uint8Array | undefined, x: number, y: number): boolean {
+  if (!visible || x < 0 || y < 0 || x >= MAP_SIZE || y >= MAP_SIZE) return false;
+  return visible[tileIndex(x, y)] === 2;
+}
+
 function answerInformationRequest(state: GameState, request: AiInformationRequest): void {
   const lower = `${request.subject} ${request.body} ${request.reason}`.toLowerCase();
   const ownUnits = Object.values(state.units).filter((unit) => unit.tribeId === request.tribeId && unit.hp > 0);
@@ -1670,11 +2157,11 @@ function answerInformationRequest(state: GameState, request: AiInformationReques
   const diplomacy = summarizeInformationDiplomacy(state, request.tribeId);
   const victory = getVictoryPressure(state);
   const asksHidden =
-    /\b(private|secret|hidden|unseen|intent|plans?|strategy|treasury|resources|wealth|rich|poorest|army|armies)\b/.test(lower) &&
-    /\b(enemy|rival|foreign|other|their|opponent)\b/.test(lower);
+    /\b(private|secret|hidden|unseen|intent|plans?|strategy|treasury|treasuries|stockpiles?|stash|resources?|wealth|rich|poorest|army|armies|deposits?|mines?|ore)\b/.test(lower) &&
+    /\b(enemy|rival|foreign|other|their|opponent|opponents?|red|green|yellow|purple|blue)\b/.test(lower);
   const answerStatus: AiInformationRequest["answerStatus"] = asksHidden ? "partial" : "answered";
   const hiddenCaveat = asksHidden
-    ? "Private rival intent, unseen armies, and hidden treasuries are not directly observable; scout, send a messenger, or provoke a public event to learn more."
+    ? "Private rival intent, unseen armies, hidden treasuries, and unscouted deposits are not directly observable; scout, send a messenger, or provoke a public event to learn more."
     : "No hidden-state caveat triggered by this question.";
   const ownPosition = `${state.tribes[request.tribeId].name} has wealth ${computeWealth(state, request.tribeId)}, resources ${formatResourcesForInformation(state.tribes[request.tribeId].resources)}, ${ownUnits.length} living units, ${military} military units, ${walls} walls, ${gates} gates, and ${turrets} turrets.`;
   const answer = clampText(
@@ -1704,27 +2191,36 @@ function answerInformationRequest(state: GameState, request: AiInformationReques
 
 function summarizeVisibleResourceIntel(state: GameState, tribeId: TribeId, lower: string): string {
   const wanted = requestedResourceTypes(lower);
-  const visible = state.visibility[tribeId];
-  const base = findTownHall(state, tribeId) ?? starts[tribeId];
-  const deposits: { type: ResourceType; x: number; y: number; amount: number; distance: number }[] = [];
-  for (let y = 0; y < MAP_SIZE; y += 1) {
-    for (let x = 0; x < MAP_SIZE; x += 1) {
-      const index = tileIndex(x, y);
-      if (visible[index] !== 2) continue;
-      const tile = state.map[index];
-      if (tile.resource?.amount && tile.resource.hp > 0 && wanted.includes(tile.resource.type)) {
-        deposits.push({ type: tile.resource.type, x, y, amount: Math.round(tile.resource.amount), distance: distance(base, { x, y }) });
-      }
-    }
-  }
+  const deposits = getVisibleResourceDepositIntel(state, tribeId, 24).filter((deposit) => wanted.includes(deposit.type));
   if (deposits.length === 0) {
     return `Visible resource answer: no ${wanted.join("/")} deposits are currently visible; scout roads, borders, and the center before committing workers or armies.`;
   }
-  deposits.sort((left, right) => left.distance - right.distance || right.amount - left.amount);
+  deposits.sort((left, right) => left.distanceToTownHall - right.distanceToTownHall || right.amount - left.amount);
   return `Visible resource answer: ${deposits
     .slice(0, 6)
-    .map((deposit) => `${deposit.type} at ${deposit.x},${deposit.y} amount ${deposit.amount} (${Math.round(deposit.distance)} tiles)`)
+    .map(
+      (deposit) =>
+        `${deposit.type} at ${deposit.x},${deposit.y} amount ${deposit.amount} (${deposit.distanceToTownHall} tiles, ${formatResourcePostureForIntel(
+          state,
+          tribeId,
+          deposit
+        )})`
+    )
     .join("; ")}.`;
+}
+
+function formatResourcePostureForIntel(state: GameState, tribeId: TribeId, deposit: ResourceDepositPosture): string {
+  const control =
+    deposit.control === "controlled"
+      ? "controlled by you"
+      : deposit.control === "contested"
+        ? "contested"
+        : deposit.control === "foreign_controlled"
+          ? `foreign-controlled${deposit.controlledBy ? ` by visible ${state.tribes[deposit.controlledBy].name}` : ""}`
+          : "uncontrolled";
+  const defense = deposit.defended ? "defended by you" : deposit.hostileDefended ? "hostile defenses visible" : "undefended";
+  const raid = deposit.underAttack ? `under attack by ${deposit.raiders.join("/")}` : deposit.raided ? "damaged or raided" : "intact";
+  return `${control}, ${defense}, ${raid}`;
 }
 
 function requestedResourceTypes(lower: string): ResourceType[] {
@@ -2453,16 +2949,28 @@ function applyResourceDamage(state: GameState, target: Position, amount: number,
   const tile = state.map[tileIndex(target.x, target.y)];
   const resource = tile.resource;
   if (!resource || resource.hp <= 0 || resource.amount <= 0) return false;
+  const destroyedSnapshot = { ...resource };
   const damage = armoredDamage(amount, resource.armor);
   resource.hp = Math.max(0, resource.hp - damage);
   resource.amount = Math.max(0, resource.amount - damage);
+  invalidateResourceControlCache(state);
   if (resource.hp > 0 && resource.amount > 0) return false;
-  destroyResourceDepositAt(state, target, resource.type, attackerTribeId);
+  destroyResourceDepositAt(state, target, resource.type, attackerTribeId, destroyedSnapshot);
   return true;
 }
 
-function destroyResourceDepositAt(state: GameState, target: Position, type: ResourceType, attackerTribeId?: TribeId): void {
+function destroyResourceDepositAt(
+  state: GameState,
+  target: Position,
+  type: ResourceType,
+  attackerTribeId?: TribeId,
+  destroyedSnapshot?: ResourceDeposit
+): void {
   const tile = state.map[tileIndex(target.x, target.y)];
+  const resource = destroyedSnapshot ?? tile.resource;
+  const controlledBy = resource ? dominantResourceController(state, target, resource) : undefined;
+  const visibleTo = resourceEventVisibleTo(state, target, [attackerTribeId, controlledBy]);
+  if (resource && attackerTribeId) recordResourceDenial(state, target, resource, attackerTribeId, controlledBy, visibleTo);
   if (type === "wood" && tile.terrain === "forest") tile.terrain = "grass";
   delete tile.resource;
   addEvent(
@@ -2470,7 +2978,7 @@ function destroyResourceDepositAt(state: GameState, target: Position, type: Reso
     "RESOURCE_DEPOSIT_DESTROYED",
     `${labelResourceType(type)} deposit destroyed`,
     `${labelResourceType(type)} deposit at ${target.x},${target.y} was destroyed${attackerTribeId ? ` by ${state.tribes[attackerTribeId].name}` : ""}.`,
-    "all"
+    visibleTo
   );
   updateVisibility(state);
 }

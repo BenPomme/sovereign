@@ -233,7 +233,25 @@ const wallState = await page.evaluate(() => {
   const camera = parsed.camera;
   const contestedIron = parsed.contestedResourceSites?.filter((site) => site.type === "iron" && site.contested) ?? [];
   const contestedCoal = parsed.contestedResourceSites?.filter((site) => site.type === "coal" && site.contested) ?? [];
-  return { selectedWall, clay, limestone, iron, coal, wallCost, turretCost, wallMissing, readability, constructionFeedback, camera, contestedIron, contestedCoal };
+  const blueResourceControl = parsed.resourceControl?.find((entry) => entry.tribeId === "blue");
+  const visibleResourceDepositsForPlayer = parsed.visibleResourceDepositsForPlayer ?? [];
+  return {
+    selectedWall,
+    clay,
+    limestone,
+    iron,
+    coal,
+    wallCost,
+    turretCost,
+    wallMissing,
+    readability,
+    constructionFeedback,
+    camera,
+    contestedIron,
+    contestedCoal,
+    blueResourceControl,
+    visibleResourceDepositsForPlayer
+  };
 });
 if (wallState.selectedWall?.type !== "wall" || wallState.selectedWall.blocksMovement !== true) {
   throw new Error(`Built wall was not represented as a blocking visible building: ${JSON.stringify(wallState.selectedWall)}`);
@@ -264,6 +282,12 @@ if (!wallState.readability?.resourceAbbreviations?.some((entry) => entry.type ==
 }
 if (!wallState.contestedIron.length || !wallState.contestedCoal.length) {
   throw new Error(`No contested scarce-resource sites were exposed by render_game_to_text: ${JSON.stringify(wallState)}`);
+}
+if (!wallState.blueResourceControl || typeof wallState.blueResourceControl.survivalBonus !== "number") {
+  throw new Error(`Resource control summary was not exposed by render_game_to_text: ${JSON.stringify(wallState.blueResourceControl)}`);
+}
+if (!Array.isArray(wallState.visibleResourceDepositsForPlayer)) {
+  throw new Error("Visible resource deposit posture list was not exposed by render_game_to_text.");
 }
 if (wallState.wallMissing.length > 0) {
   throw new Error(`Masonry did not unlock wall construction in browser state: ${JSON.stringify(wallState.wallMissing)}`);

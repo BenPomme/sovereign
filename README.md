@@ -97,6 +97,8 @@ http://localhost:5173/
   - optional defense overlay outlines wall tiles and shows turret range
   - hostile units can damage and destroy structures in range
   - visible resource deposits can be raided by `ATTACK` with `targetX`, `targetY`, and `targetResourceType`; deposits take armor-reduced damage and disappear when destroyed or exhausted
+  - visible deposits expose controlled, contested, defended, raided, under-attack, and denied posture to AI prompts and browser hooks without leaking unscouted rival deposits
+  - resource-control posture contributes a bounded survival-safety modifier so raids and defended scarce resources affect century-review pressure
   - damaged owned buildings can be repaired by idle peons through `REPAIR` orders with scaled repair costs
   - turrets fire on hostile units near the kingdom
   - farms, watchtowers, walls, gates, and turrets use shared construction-cost rules tied to wood, stone, clay, limestone, iron, coal, and gold
@@ -168,7 +170,8 @@ watchtower, wall, gate, and turret, verifies each new structure is selected, vis
 centered on the map, represented in the selected panel, and retained in the
 recent-construction marker list, samples the browser screenshot around each
 created building to catch invisible-map regressions, proves explicit siege
-orders destroy wall, gate, and turret targets through normal combat, and saves:
+orders destroy wall, gate, and turret targets through normal combat, proves a
+resource raid creates visible posture and denial evidence, and saves:
 
 ```text
 /Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-buildings.png
@@ -206,7 +209,7 @@ sample.
 `pnpm smoke` loads the running dev server with Playwright and uses deterministic
 Playwright Ollama route mocks for identity setup, decision, and reply. It checks
 the observer HUD, diplomacy chat panel, tribe identity panel, legend, hover tooltip, browser QA hooks,
-farm/watchtower/wall/gate/turret construction visibility, recent construction markers, construction-resource exposure, explicit siege, resource-raid, and repair orders, explicit `REPORT_BUG`
+farm/watchtower/wall/gate/turret construction visibility, recent construction markers, construction-resource exposure, explicit siege, resource-raid, resource-control posture, and repair orders, explicit `REPORT_BUG`
 self-report persistence, `REQUEST_INFO` answer generation and queue isolation, persisted AI report
 review summary, bucket currentness/proof, source/context fields, compact snapshot previews/links, severity/provider/model filters, source/context search, and triage controls, public Victory Pressure panel/hook state, AI bug-report
 endpoint, persisted post-game learning across reload, contested-resource hook state, map-layer controls, construction-cost legend, parser recovery coverage, LLM transport/parser bug categorization, and event log, and saves:

@@ -325,6 +325,18 @@ async function assertResourceRaidOrder(page) {
   if (!state.attackerTasks?.some((task) => task.includes("Raiding iron deposit"))) {
     throw new Error(`Resource raid order did not expose attack-resource task text: ${JSON.stringify(state)}`);
   }
+  if (state.beforePosture?.type !== "iron" || state.beforePosture?.hp <= 0 || state.beforePosture?.control !== "controlled") {
+    throw new Error(`Resource raid order did not expose a controlled live resource posture before attack: ${JSON.stringify(state)}`);
+  }
+  if (state.afterPosture !== null) {
+    throw new Error(`Resource raid order did not remove the visible resource posture after destruction: ${JSON.stringify(state)}`);
+  }
+  if (!state.resourceDenials?.some((denial) => denial.type === "iron" && denial.x === 49 && denial.y === 52 && denial.attackerTribeId === "blue")) {
+    throw new Error(`Resource raid order did not create a resource denial record: ${JSON.stringify(state)}`);
+  }
+  if ((state.resourceControlAfter?.recentDeniedDeposits ?? 0) < 1) {
+    throw new Error(`Resource raid order did not affect resource-control summary: ${JSON.stringify(state)}`);
+  }
   if (!state.recentEvents?.some((event) => event.includes("RESOURCE_RAID_ORDER") && event.includes("iron"))) {
     throw new Error(`Resource raid order did not emit raid-order evidence: ${JSON.stringify(state)}`);
   }

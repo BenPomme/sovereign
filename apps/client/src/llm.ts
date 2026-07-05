@@ -11,13 +11,14 @@ import {
   getMissingBuildingDevelopments,
   getRecentVisibleEvents,
   getTribeSafetyScore,
+  getResourceControlSummary,
+  getVisibleResourceDepositIntel,
   getVictoryPressure,
   getVisibleBuildings,
   getVisibleUnits,
   resourceTypes,
   summarizeDiplomaticIntel,
   summarizeSovereignMemory,
-  tileIndex,
   tribeIds,
   type AiStrategicOrder,
   type Building,
@@ -32,6 +33,7 @@ import {
   type Packet,
   type ResourceType,
   type ResourceCost,
+  type ResourceDepositPosture,
   type Resources,
   type TribeId,
   type TribeIdentity,
@@ -998,6 +1000,7 @@ function buildPrompt(state: GameState, tribeId: TribeId, iterationContext: AiIte
   const visibleForeignUnits = getVisibleUnits(state, tribeId).filter((unit) => unit.tribeId !== tribeId);
   const visibleForeignBuildings = getVisibleBuildings(state, tribeId).filter((building) => building.tribeId !== tribeId);
   const visibleResourceTargets = summarizeVisibleResourceTargets(state, tribeId);
+  const knownResourcePosture = summarizeKnownResourcePosture(state, tribeId);
   const packets = Object.values(state.packets)
     .filter((packet) => packet.originTribeId === tribeId || packet.recipientTribeId === tribeId)
     .slice(-5)
@@ -1053,6 +1056,7 @@ Your happiness: ${Math.round(tribe.happiness)}
 Your safety score: ${ownSafety}
 Developments: ${developmentState}
 Public survival pressure: ${victory.publicText} Status ${victory.status}. Surviving populations ${victory.survivingTribes}/${tribeIds.length}; next public review year ${victory.nextReviewYear}. Exact rival wealth is not public.
+Known resource posture: ${knownResourcePosture}
 Own units: ${summarizeUnits(ownUnits)}
 Own unit roster: ${summarizeUnitRoster(ownUnits)}
 Own buildings: ${summarizeOwnBuildings(ownBuildings)}
@@ -1105,6 +1109,7 @@ function buildCompactPrompt(
   const catchUp = summarizeSovereignCatchUp(state, tribeId, true);
   const diplomaticIntel = summarizeDiplomaticIntel(state, tribeId, 8);
   const sinceTick = lastSovereignMoveTick(state, tribeId);
+  const knownResourcePosture = summarizeKnownResourcePosture(state, tribeId);
   return `
 You are ${tribe.name}, an embodied sovereign responsible for living people. Return compact JSON only.
 The previous council transcript was unusable (${failure.kind}: ${cleanText(failure.message, 120)}), so answer this shorter royal brief.
@@ -1114,7 +1119,8 @@ Identity: sovereign ${tribe.sovereignName}; naming style ${tribe.namingStyle}.
 Turn ${state.tick}; year ${victory.currentYear}/${victory.finalYear}; next review in ${victory.yearsUntilReview} years.
 Resources: ${formatResources(tribe.resources)}
 Wealth ${computeWealth(state, tribeId)}; happiness ${Math.round(tribe.happiness)}; safety ${getTribeSafetyScore(state, tribeId)}; population ${ownUnits.length}.
-	Buildings: ${summarizeOwnBuildings(ownBuildings)}
+		Known resource posture: ${knownResourcePosture}
+		Buildings: ${summarizeOwnBuildings(ownBuildings)}
 	Developments: ${summarizeDevelopmentState(state, tribeId)}
 	Memory: ${summarizeSovereignMemory(state, tribeId)}
 	Diplomatic intelligence: ${diplomaticIntel}
@@ -1295,34 +1301,65 @@ function summarizeVisibleForeignBuildings(
 }
 
 function summarizeVisibleResourceTargets(state: GameState, tribeId: TribeId): string {
-  const visible = state.visibility[tribeId];
-  const base = Object.values(state.buildings).find((building) => building.tribeId === tribeId && building.type === "townHall") ?? { x: MAP_SIZE / 2, y: MAP_SIZE / 2 };
-  const strategic = new Set<ResourceType>(["coal", "iron", "gold", "stone", "limestone", "clay", "wood", "food"]);
-  const deposits: Array<{ type: ResourceType; x: number; y: number; amount: number; hp: number; armor: number; distance: number }> = [];
-  for (let y = 0; y < MAP_SIZE; y += 1) {
-    for (let x = 0; x < MAP_SIZE; x += 1) {
-      const index = tileIndex(x, y);
-      if (visible[index] !== 2) continue;
-      const resource = state.map[index].resource;
-      if (!resource || resource.amount <= 0 || resource.hp <= 0 || !strategic.has(resource.type)) continue;
-      deposits.push({
-        type: resource.type,
-        x,
-        y,
-        amount: Math.round(resource.amount),
-        hp: Math.ceil(resource.hp),
-        armor: resource.armor,
-        distance: Math.hypot(x - base.x, y - base.y)
-      });
-    }
-  }
+  const deposits = getVisibleResourceDepositIntel(state, tribeId, 40);
   if (deposits.length === 0) return "none currently visible";
   const scarcityRank: Record<ResourceType, number> = { coal: 8, iron: 7, gold: 6, limestone: 5, stone: 4, clay: 3, wood: 2, food: 1 };
   return deposits
-    .sort((left, right) => scarcityRank[right.type] - scarcityRank[left.type] || right.amount - left.amount || left.distance - right.distance)
+    .sort(
+      (left, right) =>
+        Number(right.control === "foreign_controlled" || right.control === "contested") -
+          Number(left.control === "foreign_controlled" || left.control === "contested") ||
+        Number(right.underAttack) - Number(left.underAttack) ||
+        scarcityRank[right.type] - scarcityRank[left.type] ||
+        right.amount - left.amount ||
+        left.distanceToTownHall - right.distanceToTownHall
+    )
     .slice(0, 10)
-    .map((deposit) => `${deposit.type} at ${deposit.x},${deposit.y} amount ${deposit.amount} hp ${deposit.hp} armor ${deposit.armor}`)
+    .map((deposit) => `${deposit.type} at ${deposit.x},${deposit.y} amount ${deposit.amount} hp ${deposit.hp} armor ${deposit.armor} ${formatResourcePostureTag(deposit)}`)
     .join("; ");
+}
+
+function summarizeKnownResourcePosture(state: GameState, tribeId: TribeId): string {
+  const visible = getVisibleResourceDepositIntel(state, tribeId, 80);
+  const summary = getResourceControlSummary(state, tribeId);
+  const controlled = visible.filter((deposit) => deposit.control === "controlled");
+  const defended = controlled.filter((deposit) => deposit.defended);
+  const contested = visible.filter((deposit) => deposit.control === "contested");
+  const vulnerable = controlled.filter((deposit) => !deposit.defended);
+  const raided = visible.filter((deposit) => deposit.raided || deposit.underAttack);
+  const scarce = visible
+    .filter((deposit) => deposit.type === "coal" || deposit.type === "iron" || deposit.type === "gold")
+    .slice(0, 5)
+    .map((deposit) => `${deposit.type} ${deposit.x},${deposit.y} ${deposit.control}${deposit.defended ? " defended" : ""}${deposit.raided ? " raided" : ""}`)
+    .join("; ");
+  return [
+    `visible deposits ${visible.length}`,
+    `controlled visible ${controlled.length}`,
+    `defended ${defended.length}`,
+    `vulnerable ${vulnerable.length}`,
+    `contested ${contested.length}`,
+    `raided/under attack ${raided.length}`,
+    `resource-control survival modifier ${formatSigned(summary.survivalBonus)}`,
+    scarce ? `scarce known sites ${scarce}` : "no scarce known sites"
+  ].join("; ");
+}
+
+function formatResourcePostureTag(deposit: ResourceDepositPosture): string {
+  const control =
+    deposit.control === "controlled"
+      ? "posture controlled_by_you"
+      : deposit.control === "foreign_controlled"
+        ? `posture foreign_controlled${deposit.controlledBy ? `_by_${deposit.controlledBy}` : ""}`
+        : deposit.control === "contested"
+          ? "posture contested"
+          : "posture uncontrolled";
+  const defense = deposit.defended ? "defended_by_you" : deposit.hostileDefended ? "hostile_defended_visible" : "undefended";
+  const raid = deposit.underAttack ? `under_attack_by_${deposit.raiders.join("_")}` : deposit.raided ? "damaged_or_raided" : "intact";
+  return `${control} ${defense} ${raid} distance ${deposit.distanceToTownHall}`;
+}
+
+function formatSigned(value: number): string {
+  return value > 0 ? `+${value}` : String(value);
 }
 
 function summarizeInformationAnswers(state: GameState, tribeId: TribeId, sinceTick = -1): string {

@@ -1933,6 +1933,9 @@ describe("Ollama JSON recovery", () => {
 
     expect(body.prompt).toContain("Visible resource raid targets:");
     expect(body.prompt).toContain("iron at 21,20 amount 12 hp 12 armor 3");
+    expect(body.prompt).toContain("Known resource posture:");
+    expect(body.prompt).toContain("posture controlled_by_you");
+    expect(body.prompt).toContain("resource-control survival modifier");
     expect(body.prompt).toContain("targetResource options");
     expect(body.format.properties.orders.items.properties.targetResourceType.enum).toContain("iron");
     expect(decision.orders[0]).toMatchObject({

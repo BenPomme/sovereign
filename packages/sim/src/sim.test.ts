@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TICKS_PER_GAME_YEAR, TICK_RATE, advanceGame, advanceGameTicks, appendSovereignMemory, applyTribeIdentity, assignGathering, attachReplyToPacket, buildStructure, buildingTypes, createGame, createResourceDeposit, damageBuilding, damageResourceDeposit, formAlliance, getBuildingCombatStats, getBuildingTypeCombatStats, getCurrentYear, getBuildingCost, getBuildingRepairCost, getResourceDepositCombatStats, getResourceTypeCombatStats, getTownHall, getUnitCombatStats, getUnitTypeCombatStats, getVictoryPressure, getVisibleBuildings, getVisibleUnits, isTileWalkable, issueSovereignOrder, recordAiDecision, renameUnits, resourceTypes, sendPlayerMessage, setAllControllers, setGateState, summarizeDiplomaticIntel, summarizeSovereignMemory, tileIndex, unitTypes, worldSignature } from "./index";
+import { TICKS_PER_GAME_YEAR, TICK_RATE, advanceGame, advanceGameTicks, appendSovereignMemory, applyTribeIdentity, assignGathering, attachReplyToPacket, buildStructure, buildingTypes, createGame, createResourceDeposit, damageBuilding, damageResourceDeposit, formAlliance, getBuildingCombatStats, getBuildingTypeCombatStats, getCurrentYear, getBuildingCost, getBuildingRepairCost, getRecentVisibleEvents, getResourceControlSummary, getResourceDepositCombatStats, getResourceDepositPosturesForTribe, getResourceTypeCombatStats, getTownHall, getUnitCombatStats, getUnitTypeCombatStats, getVictoryPressure, getVisibleBuildings, getVisibleUnits, isTileWalkable, issueSovereignOrder, recordAiDecision, renameUnits, resourceTypes, sendPlayerMessage, setAllControllers, setGateState, summarizeDiplomaticIntel, summarizeSovereignMemory, tileIndex, unitTypes, worldSignature } from "./index";
 
 describe("Sovereign Worlds vertical slice simulation", () => {
   it("is deterministic for the same seed and elapsed time", () => {
@@ -1123,6 +1123,27 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     expect(second.ok && second.destroyed).toBe(true);
     expect(state.map[tileIndex(20, 22)].resource).toBeUndefined();
     expect(state.events.some((event) => event.type === "RESOURCE_DEPOSIT_DESTROYED" && event.body.includes("20,22"))).toBe(true);
+    expect(state.resourceDenials.at(-1)).toMatchObject({ type: "coal", x: 20, y: 22, attackerTribeId: "blue" });
+  });
+
+  it("classifies controlled resource deposits as defended strategic assets", () => {
+    const state = createGame(986);
+    const target = { x: 20, y: 22 };
+    state.map[tileIndex(target.x, target.y)] = { terrain: "hill", resource: createResourceDeposit("iron", 10) };
+    advanceGameTicks(state, 5);
+
+    const posture = getResourceDepositPosturesForTribe(state, "blue", { visibleOnly: true }).find((deposit) => deposit.x === target.x && deposit.y === target.y);
+    const summary = getResourceControlSummary(state, "blue");
+
+    expect(posture).toMatchObject({
+      type: "iron",
+      control: "controlled",
+      defended: true,
+      raided: false
+    });
+    expect(summary.controlledDeposits).toBeGreaterThan(0);
+    expect(summary.defendedDeposits).toBeGreaterThan(0);
+    expect(summary.survivalBonus).toBeGreaterThanOrEqual(0);
   });
 
   it("lets an AI attack order raid and destroy a visible resource deposit by coordinate", () => {
@@ -1151,11 +1172,18 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     expect(attack.ok).toBe(true);
     expect(attack.ok && attack.summary).toContain("iron deposit 21,20");
     expect(attackers.some((unit) => unit.task.kind === "attackResource" && unit.task.resource === "iron")).toBe(true);
+    const activePosture = getResourceDepositPosturesForTribe(state, "blue", { visibleOnly: true }).find((deposit) => deposit.x === target.x && deposit.y === target.y);
+    expect(activePosture?.underAttack).toBe(true);
+    expect(activePosture?.raiders).toContain("blue");
     advanceGameTicks(state, 30);
 
     expect(state.map[tileIndex(target.x, target.y)].resource).toBeUndefined();
     expect(state.events.some((event) => event.type === "RESOURCE_RAID_ORDER" && event.body.includes("21,20"))).toBe(true);
     expect(state.events.some((event) => event.type === "RESOURCE_DEPOSIT_DESTROYED" && event.body.includes("21,20"))).toBe(true);
+    expect(state.resourceDenials.at(-1)).toMatchObject({ type: "iron", x: 21, y: 20, attackerTribeId: "blue" });
+    expect(getResourceControlSummary(state, "blue").recentDeniedDeposits).toBeGreaterThan(0);
+    expect(getRecentVisibleEvents(state, "blue", 12).some((event) => event.type === "RESOURCE_DEPOSIT_DESTROYED" && event.body.includes("21,20"))).toBe(true);
+    expect(getRecentVisibleEvents(state, "red", 12).some((event) => event.body.includes("21,20"))).toBe(false);
   });
 
   it("rejects invalid explicit siege targets", () => {
@@ -1251,6 +1279,7 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     expect(stored.answer).toContain("not directly observable");
     expect(stored.answer).toContain("scout");
     expect(stored.answer).not.toContain("Red Banner has resources");
+    expect(stored.answer).not.toMatch(/Red Banner.*(gold|iron|coal|wealth)\s+\d+/);
   });
 
   it("handles destroyed town halls without throwing later commands", () => {

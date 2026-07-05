@@ -2529,3 +2529,37 @@ Original prompt: ok continue with roadmap make sure the AIs can report bugs and 
   - implement resource-control scoring and prompt-safe deposit posture for controlled, defended, raided, and denied deposits,
   - add siege engines, breach previews, and contested field repair under fire,
   - keep future inventory items, siege engines, processing buildings, and any targetable board object on this health/armor/attack/range plus destruction contract.
+
+### 2026-07-05 Resource-Control Posture And Reply Scheduling
+
+- Delivered the first strategic resource-control scoring slice:
+  - added `ResourceDepositPosture`, `ResourceControlSummary`, and `ResourceDenialRecord` simulation contracts,
+  - deposits are now classified as controlled, contested, foreign-controlled, uncontrolled, defended, hostile-defended, raided, under attack, and recently denied,
+  - resource-denial records are written when a hostile/resource raid destroys a deposit,
+  - survival safety now includes a bounded resource-control modifier, tuned so scarce/strategic deposits matter without hundreds of wood/food tiles saturating the score,
+  - resource raid/destruction events are visible only to observing or participating tribes instead of broadcasting hidden coordinates to everyone.
+- Exposed the posture safely to AI and browser QA:
+  - LLM prompts include `Known resource posture` and visible raid-target posture tags while preserving exact coordinates only for visible deposits,
+  - `REQUEST_INFO` answers use the same visible posture and strengthened hidden-rival caveats for private wealth, stockpiles, unseen deposits, and rival strategy,
+  - `render_game_to_text()` exposes `resourceControl` plus `visibleResourceDepositsForPlayer`,
+  - `window.force_resource_raid_for_test()` now returns before/after posture, resource-control summaries, and denial records.
+- Fixed a QA-discovered diplomacy starvation bug:
+  - resource-control summary recomputation initially pushed frame pressure high enough that the general smoke kept replies suppressed,
+  - added a short cache for resource-control summaries so animation-frame reads stay cheap,
+  - allowed LLM reply scheduling to bypass only frame-pressure suppression while still respecting active-job capacity and model-concurrency rules, so delivered messenger packets do not wait forever for a written reply.
+- QA completed:
+  - `pnpm exec tsc --noEmit` passed,
+  - focused `pnpm exec vitest run packages/sim/src/sim.test.ts apps/client/src/llm.test.ts --reporter=dot` passed: 109 tests,
+  - full `pnpm test` passed: 114 tests,
+  - `pnpm build` passed,
+  - `pnpm smoke:buildings` passed with live deposit posture, denial record, explicit siege, repair, and construction evidence,
+  - inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-buildings.png`; board, overlays, construction cluster, and selected turret render normally,
+  - `pnpm smoke:smooth` passed after caching with measured FPS 30.4 and visible interpolation,
+  - inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-smooth-frame-loop.png`; board and observer panel render normally,
+  - first `pnpm smoke` run exposed the reply starvation bug; after the scheduler fix, full `pnpm smoke` passed with an AI-authored diplomacy reply, board, report review, info request, learning, persistence, and screenshot checks,
+  - `pnpm ai:review:strict -- --json --no-write` passed: 0 actionable unresolved, 0 parser/transport open,
+  - `pnpm ai:snapshots:replay -- --strict --json --no-write` passed: 486 replayed, 0 failures, 0 contract warnings.
+- Remaining backlog:
+  - expand resource-control scoring into defended logistics routes, tribute, embargoes, market manipulation, and richer resource-denial consequences,
+  - continue the PixiJS graphics upgrade so resource/fortification posture becomes more readable to humans,
+  - add siege engines, breach previews, and contested field repair under fire.
