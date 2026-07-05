@@ -123,6 +123,7 @@ for (const type of ["farm", "watchtower", "wall", "gate", "turret"]) {
     throw new Error(`Created ${type} did not keep a recent visible construction marker: ${JSON.stringify(buildingState)}`);
   }
 }
+const siegeState = await assertExplicitSiegeOrder(page);
 
 await page.screenshot({ path: screenshotPath, fullPage: true });
 const screenshot = await stat(screenshotPath);
@@ -142,7 +143,8 @@ console.log(
       url,
       screenshotPath,
       screenshotBytes: screenshot.size,
-      buildingState
+      buildingState,
+      siegeState
     },
     null,
     2
@@ -255,6 +257,26 @@ async function assertSelectedGateState(page, expectedState, expectedPolicy) {
   if (!state.panel.includes(`Gate: ${expectedState}`)) {
     throw new Error(`Selected gate panel did not expose state ${expectedState}: ${JSON.stringify(state)}`);
   }
+}
+
+async function assertExplicitSiegeOrder(page) {
+  const state = await page.evaluate(() => {
+    if (typeof window.force_siege_for_test !== "function") return { ok: false, reason: "missing siege hook" };
+    return window.force_siege_for_test();
+  });
+  if (!state.ok || state.destroyed !== true || state.afterHp !== null) {
+    throw new Error(`Explicit siege order did not destroy the target wall: ${JSON.stringify(state)}`);
+  }
+  if (!state.attackerTasks?.some((task) => task.includes("Attacking wall test_siege_wall"))) {
+    throw new Error(`Explicit siege order did not expose attack-building task text: ${JSON.stringify(state)}`);
+  }
+  if (!state.recentEvents?.some((event) => event.includes("WAR_SIEGE_ORDER") && event.includes("test_siege_wall"))) {
+    throw new Error(`Explicit siege order did not emit order evidence: ${JSON.stringify(state)}`);
+  }
+  if (!state.recentEvents?.some((event) => event.includes("STRUCTURE_DESTROYED") && event.includes("50,50"))) {
+    throw new Error(`Explicit siege order did not emit destruction evidence: ${JSON.stringify(state)}`);
+  }
+  return state;
 }
 
 async function assertBuildingRequirementState(page, buildingType, expectedMissing) {

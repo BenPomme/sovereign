@@ -68,9 +68,11 @@ This roadmap must stay tied to the visible board. Development choices should cha
 
 **Delivered gate access-policy slice on July 5, 2026:** open gates now support `all`, `owner_allies`, and `owner_only` passage policies. Pathfinding, movement recovery, AI order schema, LLM prompts, selected-panel UI, hover text, browser hooks, and building smoke QA all expose the policy. Walls are also proven destroyable through the normal combat loop, not only direct damage helpers.
 
+**Delivered explicit siege-order slice on July 5, 2026:** `ATTACK` orders can now include `targetBuildingId` so AIs can intentionally breach visible hostile walls, gates, turrets, or buildings. Military units path to an adjacent attack position, prioritize the ordered structure over ambient building priorities, declare war/break alliances consistently, and destroy the target through normal armor-reduced combat.
+
 1. **Building-tree prerequisites:** extend per-tribe development state beyond current walls, gates, and turrets into stronger walls, siege tools, road upgrades, gate automation, and later fortification variants behind masonry, brick kilns, ironworking, ballistics, and military architecture.
 2. **Chosen placement:** let LLMs choose perimeter/fortification intent and later add human tile previews only after the human play model is decided.
-3. **Siege behavior:** add explicit attack-building / attack-blocking-wall orders so hostile units can break fortifications that cut routes.
+3. **Advanced siege behavior:** add siege tools, repairs, wall/gate damage states, breach previews, and multi-unit assault doctrines on top of explicit building-target attacks.
 4. **Gate diplomacy and strategy:** let sovereigns negotiate gate access, lie about open routes, lock allies out, create safe-passage treaties, stage ambushes at gates, charge tolls, sabotage controls, or deliberately sacrifice a gate to delay pursuit.
 5. **Fortification stat contract:** any future board item, siege engine, inventory object, or resource-processing installation must declare health, armor, attack, range, and destruction behavior when it can be targeted or can affect combat.
 6. **PixiJS graphics upgrade:** replace the current conceptual debug-board style with a production-oriented PixiJS visual pass: terrain/resource sprites, building silhouettes, wall/gate state art, animated units, selection/route previews, construction/damage/firing effects, and zoom-aware overlays.
@@ -982,10 +984,10 @@ This roadmap must stay tied to the visible board. Development choices should cha
   - **Phase:** P4.
 
 - **SW-127 — Fortress Walls**
-  - **Mechanics:** perimeter wall and gate mechanisms. Wall tiles block all movement for every tribe, including owners and allies; only explicit gates can create controlled passage.
+  - **Mechanics:** perimeter wall and gate mechanisms. Wall tiles block all movement for every tribe, including owners and allies; only explicit gates can create controlled passage. Explicit `ATTACK` orders can target visible hostile wall ids for breach attempts.
   - **Effects:** siege breach time +40%; trade congestion +5 unless gate capacity is managed.
   - **Prereqs/Tradeoffs:** stone supply and maintenance.
-  - **AI Hook:** defensive consolidation strategy.
+  - **AI Hook:** defensive consolidation strategy; attackers can now name a visible wall segment as a siege target when route denial or conquest requires it.
   - **Phase:** P4.
 
 - **SW-127A — Lockable Gatehouses**

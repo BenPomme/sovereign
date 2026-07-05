@@ -1830,6 +1830,66 @@ describe("Ollama JSON recovery", () => {
     expect(decision.orders.some((order) => order.type === "ATTACK")).toBe(false);
   });
 
+  it("preserves LLM-authored siege targets on attack orders", async () => {
+    const game = createGame(20260705);
+    game.buildings.red_test_wall = {
+      id: "red_test_wall",
+      type: "wall",
+      tribeId: "red",
+      x: 24,
+      y: 20,
+      hp: 50,
+      maxHp: 240,
+      armor: 6,
+      attack: 0,
+      range: 0,
+      attackCooldown: 0
+    };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        response: JSON.stringify({
+          freeformStrategy: "Red has exposed a wall on the east approach; I will breach the exact segment before it becomes a frontier line.",
+          strategySummary: "Attack the visible red wall.",
+          memoryNote: "Red wall red_test_wall is the first siege target.",
+          orders: [
+            {
+              type: "ATTACK",
+              priority: 1,
+              recipientTribeId: "red",
+              targetBuildingId: "red_test_wall",
+              messageType: "LETTER",
+              diplomacyIntent: "NONE",
+              subject: "",
+              body: "",
+              reason: "Breach red_test_wall before Red can extend it."
+            }
+          ],
+          unitNames: [],
+          bugReport: "",
+          bugSeverity: "low"
+        })
+      })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("window", {
+      setTimeout: globalThis.setTimeout,
+      clearTimeout: globalThis.clearTimeout
+    });
+
+    const decision = await requestSovereignDecision(game, "blue", "qwen3.5:9b-mlx");
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+
+    expect(body.prompt).toContain("Visible foreign buildings:");
+    expect(body.prompt).toContain("red_test_wall: red wall at 24,20 hp 50 armor 6");
+    expect(body.prompt).toContain("targetBuildingId options red_test_wall:red:wall:24,20");
+    expect(decision.orders[0]).toMatchObject({
+      type: "ATTACK",
+      recipientTribeId: "red",
+      targetBuildingId: "red_test_wall"
+    });
+  });
+
   it("uses the chat endpoint for gpt-oss and reads JSON from message content", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

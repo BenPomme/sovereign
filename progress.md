@@ -2276,7 +2276,7 @@ Original prompt: ok continue with roadmap make sure the AIs can report bugs and 
   - `pnpm smoke:mock-ollama` passed and verified the schema/report path with `gates=0` in turn context.
 - Remaining backlog:
   - expand gate access policies beyond the first `all` / `owner_allies` / `owner_only` layer into richer diplomacy, sabotage, toll, and automation rules,
-  - add explicit attack-building / attack-wall / attack-gate siege orders,
+  - add advanced siege tools, repairs, wall/gate damage states, and breach previews on top of explicit building-target attacks,
   - add gate diplomacy behaviors: safe passage treaties, betrayal by locking gates, tolls, ambushes, and sabotage,
   - continue the PixiJS graphics production pass with sprite/texture assets and clearer wall/gate/turret silhouettes.
 
@@ -2310,7 +2310,42 @@ Original prompt: ok continue with roadmap make sure the AIs can report bugs and 
   - `pnpm smoke:ai-fairness` passed with mixed qwen/gpt-oss assignments and zero fallback decisions,
   - full `pnpm smoke` passed with board, diplomacy, report review, info request, wall/resource, gate, learning, persistence, and screenshot checks.
 - Remaining backlog:
-  - add explicit attack-building / attack-wall / attack-gate siege orders so AIs can intentionally breach fortifications,
+  - expand explicit attack-building / attack-wall / attack-gate siege orders into richer siege tools, repairs, and damage states,
   - add gate diplomacy mechanics around safe-passage treaties, tolls, betrayal, sabotage, and ambushes,
   - improve PixiJS visuals with clearer wall/gate/turret silhouettes and zoom-aware construction labels,
   - keep all future targetable items on the health/armor/attack/range stat contract.
+
+### 2026-07-05 Explicit Siege Orders
+
+- Implemented the first intentional siege-order slice:
+  - `ATTACK` can now carry `targetBuildingId`,
+  - AIs can target a visible hostile wall, gate, turret, or building by exact id,
+  - siege attacks declare war and break alliances through the same path as tribe-level attacks,
+  - military units receive an `attackBuilding` task and path to an adjacent walkable attack position,
+  - targeted building attacks damage the ordered structure before ambient building priorities,
+  - destroyed walls/gates/buildings still use normal armor-reduced combat and `STRUCTURE_DESTROYED` events.
+- Exposed the feature to AI and UI:
+  - LLM decision schema accepts `targetBuildingId`,
+  - prompts list visible foreign building ids, hp, armor, attack/range, position, and gate policy,
+  - order availability lists targetable visible building ids,
+  - browser/unit task text now says when a unit is attacking a specific wall/building.
+- Browser QA:
+  - added `window.force_siege_for_test()` to create a weakened hostile wall, issue a real `ATTACK` order with `targetBuildingId`, advance combat, and report task/event evidence,
+  - `pnpm smoke:buildings` now fails unless the explicit siege target is destroyed through the browser path.
+- QA completed:
+  - `pnpm exec tsc --noEmit` passed,
+  - focused `pnpm exec vitest run packages/sim/src/sim.test.ts apps/client/src/llm.test.ts --reporter=dot` passed: 100 tests,
+  - full `pnpm test` passed: 104 tests,
+  - `pnpm build` passed,
+  - `pnpm smoke:buildings` passed with `WAR_SIEGE_ORDER` and `STRUCTURE_DESTROYED` evidence for `test_siege_wall`,
+  - inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-buildings.png`; construction labels are visible but still crowded near the town hall,
+  - `pnpm smoke:smooth` passed with measured FPS 25.5 and smooth interpolation,
+  - `pnpm smoke:mock-ollama` passed,
+  - `pnpm smoke:ai-fairness` passed with mixed qwen/gpt-oss assignments and zero fallbacks,
+  - full `pnpm smoke` passed,
+  - the shared `develop-web-game` Playwright client ran successfully against `http://localhost:5173`.
+- Remaining backlog:
+  - add actual siege engines and repair actions,
+  - add damaged wall/gate visuals and breach previews,
+  - add gate diplomacy around safe-passage treaties, tolls, betrayal, sabotage, and ambushes,
+  - improve PixiJS silhouettes and zoom-aware construction labels.

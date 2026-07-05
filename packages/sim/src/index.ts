@@ -83,6 +83,7 @@ export type AiStrategicOrder = {
   unitType?: "peon" | "militia" | "archer" | "messenger" | "sentinel";
   buildingType?: BuildableBuildingType;
   buildingId?: string;
+  targetBuildingId?: string;
   gateState?: GateState;
   gateAccessPolicy?: GateAccessPolicy;
   targetX?: number;
@@ -230,7 +231,8 @@ export type UnitTask =
       path: Position[];
       waitUntilTick?: number;
     }
-  | { kind: "attack"; targetUnitId: string; path: Position[] };
+  | { kind: "attack"; targetUnitId: string; path: Position[] }
+  | { kind: "attackBuilding"; targetBuildingId: string; path: Position[] };
 
 export type Unit = {
   id: string;
@@ -770,7 +772,7 @@ export function issueSovereignOrder(
       return { ok: true, summary: `moved ${moved} defenders` };
     }
     case "ATTACK":
-      return issueAttackOrder(state, tribeId, order.recipientTribeId, order.reason);
+      return issueAttackOrder(state, tribeId, order.recipientTribeId, order.reason, order.targetBuildingId ?? order.buildingId);
     case "REPORT_BUG": {
       const title = clampText(order.subject ?? "AI self-report", 80);
       const body = clampText(order.body || order.reason, 260);
@@ -827,19 +829,45 @@ function issueAttackOrder(
   state: GameState,
   tribeId: TribeId,
   targetTribeId: TribeId | undefined,
-  reason: string | undefined
+  reason: string | undefined,
+  targetBuildingId?: string
 ): { ok: true; summary: string } | { ok: false; reason: string } {
-  if (!targetTribeId || targetTribeId === tribeId || !tribeIds.includes(targetTribeId)) return { ok: false, reason: "invalid attack target" };
+  const targetBuilding = targetBuildingId ? state.buildings[targetBuildingId] : undefined;
+  const resolvedTargetTribeId = targetTribeId ?? targetBuilding?.tribeId;
+  if (!resolvedTargetTribeId || resolvedTargetTribeId === tribeId || !tribeIds.includes(resolvedTargetTribeId)) return { ok: false, reason: "invalid attack target" };
+  if (state.tribes[resolvedTargetTribeId].eliminated) return { ok: false, reason: `${state.tribes[resolvedTargetTribeId].name} has been eliminated` };
+  if (targetBuildingId) {
+    if (!targetBuilding || targetBuilding.hp <= 0) return { ok: false, reason: "target building is missing or destroyed" };
+    if (targetBuilding.tribeId !== resolvedTargetTribeId) return { ok: false, reason: "target building belongs to a different tribe" };
+    if (targetBuilding.tribeId === tribeId) return { ok: false, reason: "cannot attack own building" };
+  }
   const attackers = Object.values(state.units)
     .filter((unit) => unit.tribeId === tribeId && unit.hp > 0 && (unit.type === "militia" || unit.type === "archer"))
     .slice(0, 4);
   if (attackers.length === 0) return { ok: false, reason: "no military units available" };
-  declareWar(state, tribeId, targetTribeId, reason ?? "AI attack order");
+  declareWar(state, tribeId, resolvedTargetTribeId, reason ?? "AI attack order");
+  if (targetBuilding) {
+    for (const unit of attackers) {
+      const attackPosition = findBuildingAttackPosition(state, unit, targetBuilding);
+      unit.task = { kind: "attackBuilding", targetBuildingId: targetBuilding.id, path: findPath(state, unit, attackPosition) };
+    }
+    addEvent(
+      state,
+      "WAR_SIEGE_ORDER",
+      `${state.tribes[tribeId].name} attacks ${state.tribes[resolvedTargetTribeId].name}'s ${labelBuildingType(targetBuilding.type)}`,
+      `${attackers.length} military units move to destroy ${targetBuilding.type} ${targetBuilding.id} at ${targetBuilding.x},${targetBuilding.y}. ${clampText(reason ?? "No stated reason.", 180)}`,
+      "all"
+    );
+    return {
+      ok: true,
+      summary: `declared war on ${state.tribes[resolvedTargetTribeId].name} and sent ${attackers.length} attackers against ${targetBuilding.type} ${targetBuilding.id}`
+    };
+  }
   const visibleTarget = getVisibleUnits(state, tribeId)
-    .filter((unit) => unit.tribeId === targetTribeId && !isProtectedMessenger(unit))
+    .filter((unit) => unit.tribeId === resolvedTargetTribeId && !isProtectedMessenger(unit))
     .sort((left, right) => distance(attackers[0], left) - distance(attackers[0], right))[0];
-  const townHall = findTownHall(state, targetTribeId);
-  const target = visibleTarget ? { x: Math.round(visibleTarget.x), y: Math.round(visibleTarget.y) } : townHall ? { x: townHall.x, y: townHall.y } : starts[targetTribeId];
+  const townHall = findTownHall(state, resolvedTargetTribeId);
+  const target = visibleTarget ? { x: Math.round(visibleTarget.x), y: Math.round(visibleTarget.y) } : townHall ? { x: townHall.x, y: townHall.y } : starts[resolvedTargetTribeId];
   for (const [index, unit] of attackers.entries()) {
     const offsetTarget = { x: target.x + (index % 2), y: target.y + Math.floor(index / 2) };
     unit.task = visibleTarget
@@ -849,11 +877,30 @@ function issueAttackOrder(
   addEvent(
     state,
     "WAR_ATTACK_ORDER",
-    `${state.tribes[tribeId].name} attacks ${state.tribes[targetTribeId].name}`,
+    `${state.tribes[tribeId].name} attacks ${state.tribes[resolvedTargetTribeId].name}`,
     `${attackers.length} military units move under war orders. ${clampText(reason ?? "No stated reason.", 180)}`,
     "all"
   );
-  return { ok: true, summary: `declared war on ${state.tribes[targetTribeId].name} and sent ${attackers.length} attackers` };
+  return { ok: true, summary: `declared war on ${state.tribes[resolvedTargetTribeId].name} and sent ${attackers.length} attackers` };
+}
+
+function findBuildingAttackPosition(state: GameState, unit: Unit, building: Building): Position {
+  if (distance(unit, building) <= unit.range) return { x: Math.round(unit.x), y: Math.round(unit.y) };
+  const radius = Math.max(1, Math.ceil(unit.range));
+  let best: { position: Position; pathLength: number; distance: number } | undefined;
+  for (let y = building.y - radius; y <= building.y + radius; y += 1) {
+    for (let x = building.x - radius; x <= building.x + radius; x += 1) {
+      const position = { x, y };
+      if (distance(position, building) > unit.range) continue;
+      if (!isWalkableForTribe(state, x, y, unit.tribeId)) continue;
+      const path = findPath(state, unit, position);
+      const alreadyThere = Math.round(unit.x) === x && Math.round(unit.y) === y;
+      if (!alreadyThere && !pathArrives(path, position)) continue;
+      const candidate = { position, pathLength: path.length, distance: distance(unit, position) };
+      if (!best || candidate.pathLength < best.pathLength || (candidate.pathLength === best.pathLength && candidate.distance < best.distance)) best = candidate;
+    }
+  }
+  return best?.position ?? findNearestWalkable(state, building, unit.tribeId) ?? { x: building.x, y: building.y };
 }
 
 function declareWar(state: GameState, attacker: TribeId, defender: TribeId, reason: string): void {
@@ -1722,6 +1769,7 @@ function updateUnits(state: GameState): void {
         updateMessenger(state, unit, unit.task);
         break;
       case "attack":
+      case "attackBuilding":
         updateAttacker(state, unit);
         break;
     }
@@ -1925,14 +1973,25 @@ export function attachReplyToPacket(
 }
 
 function updateAttacker(state: GameState, unit: Unit): void {
-  if (unit.task.kind !== "attack") return;
-  const target = state.units[unit.task.targetUnitId];
+  if (unit.task.kind === "attack") {
+    const target = state.units[unit.task.targetUnitId];
+    if (!target || target.hp <= 0 || target.tribeId === unit.tribeId) {
+      unit.task = { kind: "idle" };
+      return;
+    }
+    if (distance(unit, target) <= unit.range) return;
+    if (unit.task.path.length === 0) unit.task.path = findPath(state, unit, { x: target.x, y: target.y });
+    moveAlongPath(state, unit, unit.task.path);
+    return;
+  }
+  if (unit.task.kind !== "attackBuilding") return;
+  const target = state.buildings[unit.task.targetBuildingId];
   if (!target || target.hp <= 0 || target.tribeId === unit.tribeId) {
     unit.task = { kind: "idle" };
     return;
   }
   if (distance(unit, target) <= unit.range) return;
-  if (unit.task.path.length === 0) unit.task.path = findPath(state, unit, { x: target.x, y: target.y });
+  if (unit.task.path.length === 0) unit.task.path = findPath(state, unit, findBuildingAttackPosition(state, unit, target));
   moveAlongPath(state, unit, unit.task.path);
 }
 
@@ -1941,6 +2000,20 @@ function updateCombat(state: GameState): void {
   const living = Object.values(state.units).filter((u) => u.hp > 0);
   for (const unit of living) {
     if (unit.attack <= 0 || unit.attackCooldown > 0) continue;
+    if (unit.task.kind === "attackBuilding") {
+      const assignedTarget = state.buildings[unit.task.targetBuildingId];
+      if (
+        assignedTarget &&
+        assignedTarget.hp > 0 &&
+        assignedTarget.tribeId !== unit.tribeId &&
+        areHostile(state, unit.tribeId, assignedTarget.tribeId) &&
+        distance(unit, assignedTarget) <= unit.range
+      ) {
+        applyBuildingDamage(state, assignedTarget, unit.attack, unit.tribeId);
+        unit.attackCooldown = Math.round(TICK_RATE * 1.2);
+        continue;
+      }
+    }
     const target = living.find(
       (other) =>
         other.tribeId !== unit.tribeId &&

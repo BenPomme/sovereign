@@ -163,6 +163,16 @@ declare global {
       buildingId?: string,
       gateAccessPolicy?: GateAccessPolicy
     ) => { ok: boolean; buildingId?: string; gateState?: GateState; gateAccessPolicy?: GateAccessPolicy; reason?: string };
+    force_siege_for_test?: () => {
+      ok: boolean;
+      targetBuildingId?: string;
+      destroyed?: boolean;
+      beforeHp?: number;
+      afterHp?: number | null;
+      attackerTasks?: string[];
+      recentEvents?: string[];
+      reason?: string;
+    };
     force_visual_motion_for_test?: () => { ok: boolean; unitId?: string; reason?: string };
   }
 }
@@ -842,6 +852,7 @@ function installTestHooks(): void {
   window.force_resource_boost_for_test = forceResourceBoostForTest;
   window.force_development_for_test = forceDevelopmentForTest;
   window.force_gate_state_for_test = forceGateStateForTest;
+  window.force_siege_for_test = forceSiegeForTest;
   window.force_visual_motion_for_test = forceVisualMotionForTest;
 }
 
@@ -1860,6 +1871,71 @@ function forceGateStateForTest(
   return result.ok
     ? { ok: true, buildingId: result.buildingId, gateState, gateAccessPolicy: gate?.type === "gate" ? gate.gateAccessPolicy ?? "owner_allies" : undefined }
     : { ok: false, reason: result.reason };
+}
+
+function forceSiegeForTest(): {
+  ok: boolean;
+  targetBuildingId?: string;
+  destroyed?: boolean;
+  beforeHp?: number;
+  afterHp?: number | null;
+  attackerTasks?: string[];
+  recentEvents?: string[];
+  reason?: string;
+} {
+  const wallId = "test_siege_wall";
+  state.buildings[wallId] = {
+    id: wallId,
+    type: "wall",
+    tribeId: "red",
+    x: 50,
+    y: 50,
+    hp: 2,
+    maxHp: 240,
+    armor: 6,
+    attack: 0,
+    range: 0,
+    attackCooldown: 0
+  };
+  for (const pos of [
+    { x: 49, y: 50 },
+    { x: 50, y: 50 },
+    { x: 48, y: 50 },
+    { x: 48, y: 51 }
+  ]) {
+    state.map[tileIndex(pos.x, pos.y)].terrain = "grass";
+    delete state.map[tileIndex(pos.x, pos.y)].resource;
+  }
+  const attackers = Object.values(state.units).filter((unit) => unit.tribeId === playerTribe && unit.type === "militia" && unit.hp > 0);
+  if (attackers.length === 0) return { ok: false, targetBuildingId: wallId, reason: "no blue militia available" };
+  for (const [index, attacker] of attackers.entries()) {
+    attacker.x = 48;
+    attacker.y = 50 + index;
+    attacker.task = { kind: "idle" };
+  }
+  const result = issueSovereignOrder(state, playerTribe, {
+    type: "ATTACK",
+    priority: 1,
+    targetBuildingId: wallId,
+    reason: "Browser smoke siege test: breach a specific hostile wall."
+  });
+  if (!result.ok) {
+    render();
+    return { ok: false, targetBuildingId: wallId, reason: result.reason };
+  }
+  const attackerTasks = attackers.map((unit) => describeUnitTask(state, unit));
+  advanceSimulationTicks(60, { scheduleAi: false, render: false });
+  render({ forceHud: true, forceLabels: true, forceFog: true });
+  const remaining = state.buildings[wallId];
+  return {
+    ok: !remaining,
+    targetBuildingId: wallId,
+    destroyed: !remaining,
+    beforeHp: 2,
+    afterHp: remaining?.hp ?? null,
+    attackerTasks,
+    recentEvents: state.events.slice(-8).map((event) => `${event.type}:${event.body}`)
+  };
 }
 
 function summarizeResourceTiles(game: GameState, type: ResourceType): {
@@ -5595,8 +5671,14 @@ function describeUnitTask(game: GameState, unit: Unit): string {
     if (task.phase === "waiting") return `Waiting for reply until turn ${task.waitUntilTick ?? "unknown"} (${packetState})`;
     return `Returning with reply to ${formatPosition(task.returnTo)} (${packetState})`;
   }
-  const target = game.units[task.targetUnitId];
-  return target ? `Attacking ${target.name} of ${game.tribes[target.tribeId].name}` : "Attacking missing target";
+  if (task.kind === "attack") {
+    const target = game.units[task.targetUnitId];
+    return target ? `Attacking ${target.name} of ${game.tribes[target.tribeId].name}` : "Attacking missing target";
+  }
+  const building = game.buildings[task.targetBuildingId];
+  return building
+    ? `Attacking ${building.type} ${building.id} of ${game.tribes[building.tribeId].name}`
+    : "Attacking missing building";
 }
 
 function formatPosition(pos: Position): string {

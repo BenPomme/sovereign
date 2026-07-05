@@ -846,6 +846,80 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     expect(Object.values(state.units).some((unit) => unit.tribeId === "blue" && (unit.task.kind === "move" || unit.task.kind === "attack"))).toBe(true);
   });
 
+  it("lets an AI siege order target and destroy a specific hostile wall", () => {
+    const state = createGame(986);
+    expect(formAlliance(state, "blue", "red").ok).toBe(true);
+    state.buildings.test_red_wall = {
+      id: "test_red_wall",
+      type: "wall",
+      tribeId: "red",
+      x: 50,
+      y: 50,
+      hp: 2,
+      maxHp: 240,
+      armor: 6,
+      attack: 0,
+      range: 0,
+      attackCooldown: 0
+    };
+    state.map[tileIndex(49, 50)].terrain = "grass";
+    state.map[tileIndex(50, 50)].terrain = "grass";
+    const attackers = Object.values(state.units).filter((unit) => unit.tribeId === "blue" && unit.type === "militia");
+    expect(attackers.length).toBeGreaterThan(0);
+    for (const [index, attacker] of attackers.entries()) {
+      attacker.x = 48;
+      attacker.y = 50 + index;
+      attacker.task = { kind: "idle" };
+    }
+
+    const attack = issueSovereignOrder(state, "blue", {
+      type: "ATTACK",
+      priority: 1,
+      targetBuildingId: "test_red_wall",
+      reason: "Breach the red wall blocking future routes."
+    });
+
+    expect(attack.ok).toBe(true);
+    expect(state.alliances.blue).toBeUndefined();
+    expect(state.alliances.red).toBeUndefined();
+    expect(state.wars.blue.red).toBe(true);
+    expect(attack.ok && attack.summary).toContain("test_red_wall");
+    expect(attackers.some((unit) => unit.task.kind === "attackBuilding" && unit.task.targetBuildingId === "test_red_wall")).toBe(true);
+
+    advanceGameTicks(state, 40);
+
+    expect(state.buildings.test_red_wall).toBeUndefined();
+    expect(isTileWalkable(state, 50, 50)).toBe(true);
+    expect(state.events.some((event) => event.type === "WAR_SIEGE_ORDER" && event.body.includes("test_red_wall"))).toBe(true);
+    expect(state.events.some((event) => event.type === "STRUCTURE_DESTROYED" && event.body.includes("50,50"))).toBe(true);
+  });
+
+  it("rejects invalid explicit siege targets", () => {
+    const state = createGame(987);
+    const ownTownHall = getTownHall(state, "blue");
+
+    const missing = issueSovereignOrder(state, "blue", {
+      type: "ATTACK",
+      priority: 1,
+      recipientTribeId: "red",
+      targetBuildingId: "missing_building",
+      reason: "Attack a building that does not exist."
+    });
+    expect(missing.ok).toBe(false);
+    if (missing.ok) throw new Error("Missing target unexpectedly accepted");
+    expect(missing.reason).toContain("missing or destroyed");
+
+    const own = issueSovereignOrder(state, "blue", {
+      type: "ATTACK",
+      priority: 1,
+      targetBuildingId: ownTownHall.id,
+      reason: "Try to attack our own town hall."
+    });
+    expect(own.ok).toBe(false);
+    if (own.ok) throw new Error("Own target unexpectedly accepted");
+    expect(own.reason).toContain("invalid attack target");
+  });
+
   it("lets AI sovereigns file explicit issue-report orders", () => {
     const state = createGame(981);
     const report = issueSovereignOrder(state, "blue", {
