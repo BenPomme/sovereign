@@ -2498,3 +2498,34 @@ Original prompt: ok continue with roadmap make sure the AIs can report bugs and 
   - add siege engines, breach previews, and contested field repair under fire,
   - improve PixiJS resource/fortification silhouettes and zoom-aware labels,
   - keep every future targetable item, siege engine, inventory object, and processing building on the health/armor/attack/range plus destruction contract.
+
+### 2026-07-05 Combat Stat Coverage And Siege QA Hardening
+
+- Responded to the follow-up requirement that every unit and item has health, armor, and attack stats:
+  - exported declared `unitTypes` and `buildingTypes` so tests can cover the full entity type surface instead of only currently spawned units/buildings,
+  - moved unit cooldown into the unit stat definition table so every unit type has a complete health/armor/attack/range/cooldown contract at definition time,
+  - added `getUnitTypeCombatStats()`, `getBuildingTypeCombatStats()`, and `getResourceTypeCombatStats()` for type-level QA and future tooling,
+  - expanded the sim contract test to cover every unit type, every building type, and every resource deposit type, including unspawned `trader`.
+- Rechecked destroyability beyond walls:
+  - existing wall tests still prove walls block movement until destroyed and become walkable afterward,
+  - added a sim regression proving targeted siege orders destroy locked gates and turrets through normal combat,
+  - generalized `window.force_siege_for_test()` so browser smoke can create weakened hostile wall/gate/turret fixtures using real building stats,
+  - `pnpm smoke:buildings` now proves explicit `ATTACK` orders destroy wall, gate, and turret targets; wall/gate tiles are non-walkable before destruction and walkable after destruction.
+- QA completed:
+  - `pnpm exec tsc --noEmit` passed,
+  - focused `pnpm exec vitest run packages/sim/src/sim.test.ts --reporter=dot` passed: 49 tests,
+  - full `pnpm test` passed: 113 tests,
+  - `pnpm build` passed,
+  - `pnpm smoke:buildings` passed with `test_siege_wall`, `test_siege_gate`, `test_siege_turret`, and `RESOURCE_DEPOSIT_DESTROYED` evidence,
+  - inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-buildings.png`; board, labels, construction cluster, and overlays remained readable though dense,
+  - `pnpm smoke:smooth` passed with measured FPS 28.8 and visible interpolation,
+  - inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-smooth-frame-loop.png`; the board and observer panel render normally,
+  - `pnpm ai:review:strict -- --json --no-write` passed: 0 actionable unresolved, 0 parser/transport open,
+  - `pnpm ai:snapshots:replay -- --strict --json --no-write` passed after full smoke: 482 replayed, 0 failures, 0 contract warnings,
+  - shared `develop-web-game` Playwright client exited cleanly,
+  - full `pnpm smoke` passed with board, diplomacy, AI report review, information request, learning, persistence, full wall/gate/turret/resource QA, and screenshot checks,
+  - inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-smoke.png`; the board and AI report review panel render normally.
+- Remaining backlog:
+  - implement resource-control scoring and prompt-safe deposit posture for controlled, defended, raided, and denied deposits,
+  - add siege engines, breach previews, and contested field repair under fire,
+  - keep future inventory items, siege engines, processing buildings, and any targetable board object on this health/armor/attack/range plus destruction contract.

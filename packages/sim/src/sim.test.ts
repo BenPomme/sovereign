@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TICKS_PER_GAME_YEAR, TICK_RATE, advanceGame, advanceGameTicks, appendSovereignMemory, applyTribeIdentity, assignGathering, attachReplyToPacket, buildStructure, createGame, createResourceDeposit, damageBuilding, damageResourceDeposit, formAlliance, getBuildingCombatStats, getCurrentYear, getBuildingCost, getBuildingRepairCost, getResourceDepositCombatStats, getTownHall, getUnitCombatStats, getVictoryPressure, getVisibleBuildings, getVisibleUnits, isTileWalkable, issueSovereignOrder, recordAiDecision, renameUnits, sendPlayerMessage, setAllControllers, setGateState, summarizeDiplomaticIntel, summarizeSovereignMemory, tileIndex, worldSignature } from "./index";
+import { TICKS_PER_GAME_YEAR, TICK_RATE, advanceGame, advanceGameTicks, appendSovereignMemory, applyTribeIdentity, assignGathering, attachReplyToPacket, buildStructure, buildingTypes, createGame, createResourceDeposit, damageBuilding, damageResourceDeposit, formAlliance, getBuildingCombatStats, getBuildingTypeCombatStats, getCurrentYear, getBuildingCost, getBuildingRepairCost, getResourceDepositCombatStats, getResourceTypeCombatStats, getTownHall, getUnitCombatStats, getUnitTypeCombatStats, getVictoryPressure, getVisibleBuildings, getVisibleUnits, isTileWalkable, issueSovereignOrder, recordAiDecision, renameUnits, resourceTypes, sendPlayerMessage, setAllControllers, setGateState, summarizeDiplomaticIntel, summarizeSovereignMemory, tileIndex, unitTypes, worldSignature } from "./index";
 
 describe("Sovereign Worlds vertical slice simulation", () => {
   it("is deterministic for the same seed and elapsed time", () => {
@@ -82,7 +82,7 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     expect(startingUnits.every((unit) => unit.name === unit.id)).toBe(true);
   });
 
-  it("exposes health, armor, attack, and range stats on all units and buildings", () => {
+  it("exposes health, armor, attack, and range stats on all units, buildings, and map items", () => {
     const state = createGame(10);
     state.tribes.blue.resources = { gold: 800, food: 800, wood: 800, stone: 800, clay: 800, limestone: 800, iron: 800, coal: 800 };
     expect(issueSovereignOrder(state, "blue", { type: "DEVELOP", priority: 1, developmentId: "masonry", reason: "Unlock durability-test walls." }).ok).toBe(true);
@@ -92,6 +92,35 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     for (const buildingType of ["wall", "gate", "turret"] as const) {
       const built = buildStructure(state, "blue", buildingType, townHall);
       expect(built.ok).toBe(true);
+    }
+    for (const unitType of unitTypes) {
+      const stats = getUnitTypeCombatStats(unitType);
+      expect(stats.maxHp).toBeGreaterThan(0);
+      expect(stats.hp).toBe(stats.maxHp);
+      expect(stats.armor).toBeGreaterThanOrEqual(0);
+      expect(stats.attack).toBeGreaterThanOrEqual(0);
+      expect(stats.range).toBeGreaterThanOrEqual(0);
+      expect(stats.attackCooldown).toBeGreaterThanOrEqual(0);
+      if (stats.attack > 0) expect(stats.range).toBeGreaterThan(0);
+    }
+    for (const buildingType of buildingTypes) {
+      const stats = getBuildingTypeCombatStats(buildingType);
+      expect(stats.maxHp).toBeGreaterThan(0);
+      expect(stats.hp).toBe(stats.maxHp);
+      expect(stats.armor).toBeGreaterThanOrEqual(0);
+      expect(stats.attack).toBeGreaterThanOrEqual(0);
+      expect(stats.range).toBeGreaterThanOrEqual(0);
+      expect(stats.attackCooldown).toBeGreaterThanOrEqual(0);
+      if (stats.attack > 0) expect(stats.range).toBeGreaterThan(0);
+    }
+    for (const resourceType of resourceTypes) {
+      const stats = getResourceTypeCombatStats(resourceType, 12);
+      expect(stats.maxHp).toBeGreaterThan(0);
+      expect(stats.hp).toBe(stats.maxHp);
+      expect(stats.armor).toBeGreaterThanOrEqual(0);
+      expect(stats.attack).toBe(0);
+      expect(stats.range).toBe(0);
+      expect(stats.attackCooldown).toBe(0);
     }
     for (const unit of Object.values(state.units)) {
       const stats = getUnitCombatStats(unit);
@@ -1021,6 +1050,62 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     expect(isTileWalkable(state, 50, 50)).toBe(true);
     expect(state.events.some((event) => event.type === "WAR_SIEGE_ORDER" && event.body.includes("test_red_wall"))).toBe(true);
     expect(state.events.some((event) => event.type === "STRUCTURE_DESTROYED" && event.body.includes("50,50"))).toBe(true);
+  });
+
+  it("lets targeted siege orders destroy gates and turrets through normal combat", () => {
+    for (const buildingType of ["gate", "turret"] as const) {
+      const state = createGame(buildingType === "gate" ? 988 : 989);
+      const targetBuildingId = `test_red_${buildingType}`;
+      const stats = getBuildingTypeCombatStats(buildingType);
+      state.buildings[targetBuildingId] = {
+        id: targetBuildingId,
+        type: buildingType,
+        tribeId: "red",
+        x: 50,
+        y: 50,
+        hp: 2,
+        maxHp: stats.maxHp,
+        armor: stats.armor,
+        attack: stats.attack,
+        range: stats.range,
+        attackCooldown: 0,
+        ...(buildingType === "gate" ? { gateState: "locked" as const, gateAccessPolicy: "owner_only" as const } : {})
+      };
+      for (const pos of [
+        { x: 48, y: 50 },
+        { x: 49, y: 50 },
+        { x: 50, y: 50 },
+        { x: 48, y: 51 }
+      ]) {
+        state.map[tileIndex(pos.x, pos.y)].terrain = "grass";
+        delete state.map[tileIndex(pos.x, pos.y)].resource;
+      }
+      const attackers = Object.values(state.units).filter((unit) => unit.tribeId === "blue" && unit.type === "militia");
+      expect(attackers.length).toBeGreaterThan(0);
+      for (const [index, attacker] of attackers.entries()) {
+        attacker.x = 48;
+        attacker.y = 50 + index;
+        attacker.attackCooldown = 0;
+        attacker.task = { kind: "idle" };
+      }
+      if (buildingType === "gate") expect(isTileWalkable(state, 50, 50, "blue")).toBe(false);
+
+      const attack = issueSovereignOrder(state, "blue", {
+        type: "ATTACK",
+        priority: 1,
+        targetBuildingId,
+        reason: `Breach the red ${buildingType} with ordinary combat.`
+      });
+
+      expect(attack.ok).toBe(true);
+      expect(attack.ok && attack.summary).toContain(`${buildingType} ${targetBuildingId}`);
+      expect(attackers.some((unit) => unit.task.kind === "attackBuilding" && unit.task.targetBuildingId === targetBuildingId)).toBe(true);
+      advanceGameTicks(state, 40);
+
+      expect(state.buildings[targetBuildingId]).toBeUndefined();
+      expect(isTileWalkable(state, 50, 50, "blue")).toBe(true);
+      expect(state.events.some((event) => event.type === "STRUCTURE_DESTROYED" && event.body.includes(buildingType))).toBe(true);
+    }
   });
 
   it("applies armor-reduced damage to resource deposits and removes destroyed deposits", () => {

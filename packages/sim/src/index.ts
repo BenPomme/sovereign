@@ -436,6 +436,8 @@ export type GameState = {
 };
 
 export const tribeIds: TribeId[] = ["blue", "red", "green", "yellow", "purple"];
+export const unitTypes: readonly UnitType[] = ["sovereign", "peon", "sentinel", "messenger", "trader", "militia", "archer"] as const;
+export const buildingTypes: readonly BuildingType[] = ["townHall", "farm", "barracks", "market", "watchtower", "wall", "gate", "turret"] as const;
 
 export const tribeConfig: Record<TribeId, Pick<Tribe, "id" | "name" | "color" | "colorText" | "controller">> = {
   blue: {
@@ -483,14 +485,16 @@ const starts: Record<TribeId, Position> = {
   purple: { x: 66, y: 66 }
 };
 
-const unitStats: Record<UnitType, Pick<Unit, "hp" | "maxHp" | "armor" | "speed" | "visionRadius" | "attack" | "range">> = {
-  sovereign: { hp: 80, maxHp: 80, armor: 2, speed: 1.0, visionRadius: 8, attack: 4, range: 1.2 },
-  peon: { hp: 38, maxHp: 38, armor: 0, speed: 1.0, visionRadius: 5, attack: 2, range: 1.1 },
-  sentinel: { hp: 32, maxHp: 32, armor: 1, speed: 1.35, visionRadius: 10, attack: 1, range: 1.1 },
-  messenger: { hp: 25, maxHp: 25, armor: 0, speed: 1.6, visionRadius: 5, attack: 0, range: 0 },
-  trader: { hp: 44, maxHp: 44, armor: 1, speed: 1.1, visionRadius: 5, attack: 0, range: 0 },
-  militia: { hp: 55, maxHp: 55, armor: 2, speed: 1.05, visionRadius: 5, attack: 7, range: 1.2 },
-  archer: { hp: 40, maxHp: 40, armor: 1, speed: 1.0, visionRadius: 6, attack: 5, range: 4.4 }
+type UnitStatDefinition = Pick<Unit, "hp" | "maxHp" | "armor" | "speed" | "visionRadius" | "attack" | "range" | "attackCooldown">;
+
+const unitStats: Record<UnitType, UnitStatDefinition> = {
+  sovereign: { hp: 80, maxHp: 80, armor: 2, speed: 1.0, visionRadius: 8, attack: 4, range: 1.2, attackCooldown: 0 },
+  peon: { hp: 38, maxHp: 38, armor: 0, speed: 1.0, visionRadius: 5, attack: 2, range: 1.1, attackCooldown: 0 },
+  sentinel: { hp: 32, maxHp: 32, armor: 1, speed: 1.35, visionRadius: 10, attack: 1, range: 1.1, attackCooldown: 0 },
+  messenger: { hp: 25, maxHp: 25, armor: 0, speed: 1.6, visionRadius: 5, attack: 0, range: 0, attackCooldown: 0 },
+  trader: { hp: 44, maxHp: 44, armor: 1, speed: 1.1, visionRadius: 5, attack: 0, range: 0, attackCooldown: 0 },
+  militia: { hp: 55, maxHp: 55, armor: 2, speed: 1.05, visionRadius: 5, attack: 7, range: 1.2, attackCooldown: 0 },
+  archer: { hp: 40, maxHp: 40, armor: 1, speed: 1.0, visionRadius: 6, attack: 5, range: 4.4, attackCooldown: 0 }
 };
 
 const REPAIR_RANGE = 1.2;
@@ -1392,6 +1396,34 @@ export function getResourceDepositCombatStats(resource: ResourceDeposit): Combat
   };
 }
 
+export function getUnitTypeCombatStats(type: UnitType): CombatStats {
+  const stats = unitStats[type];
+  return {
+    hp: stats.hp,
+    maxHp: stats.maxHp,
+    armor: stats.armor,
+    attack: stats.attack,
+    range: stats.range,
+    attackCooldown: stats.attackCooldown
+  };
+}
+
+export function getBuildingTypeCombatStats(type: BuildingType): CombatStats {
+  const stats = buildingStats[type];
+  return {
+    hp: stats.maxHp,
+    maxHp: stats.maxHp,
+    armor: stats.armor,
+    attack: stats.attack,
+    range: stats.range,
+    attackCooldown: 0
+  };
+}
+
+export function getResourceTypeCombatStats(type: ResourceType, amount = 1): CombatStats {
+  return getResourceDepositCombatStats(createResourceDeposit(type, amount));
+}
+
 export function createResourceDeposit(type: ResourceType, amount: number): ResourceDeposit {
   const normalizedAmount = Math.max(0, Math.round(amount));
   const maxHp = Math.max(1, normalizedAmount);
@@ -1790,7 +1822,6 @@ function addUnit(state: GameState, tribeId: TribeId, type: UnitType, x: number, 
     x,
     y,
     ...stats,
-    attackCooldown: 0,
     task: { kind: "idle" }
   };
   state.units[id] = unit;

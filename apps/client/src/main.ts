@@ -25,8 +25,10 @@ import {
   getVictoryPressure,
   getVisibleBuildings,
   getVisibleUnits,
+  getBuildingTypeCombatStats,
   issueSovereignOrder,
   isBuildingMovementBlocking,
+  isTileWalkable,
   recordAiDecision,
   renameUnits,
   resourceTypes,
@@ -179,12 +181,15 @@ declare global {
       selectedPanel?: string;
       reason?: string;
     };
-    force_siege_for_test?: () => {
+    force_siege_for_test?: (buildingType?: "wall" | "gate" | "turret") => {
       ok: boolean;
       targetBuildingId?: string;
+      buildingType?: "wall" | "gate" | "turret";
       destroyed?: boolean;
       beforeHp?: number;
       afterHp?: number | null;
+      beforeWalkable?: boolean;
+      afterWalkable?: boolean;
       attackerTasks?: string[];
       recentEvents?: string[];
       reason?: string;
@@ -2074,66 +2079,82 @@ function forceDamageBuildingForTest(): {
   };
 }
 
-function forceSiegeForTest(): {
+function forceSiegeForTest(buildingType: "wall" | "gate" | "turret" = "wall"): {
   ok: boolean;
   targetBuildingId?: string;
+  buildingType?: "wall" | "gate" | "turret";
   destroyed?: boolean;
   beforeHp?: number;
   afterHp?: number | null;
+  beforeWalkable?: boolean;
+  afterWalkable?: boolean;
   attackerTasks?: string[];
   recentEvents?: string[];
   reason?: string;
 } {
-  const wallId = "test_siege_wall";
-  state.buildings[wallId] = {
-    id: wallId,
-    type: "wall",
+  if (buildingType !== "wall" && buildingType !== "gate" && buildingType !== "turret") return { ok: false, reason: "invalid siege target type" };
+  const targetBuildingId = `test_siege_${buildingType}`;
+  const stats = getBuildingTypeCombatStats(buildingType);
+  const target = { x: 50, y: buildingType === "wall" ? 50 : buildingType === "gate" ? 54 : 58 };
+  state.buildings[targetBuildingId] = {
+    id: targetBuildingId,
+    type: buildingType,
     tribeId: "red",
-    x: 50,
-    y: 50,
+    x: target.x,
+    y: target.y,
     hp: 2,
-    maxHp: 240,
-    armor: 6,
-    attack: 0,
-    range: 0,
+    maxHp: stats.maxHp,
+    armor: stats.armor,
+    attack: stats.attack,
+    range: stats.range,
     attackCooldown: 0
   };
+  if (buildingType === "gate") {
+    state.buildings[targetBuildingId].gateState = "locked";
+    state.buildings[targetBuildingId].gateAccessPolicy = "owner_only";
+  }
   for (const pos of [
-    { x: 49, y: 50 },
-    { x: 50, y: 50 },
-    { x: 48, y: 50 },
-    { x: 48, y: 51 }
+    { x: target.x - 1, y: target.y },
+    { x: target.x, y: target.y },
+    { x: target.x - 2, y: target.y },
+    { x: target.x - 2, y: target.y + 1 }
   ]) {
     state.map[tileIndex(pos.x, pos.y)].terrain = "grass";
     delete state.map[tileIndex(pos.x, pos.y)].resource;
   }
   const attackers = Object.values(state.units).filter((unit) => unit.tribeId === playerTribe && unit.type === "militia" && unit.hp > 0);
-  if (attackers.length === 0) return { ok: false, targetBuildingId: wallId, reason: "no blue militia available" };
+  if (attackers.length === 0) return { ok: false, targetBuildingId, buildingType, reason: "no blue militia available" };
   for (const [index, attacker] of attackers.entries()) {
-    attacker.x = 48;
-    attacker.y = 50 + index;
+    attacker.x = target.x - 2;
+    attacker.y = target.y + index;
+    attacker.attackCooldown = 0;
     attacker.task = { kind: "idle" };
   }
+  const beforeWalkable = isTileWalkable(state, target.x, target.y, playerTribe);
   const result = issueSovereignOrder(state, playerTribe, {
     type: "ATTACK",
     priority: 1,
-    targetBuildingId: wallId,
-    reason: "Browser smoke siege test: breach a specific hostile wall."
+    targetBuildingId,
+    reason: `Browser smoke siege test: breach a specific hostile ${buildingType}.`
   });
   if (!result.ok) {
     render();
-    return { ok: false, targetBuildingId: wallId, reason: result.reason };
+    return { ok: false, targetBuildingId, buildingType, beforeWalkable, reason: result.reason };
   }
   const attackerTasks = attackers.map((unit) => describeUnitTask(state, unit));
   advanceSimulationTicks(60, { scheduleAi: false, render: false });
   render({ forceHud: true, forceLabels: true, forceFog: true });
-  const remaining = state.buildings[wallId];
+  const remaining = state.buildings[targetBuildingId];
+  const afterWalkable = isTileWalkable(state, target.x, target.y, playerTribe);
   return {
     ok: !remaining,
-    targetBuildingId: wallId,
+    targetBuildingId,
+    buildingType,
     destroyed: !remaining,
     beforeHp: 2,
     afterHp: remaining?.hp ?? null,
+    beforeWalkable,
+    afterWalkable,
     attackerTasks,
     recentEvents: state.events.slice(-8).map((event) => `${event.type}:${event.body}`)
   };

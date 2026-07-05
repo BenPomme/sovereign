@@ -81,7 +81,7 @@ http://localhost:5173/
   - select visible units/buildings
   - right-click to move selected owned units
   - train peons, militia, and archers
-  - build farms, watchtowers, walls, and turrets
+  - build farms, watchtowers, walls, gates, and turrets
   - assign selected peons to gather food, wood, stone, clay, limestone, iron, coal, or gold
   - send a physical peace offer or warning by messenger
 - Baseline simulation AI for gathering, scouting, and training.
@@ -99,7 +99,7 @@ http://localhost:5173/
   - visible resource deposits can be raided by `ATTACK` with `targetX`, `targetY`, and `targetResourceType`; deposits take armor-reduced damage and disappear when destroyed or exhausted
   - damaged owned buildings can be repaired by idle peons through `REPAIR` orders with scaled repair costs
   - turrets fire on hostile units near the kingdom
-  - farms, watchtowers, walls, and turrets use shared construction-cost rules tied to wood, stone, clay, limestone, iron, coal, and gold
+  - farms, watchtowers, walls, gates, and turrets use shared construction-cost rules tied to wood, stone, clay, limestone, iron, coal, and gold
   - starting iron and coal are below turret cost so scarce deposits matter for early defensive escalation
   - alliances suppress hostile combat between allied tribes
   - ATTACK orders break alliances with the target and create explicit war state
@@ -164,10 +164,11 @@ against the markdown report links and serialized invariant contract, then writes
 ```
 
 `pnpm smoke:buildings` runs a focused browser check that builds a farm,
-watchtower, wall, and turret, verifies each new structure is selected, visible,
+watchtower, wall, gate, and turret, verifies each new structure is selected, visible,
 centered on the map, represented in the selected panel, and retained in the
 recent-construction marker list, samples the browser screenshot around each
-created building to catch invisible-map regressions, and saves:
+created building to catch invisible-map regressions, proves explicit siege
+orders destroy wall, gate, and turret targets through normal combat, and saves:
 
 ```text
 /Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-buildings.png

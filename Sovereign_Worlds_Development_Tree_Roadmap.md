@@ -78,6 +78,8 @@ This roadmap must stay tied to the visible board. Development choices should cha
 
 **Delivered resource raid/destruction slice on July 5, 2026:** visible resource deposits can now be raided by `ATTACK` orders using `targetX`, `targetY`, and `targetResourceType`. Military units path into range, apply armor-reduced damage to the deposit, destroy/exhaust it through the shared damage contract, and emit `RESOURCE_RAID_ORDER` plus `RESOURCE_DEPOSIT_DESTROYED` evidence. LLM prompts and order availability expose visible raidable deposits without revealing hidden rival wealth.
 
+**Delivered combat-stat coverage and siege QA hardening on July 5, 2026:** every declared unit type, building type, and resource deposit type now has a type-level health, armor, attack/range, and cooldown stat helper covered by tests, including currently unspawned types such as traders. Browser building smoke now proves explicit siege orders destroy wall, gate, and turret targets through normal armor-reduced combat, and confirms wall/gate tiles become walkable once destroyed.
+
 1. **Building-tree prerequisites:** extend per-tribe development state beyond current walls, gates, and turrets into stronger walls, siege tools, road upgrades, gate automation, and later fortification variants behind masonry, brick kilns, ironworking, ballistics, and military architecture.
 2. **Chosen placement:** let LLMs choose perimeter/fortification intent and later add human tile previews only after the human play model is decided.
 3. **Advanced siege behavior:** add siege tools, breach previews, contested field repairs under fire, and multi-unit assault doctrines on top of explicit building-target attacks.
