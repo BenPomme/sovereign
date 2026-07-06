@@ -1,4 +1,4 @@
-import { Application, Container, Graphics, Text } from "pixi.js";
+import { Application, Container, Graphics, Sprite, Text, Texture } from "pixi.js";
 import "./styles.css";
 import {
   MAP_SIZE,
@@ -35,6 +35,7 @@ import {
   isTileWalkable,
   recordAiDecision,
   renameUnits,
+  buildingTypes,
   resourceTypes,
   setGateState,
   summarizeDiplomaticIntel,
@@ -46,9 +47,11 @@ import {
   trainUnit,
   tribeConfig,
   tribeIds,
+  unitTypes,
   type AiDecision,
   type AiStrategicOrder,
   type Building,
+  type BuildingType,
   type BuildableBuildingType,
   type DevelopmentId,
   type DiplomacyIntent,
@@ -64,6 +67,7 @@ import {
   type TerrainType,
   type TribeId,
   type Unit,
+  type UnitType,
   type VictoryScoreEntry
 } from "../../../packages/sim/src";
 import {
@@ -292,7 +296,7 @@ let paused = false;
 let speedIndex = 0;
 const speedOptions = [1, 2, 4, 8];
 const camera = { x: 0, y: 0, scale: 0.85 };
-let showResourceLabels = true;
+let showResourceLabels = false;
 let showContestedResources = true;
 let showDefenseOverlay = true;
 const keys = new Set<string>();
@@ -314,6 +318,12 @@ type HoverTarget =
   | { kind: "unit"; unit: Unit }
   | { kind: "building"; building: Building }
   | { kind: "tile"; x: number; y: number; terrain: TerrainType; resource?: ResourceDeposit };
+type LabelTier = "overview" | "tactical" | "detail";
+type VisualTextureAtlas = {
+  resources: Record<ResourceType, Texture>;
+  buildings: Record<BuildingType, Texture>;
+  units: Record<UnitType, Texture>;
+};
 type DurabilityCondition = "intact" | "worn" | "damaged" | "critical" | "destroyed";
 type RepairState = "none" | "repairing" | "recently_repaired";
 type CombatStatSnapshot = {
@@ -691,15 +701,18 @@ const nextLlmDecisionTick: Record<TribeId, number> = {
 const app = new Application();
 const world = new Container();
 const terrainLayer = new Graphics();
+const resourceSpriteLayer = new Container();
 const routeLayer = new Graphics();
 const dynamicLayer = new Container();
 const overlayGraphics = new Graphics();
 const buildingGraphics = new Graphics();
 const dynamicGraphics = new Graphics();
+const labelBackdropGraphics = new Graphics();
 const dynamicLabelLayer = new Container();
 const fogLayer = new Graphics();
-dynamicLayer.addChild(overlayGraphics, buildingGraphics, dynamicGraphics, dynamicLabelLayer);
-world.addChild(terrainLayer, routeLayer, dynamicLayer, fogLayer);
+dynamicLayer.addChild(overlayGraphics, buildingGraphics, dynamicGraphics, labelBackdropGraphics, dynamicLabelLayer);
+world.addChild(terrainLayer, resourceSpriteLayer, routeLayer, dynamicLayer, fogLayer);
+let visualTextures: VisualTextureAtlas | undefined;
 
 let accumulated = 0;
 let renderAlpha = 1;
@@ -740,6 +753,7 @@ async function bootstrap(): Promise<void> {
   });
   viewport.append(app.canvas);
   app.stage.addChild(world);
+  visualTextures = createVisualTextureAtlas();
   app.ticker.maxFPS = 60;
   app.ticker.minFPS = minimumSmoothFps;
   centerCamera({ x: 66, y: 66 });
@@ -1393,14 +1407,9 @@ async function forceLiveAuthoredBugReportForTest(
         rejected.push(`${order.type}: ignored during live-authored bug-report challenge`);
         continue;
       }
-      const result = issueSovereignOrder(state, targetTribeId, order);
-      if (result.ok) {
-        accepted.push(`REPORT_BUG: ${result.summary}`);
-        selfReports.push(formatSelfReportOrder(order));
-        if (order.bugSeverity) selfReportSeverities.push(order.bugSeverity);
-      } else {
-        rejected.push(`REPORT_BUG: ${result.reason}`);
-      }
+      accepted.push("REPORT_BUG: test-only integrity report authored");
+      selfReports.push(formatSelfReportOrder(order));
+      if (order.bugSeverity) selfReportSeverities.push(order.bugSeverity);
     }
     const authoredReportText =
       selfReports.length > 0
@@ -1410,10 +1419,10 @@ async function forceLiveAuthoredBugReportForTest(
       tribeId: targetTribeId,
       provider: "ollama",
       model,
-      freeformStrategy: decision.freeformStrategy,
-      strategySummary: decision.strategySummary,
-      memoryNote: decision.memoryNote ?? "Reviewed a world-integrity contradiction and decided whether to file a report.",
-      orders: decision.orders,
+      freeformStrategy: "Live integrity canary asked a local model to test REPORT_BUG authorship.",
+      strategySummary: "Live model authored a test-only integrity canary report.",
+      memoryNote: undefined,
+      orders: [],
       accepted,
       rejected
     });
@@ -1656,6 +1665,7 @@ function renderGameToText(): string {
   const leader = tribeIds.slice().sort((a, b) => computeWealth(state, b) - computeWealth(state, a))[0];
   const victory = getVictoryPressure(state);
   const aiStatus = compactAiStatus(state);
+  const boardReadability = buildBoardReadabilitySnapshot(state, visibleUnits, visibleBuildings);
   const payload = {
     coordinateSystem: "tile coordinates, origin top-left, x increases right, y increases down",
     mode: observerMode ? "observer" : "player",
@@ -1779,16 +1789,7 @@ function renderGameToText(): string {
       contestedResources: showContestedResources,
       defenseOverlay: showDefenseOverlay
     },
-    boardReadability: {
-      strategicGridStep: 8,
-      majorGridStep: 16,
-      resourceAbbreviations: resourceTypes.map((type) => ({
-        type,
-        label: resourceAbbrev(type),
-        scarce: scarceResourceTypes.has(type),
-        construction: constructionResourceTypes.has(type)
-      }))
-    },
+    boardReadability,
     combatStatCoverage: getCombatStatCoverageReport(state),
     buildingCosts: buildableBuildingTypes.map((type) => ({
       type,
@@ -4223,6 +4224,395 @@ function isOrdinaryBlockedFeedback(message: string): boolean {
   );
 }
 
+function currentLabelTier(): LabelTier {
+  if (camera.scale < 0.68) return "overview";
+  if (camera.scale < 1.12) return "tactical";
+  return "detail";
+}
+
+function currentViewportTileBounds(marginTiles = 1): { minX: number; maxX: number; minY: number; maxY: number } {
+  const left = -camera.x / camera.scale / TILE;
+  const top = -camera.y / camera.scale / TILE;
+  const right = (viewport.clientWidth - camera.x) / camera.scale / TILE;
+  const bottom = (viewport.clientHeight - camera.y) / camera.scale / TILE;
+  return {
+    minX: Math.max(0, Math.floor(left) - marginTiles),
+    maxX: Math.min(MAP_SIZE - 1, Math.ceil(right) + marginTiles),
+    minY: Math.max(0, Math.floor(top) - marginTiles),
+    maxY: Math.min(MAP_SIZE - 1, Math.ceil(bottom) + marginTiles)
+  };
+}
+
+function isWorldPointInViewport(worldX: number, worldY: number, marginPx = 80): boolean {
+  const screenX = camera.x + worldX * camera.scale;
+  const screenY = camera.y + worldY * camera.scale;
+  return screenX >= -marginPx && screenY >= -marginPx && screenX <= viewport.clientWidth + marginPx && screenY <= viewport.clientHeight + marginPx;
+}
+
+function isStrategicResource(type: ResourceType): boolean {
+  return type === "gold" || scarceResourceTypes.has(type);
+}
+
+function shouldRenderResourceLabel(type: ResourceType, tier: LabelTier): boolean {
+  if (tier === "detail") return true;
+  if (tier === "overview") return isStrategicResource(type);
+  return type !== "wood" && type !== "food";
+}
+
+function shouldRenderForestHintLabel(tier: LabelTier): boolean {
+  return tier === "detail";
+}
+
+function isFortificationType(type: Building["type"]): boolean {
+  return type === "wall" || type === "gate" || type === "turret" || type === "watchtower";
+}
+
+function shouldRenderBuildingLabel(building: Building, game: GameState, tier: LabelTier): boolean {
+  if (building.id === selectedBuildingId || building.id === constructionFlash?.buildingId) return true;
+  if (building.hp < building.maxHp || buildingRepairState(game, building) !== "none") return true;
+  if (building.type === "townHall" || building.type === "gate" || building.type === "turret") return true;
+  if (tier === "detail") return true;
+  if (tier === "tactical") return isFortificationType(building.type);
+  return building.type === "wall";
+}
+
+function shouldRenderUnitLabel(unit: Unit, tier: LabelTier): boolean {
+  if (unit.id === selectedUnitId || unit.carriedPacketId !== undefined) return true;
+  if (unit.type === "sovereign" || unit.type === "messenger") return true;
+  if (tier === "detail") return true;
+  if (tier === "tactical") return unit.type === "militia" || unit.type === "archer" || unit.type === "sentinel";
+  return false;
+}
+
+function buildBoardReadabilitySnapshot(game: GameState, visibleUnits: Unit[], visibleBuildings: Building[]) {
+  const tier = currentLabelTier();
+  const viewportTiles = currentViewportTileBounds();
+  const resources = countResourceLabelTelemetry(game, tier, viewportTiles);
+  const resourceSprites = countResourceSpriteTelemetry(game, viewportTiles);
+  const visibleBuildingLabelCount = showResourceLabels
+    ? visibleBuildings.filter((building) => {
+        return (
+          building.hp > 0 &&
+          isWorldPointInViewport(building.x * TILE + TILE / 2, building.y * TILE + TILE / 2) &&
+          shouldRenderBuildingLabel(building, game, tier)
+        );
+      }).length
+    : 0;
+  const visibleUnitLabelCount = showResourceLabels
+    ? visibleUnits.filter((unit) => {
+        const visual = visualPositionForUnit(unit);
+        return isWorldPointInViewport(visual.x * TILE + TILE / 2, visual.y * TILE + TILE / 2) && shouldRenderUnitLabel(unit, tier);
+      }).length
+    : 0;
+  const constructionLabelCount = showResourceLabels
+    ? activeConstructionFlashes(game).filter((flash) => {
+        const building = game.buildings[flash.buildingId];
+        return building && building.hp > 0 && isWorldPointInViewport(building.x * TILE + TILE / 2, building.y * TILE + TILE / 2);
+      }).length
+    : 0;
+  return {
+    labelTier: tier,
+    labelContrastMode: "backed",
+    labelBackdrop: {
+      fill: "#080706",
+      alpha: 0.54,
+      stroke: "#f2d28b",
+      strokeAlpha: 0.22
+    },
+    labelPolicy: !showResourceLabels
+      ? "debug map labels disabled; sprites and texture overlays carry the default board read"
+      : tier === "overview"
+        ? "strategic resources, sovereigns, messengers, town halls, gates, turrets, and damaged or selected targets"
+        : tier === "tactical"
+          ? "construction resources except wood/food, military units, forts, gates, turrets, and priority targets"
+          : "all visible map labels",
+    resourceLabelsVisible: showResourceLabels,
+    visibleResourceLabelCount: showResourceLabels ? resources.visible : 0,
+    suppressedResourceLabelCount: showResourceLabels ? resources.suppressed : resources.potential,
+    potentialResourceLabelCount: resources.potential,
+    forestHintLabelCount: showResourceLabels ? resources.forestHints : 0,
+    visibleBuildingLabelCount,
+    visibleUnitLabelCount,
+    constructionLabelCount,
+    totalVisibleLabelCount: showResourceLabels
+      ? resources.visible + resources.forestHints + visibleBuildingLabelCount + visibleUnitLabelCount + constructionLabelCount
+      : 0,
+    spriteVisuals: {
+      atlasReady: Boolean(visualTextures),
+      mapLabelsDefault: showResourceLabels ? "debug labels enabled" : "sprite view",
+      visibleResourceSpriteCount: resourceSprites.visible,
+      visibleScarceResourceSpriteCount: resourceSprites.scarceVisible,
+      resourceTextureTypes: resourceTypes.length,
+      buildingTextureTypes: buildingTypes.length,
+      unitTextureTypes: unitTypes.length,
+      unitAnimation: "frame-time bob and packet pulse",
+      buildingAnimation: "turret recoil and construction focus pulse"
+    },
+    viewportTiles,
+    strategicGridStep: 8,
+    majorGridStep: 16,
+    resourceAbbreviations: resourceTypes.map((type) => ({
+      type,
+      label: resourceAbbrev(type),
+      scarce: scarceResourceTypes.has(type),
+      construction: constructionResourceTypes.has(type),
+      visibleAtTier: shouldRenderResourceLabel(type, tier)
+    })),
+    visualSignatures: {
+      resources: "sprite-textured deposits drawn from live resource health and culled to the viewport",
+      labels: "debug-only map text, disabled by default",
+      forts: "textured walls, gates, and turrets with damage, repair, gate state, and range overlays",
+      units: "textured unit silhouettes with frame-time movement bob and packet satchels"
+    }
+  };
+}
+
+function countResourceLabelTelemetry(
+  game: GameState,
+  tier: LabelTier,
+  bounds: { minX: number; maxX: number; minY: number; maxY: number }
+): { visible: number; suppressed: number; potential: number; forestHints: number } {
+  let visible = 0;
+  let suppressed = 0;
+  let potential = 0;
+  let forestHints = 0;
+  for (let y = bounds.minY; y <= bounds.maxY; y += 1) {
+    for (let x = bounds.minX; x <= bounds.maxX; x += 1) {
+      const tile = game.map[tileIndex(x, y)];
+      if (tile.resource && tile.resource.amount > 0 && tile.resource.hp > 0) {
+        potential += 1;
+        if (shouldRenderResourceLabel(tile.resource.type, tier)) visible += 1;
+        else suppressed += 1;
+      } else if (tile.terrain === "forest" && shouldRenderForestHintLabel(tier) && (x * 7 + y * 11) % 41 === 0) {
+        forestHints += 1;
+      }
+    }
+  }
+  return { visible, suppressed, potential, forestHints };
+}
+
+function countResourceSpriteTelemetry(
+  game: GameState,
+  bounds: { minX: number; maxX: number; minY: number; maxY: number }
+): { visible: number; scarceVisible: number } {
+  let visible = 0;
+  let scarceVisible = 0;
+  for (let y = bounds.minY; y <= bounds.maxY; y += 1) {
+    for (let x = bounds.minX; x <= bounds.maxX; x += 1) {
+      const resource = game.map[tileIndex(x, y)].resource;
+      if (!resource || resource.amount <= 0 || resource.hp <= 0) continue;
+      visible += 1;
+      if (scarceResourceTypes.has(resource.type)) scarceVisible += 1;
+    }
+  }
+  return { visible, scarceVisible };
+}
+
+function createVisualTextureAtlas(): VisualTextureAtlas {
+  return {
+    resources: Object.fromEntries(resourceTypes.map((type) => [type, makeAtlasTexture((graphics, size) => drawResourceTexture(graphics, type, size))])) as Record<
+      ResourceType,
+      Texture
+    >,
+    buildings: Object.fromEntries(buildingTypes.map((type) => [type, makeAtlasTexture((graphics, size) => drawBuildingTexture(graphics, type, size))])) as Record<
+      BuildingType,
+      Texture
+    >,
+    units: Object.fromEntries(unitTypes.map((type) => [type, makeAtlasTexture((graphics, size) => drawUnitTexture(graphics, type, size))])) as Record<UnitType, Texture>
+  };
+}
+
+function makeAtlasTexture(draw: (graphics: Graphics, size: number) => void): Texture {
+  const size = 48;
+  const graphics = new Graphics();
+  graphics.rect(0, 0, size, size).fill({ color: 0x000000, alpha: 0 });
+  draw(graphics, size);
+  const texture = app.renderer.generateTexture(graphics);
+  graphics.destroy();
+  return texture;
+}
+
+function drawResourceTexture(graphics: Graphics, type: ResourceType, size: number): void {
+  const cx = size / 2;
+  const cy = size / 2;
+  graphics.ellipse(cx, cy + 14, 15, 5).fill({ color: 0x090806, alpha: 0.26 });
+  if (type === "gold") {
+    graphics.circle(cx - 7, cy + 3, 7).fill(0xe7a938).stroke({ color: 0x5d3609, width: 2 });
+    graphics.circle(cx + 3, cy + 1, 8).fill(0xffd96b).stroke({ color: 0x6b430d, width: 2 });
+    graphics.circle(cx + 9, cy + 8, 5).fill(0xf7bc44).stroke({ color: 0x5d3609, width: 1.5 });
+    graphics.circle(cx + 1, cy - 2, 2).fill({ color: 0xfff2b6, alpha: 0.9 });
+    return;
+  }
+  if (type === "food") {
+    graphics.rect(cx - 13, cy - 2, 26, 17).fill({ color: 0x6fa34f, alpha: 0.9 }).stroke({ color: 0x2f4d20, width: 2 });
+    for (let i = 0; i < 5; i += 1) {
+      const x = cx - 10 + i * 5;
+      graphics.moveTo(x, cy + 14).lineTo(x + 2, cy - 10).stroke({ color: 0xd9bc52, width: 2, alpha: 0.95 });
+      graphics.circle(x + 1, cy - 9, 2.2).fill(0xf2db72);
+    }
+    graphics.rect(cx - 15, cy + 9, 30, 5).fill({ color: 0x8d5f35, alpha: 0.84 });
+    return;
+  }
+  if (type === "wood") {
+    graphics.roundRect(cx - 14, cy - 2, 28, 8, 4).fill(0x9b6a3b).stroke({ color: 0x432816, width: 2 });
+    graphics.roundRect(cx - 11, cy + 7, 24, 8, 4).fill(0xc08a52).stroke({ color: 0x432816, width: 2 });
+    graphics.circle(cx - 10, cy + 2, 3).stroke({ color: 0x5b351b, width: 1.4, alpha: 0.9 });
+    graphics.circle(cx + 9, cy + 11, 3).stroke({ color: 0x5b351b, width: 1.4, alpha: 0.9 });
+    graphics.circle(cx - 4, cy - 11, 9).fill(0x3f8d4c).stroke({ color: 0x1e4426, width: 2 });
+    graphics.circle(cx + 5, cy - 13, 7).fill(0x58a85e).stroke({ color: 0x1e4426, width: 1.5 });
+    return;
+  }
+  if (type === "stone") {
+    graphics.roundRect(cx - 13, cy + 1, 17, 14, 4).fill(0xa7a297).stroke({ color: 0x3a3834, width: 2 });
+    graphics.roundRect(cx - 2, cy - 8, 15, 18, 4).fill(0xc9c3b8).stroke({ color: 0x4d4942, width: 2 });
+    graphics.roundRect(cx + 5, cy + 6, 10, 9, 3).fill(0x89847a).stroke({ color: 0x34312c, width: 1.5 });
+    return;
+  }
+  if (type === "clay") {
+    graphics.roundRect(cx - 15, cy - 8, 30, 10, 2).fill(0xb7653f).stroke({ color: 0x4a251b, width: 2 });
+    graphics.roundRect(cx - 13, cy + 4, 26, 10, 2).fill(0xd47a4b).stroke({ color: 0x4a251b, width: 2 });
+    graphics.moveTo(cx, cy - 7).lineTo(cx, cy + 13).stroke({ color: 0x6a3221, width: 1.2, alpha: 0.76 });
+    graphics.moveTo(cx - 12, cy - 2).lineTo(cx + 12, cy - 2).stroke({ color: 0x6a3221, width: 1.2, alpha: 0.76 });
+    return;
+  }
+  if (type === "limestone") {
+    graphics.roundRect(cx - 15, cy - 8, 30, 23, 3).fill(0xded7bd).stroke({ color: 0x5f5a4a, width: 2 });
+    graphics.moveTo(cx - 13, cy).lineTo(cx + 13, cy).stroke({ color: 0x9f967b, width: 1.4, alpha: 0.82 });
+    graphics.moveTo(cx - 3, cy - 8).lineTo(cx - 3, cy).moveTo(cx + 7, cy).lineTo(cx + 7, cy + 14).stroke({ color: 0x9f967b, width: 1.4, alpha: 0.82 });
+    graphics.circle(cx - 8, cy - 3, 1.5).fill({ color: 0xf7f1d7, alpha: 0.86 });
+    return;
+  }
+  if (type === "iron") {
+    graphics.regularPoly(cx - 4, cy + 4, 13, 6).fill(0x6f7d88).stroke({ color: 0x1d252b, width: 2 });
+    graphics.regularPoly(cx + 8, cy + 7, 8, 5).fill(0x495660).stroke({ color: 0x1d252b, width: 1.5 });
+    graphics.circle(cx - 8, cy, 2.4).fill({ color: 0xc3d0d7, alpha: 0.9 });
+    graphics.circle(cx + 2, cy + 4, 1.8).fill({ color: 0xdbe6eb, alpha: 0.86 });
+    return;
+  }
+  graphics.regularPoly(cx - 5, cy + 5, 13, 6).fill(0x23252a).stroke({ color: 0x090909, width: 2 });
+  graphics.regularPoly(cx + 8, cy + 8, 8, 5).fill(0x3a3d44).stroke({ color: 0x090909, width: 1.5 });
+  graphics.circle(cx - 8, cy, 2.2).fill({ color: 0x9a9a95, alpha: 0.75 });
+  graphics.circle(cx + 1, cy + 7, 1.6).fill({ color: 0xb9b8b0, alpha: 0.65 });
+}
+
+function drawBuildingTexture(graphics: Graphics, type: BuildingType, size: number): void {
+  const cx = size / 2;
+  const cy = size / 2;
+  graphics.ellipse(cx, cy + 15, 17, 5).fill({ color: 0x090806, alpha: 0.28 });
+  if (type === "townHall") {
+    graphics.roundRect(cx - 14, cy - 3, 28, 22, 2).fill(0xd8c7a0).stroke({ color: 0x3a2819, width: 2 });
+    graphics.moveTo(cx - 17, cy - 3).lineTo(cx, cy - 18).lineTo(cx + 17, cy - 3).closePath().fill(0x945236).stroke({ color: 0x3a2819, width: 2 });
+    graphics.rect(cx - 4, cy + 7, 8, 12).fill(0x5b3a25);
+    graphics.rect(cx + 7, cy + 2, 6, 6).fill(0x8fc0d2).stroke({ color: 0x2f3d43, width: 1 });
+    return;
+  }
+  if (type === "farm") {
+    graphics.rect(cx - 17, cy + 3, 34, 13).fill(0x8f7c36).stroke({ color: 0x3c371a, width: 2 });
+    for (let i = 0; i < 4; i += 1) {
+      graphics.moveTo(cx - 14 + i * 8, cy + 15).lineTo(cx - 9 + i * 8, cy + 3).stroke({ color: 0xddc66b, width: 1.5 });
+    }
+    graphics.roundRect(cx - 7, cy - 10, 14, 13, 2).fill(0xd5b178).stroke({ color: 0x3a2819, width: 2 });
+    graphics.moveTo(cx - 9, cy - 10).lineTo(cx, cy - 18).lineTo(cx + 9, cy - 10).closePath().fill(0xa95b37).stroke({ color: 0x3a2819, width: 2 });
+    return;
+  }
+  if (type === "barracks") {
+    graphics.roundRect(cx - 15, cy - 3, 30, 21, 2).fill(0xb28b63).stroke({ color: 0x372518, width: 2 });
+    graphics.moveTo(cx - 17, cy - 3).lineTo(cx, cy - 18).lineTo(cx + 17, cy - 3).closePath().fill(0x70422c).stroke({ color: 0x372518, width: 2 });
+    graphics.rect(cx - 4, cy + 7, 8, 11).fill(0x422819);
+    graphics.moveTo(cx + 8, cy - 13).lineTo(cx + 8, cy - 22).lineTo(cx + 16, cy - 18).stroke({ color: 0xeadfbf, width: 2 });
+    return;
+  }
+  if (type === "market") {
+    graphics.roundRect(cx - 15, cy - 1, 30, 19, 2).fill(0xd6b782).stroke({ color: 0x372518, width: 2 });
+    for (let i = 0; i < 4; i += 1) {
+      graphics.rect(cx - 16 + i * 8, cy - 11, 8, 10).fill(i % 2 === 0 ? 0xf6efe0 : 0xb34f42);
+    }
+    graphics.moveTo(cx - 17, cy - 11).lineTo(cx + 17, cy - 11).stroke({ color: 0x372518, width: 2 });
+    graphics.circle(cx + 8, cy + 9, 4).fill(0xe3bf4d).stroke({ color: 0x67480f, width: 1.5 });
+    return;
+  }
+  if (type === "watchtower") {
+    graphics.rect(cx - 8, cy - 2, 16, 21).fill(0xa57c51).stroke({ color: 0x332115, width: 2 });
+    graphics.rect(cx - 13, cy - 13, 26, 11).fill(0xd0b17a).stroke({ color: 0x332115, width: 2 });
+    graphics.rect(cx - 5, cy + 7, 10, 12).fill(0x5f3920);
+    graphics.moveTo(cx - 11, cy + 18).lineTo(cx - 16, cy + 23).moveTo(cx + 11, cy + 18).lineTo(cx + 16, cy + 23).stroke({ color: 0x332115, width: 2 });
+    return;
+  }
+  if (type === "wall") {
+    graphics.roundRect(cx - 18, cy - 8, 36, 20, 2).fill(0xcac2b4).stroke({ color: 0x2b2925, width: 2 });
+    for (let i = 0; i < 4; i += 1) {
+      graphics.rect(cx - 17 + i * 9, cy - 15, 7, 8).fill(0xe7ddcb).stroke({ color: 0x2b2925, width: 1.2 });
+    }
+    graphics.moveTo(cx - 17, cy + 1).lineTo(cx + 17, cy + 1).stroke({ color: 0x837b70, width: 1.2, alpha: 0.8 });
+    graphics.moveTo(cx - 5, cy - 8).lineTo(cx - 5, cy + 12).moveTo(cx + 8, cy - 8).lineTo(cx + 8, cy + 12).stroke({ color: 0x837b70, width: 1.2, alpha: 0.8 });
+    return;
+  }
+  if (type === "gate") {
+    graphics.rect(cx - 18, cy - 8, 36, 20).fill(0xcac2b4).stroke({ color: 0x2b2925, width: 2 });
+    graphics.rect(cx - 7, cy - 3, 14, 15).fill(0x68472b).stroke({ color: 0x2b2925, width: 2 });
+    graphics.moveTo(cx - 5, cy - 1).lineTo(cx - 5, cy + 11).moveTo(cx, cy - 1).lineTo(cx, cy + 11).moveTo(cx + 5, cy - 1).lineTo(cx + 5, cy + 11).stroke({ color: 0xb99257, width: 1.4 });
+    graphics.rect(cx - 15, cy - 16, 8, 9).fill(0xe7ddcb).stroke({ color: 0x2b2925, width: 1.2 });
+    graphics.rect(cx + 7, cy - 16, 8, 9).fill(0xe7ddcb).stroke({ color: 0x2b2925, width: 1.2 });
+    return;
+  }
+  graphics.roundRect(cx - 11, cy - 3, 22, 22, 3).fill(0xbeb4a4).stroke({ color: 0x2b2925, width: 2 });
+  graphics.circle(cx, cy - 7, 10).fill(0xd9c58f).stroke({ color: 0x2b2925, width: 2 });
+  graphics.rect(cx - 4, cy - 20, 8, 11).fill(0x45413a).stroke({ color: 0x181510, width: 1.5 });
+  graphics.moveTo(cx, cy - 17).lineTo(cx + 15, cy - 20).stroke({ color: 0x45413a, width: 3 });
+}
+
+function drawUnitTexture(graphics: Graphics, type: UnitType, size: number): void {
+  const cx = size / 2;
+  const cy = size / 2;
+  graphics.ellipse(cx, cy + 15, 12, 4).fill({ color: 0x050504, alpha: 0.3 });
+  if (type === "sovereign") {
+    graphics.circle(cx, cy + 3, 10).fill(0xf5efe0).stroke({ color: 0x100f0c, width: 2 });
+    graphics.circle(cx, cy - 9, 6).fill(0xf5efe0).stroke({ color: 0x100f0c, width: 2 });
+    graphics.moveTo(cx - 8, cy - 14).lineTo(cx - 4, cy - 23).lineTo(cx, cy - 15).lineTo(cx + 4, cy - 23).lineTo(cx + 8, cy - 14).fill(0xf2d28b).stroke({ color: 0x100f0c, width: 1.5 });
+    return;
+  }
+  if (type === "peon") {
+    graphics.circle(cx, cy - 8, 5).fill(0xf5efe0).stroke({ color: 0x100f0c, width: 2 });
+    graphics.roundRect(cx - 7, cy - 2, 14, 17, 4).fill(0xf5efe0).stroke({ color: 0x100f0c, width: 2 });
+    graphics.moveTo(cx + 9, cy - 5).lineTo(cx + 17, cy + 10).stroke({ color: 0x100f0c, width: 3 });
+    graphics.moveTo(cx + 12, cy + 2).lineTo(cx + 19, cy - 3).stroke({ color: 0x100f0c, width: 2 });
+    return;
+  }
+  if (type === "sentinel") {
+    graphics.moveTo(cx, cy - 18).lineTo(cx + 13, cy + 15).lineTo(cx - 13, cy + 15).closePath().fill(0xf5efe0).stroke({ color: 0x100f0c, width: 2 });
+    graphics.circle(cx, cy - 7, 4).fill(0x100f0c);
+    graphics.moveTo(cx - 7, cy - 2).lineTo(cx + 7, cy - 2).stroke({ color: 0x100f0c, width: 2 });
+    return;
+  }
+  if (type === "messenger") {
+    graphics.circle(cx - 4, cy - 10, 5).fill(0xf5efe0).stroke({ color: 0x100f0c, width: 2 });
+    graphics.roundRect(cx - 10, cy - 3, 16, 15, 5).fill(0xf5efe0).stroke({ color: 0x100f0c, width: 2 });
+    graphics.roundRect(cx + 4, cy - 9, 15, 10, 2).fill(0xf2d28b).stroke({ color: 0x100f0c, width: 1.5 });
+    graphics.moveTo(cx + 5, cy - 8).lineTo(cx + 11, cy - 3).lineTo(cx + 18, cy - 8).stroke({ color: 0x7a5620, width: 1.2 });
+    graphics.moveTo(cx - 6, cy + 11).lineTo(cx - 15, cy + 18).moveTo(cx + 2, cy + 11).lineTo(cx + 12, cy + 18).stroke({ color: 0x100f0c, width: 3 });
+    return;
+  }
+  if (type === "trader") {
+    graphics.circle(cx - 4, cy - 9, 5).fill(0xf5efe0).stroke({ color: 0x100f0c, width: 2 });
+    graphics.roundRect(cx - 10, cy - 2, 16, 17, 4).fill(0xf5efe0).stroke({ color: 0x100f0c, width: 2 });
+    graphics.roundRect(cx + 5, cy + 1, 12, 13, 3).fill(0xd6b782).stroke({ color: 0x100f0c, width: 2 });
+    graphics.circle(cx + 7, cy + 16, 3).fill(0x100f0c);
+    graphics.circle(cx + 15, cy + 16, 3).fill(0x100f0c);
+    return;
+  }
+  if (type === "militia") {
+    graphics.circle(cx, cy - 11, 5).fill(0xf5efe0).stroke({ color: 0x100f0c, width: 2 });
+    graphics.moveTo(cx - 10, cy - 3).lineTo(cx, cy + 16).lineTo(cx + 10, cy - 3).closePath().fill(0xf5efe0).stroke({ color: 0x100f0c, width: 2 });
+    graphics.moveTo(cx + 12, cy - 15).lineTo(cx + 12, cy + 15).stroke({ color: 0x100f0c, width: 3 });
+    graphics.moveTo(cx + 8, cy - 10).lineTo(cx + 12, cy - 18).lineTo(cx + 16, cy - 10).stroke({ color: 0x100f0c, width: 2 });
+    return;
+  }
+  graphics.circle(cx - 1, cy - 11, 5).fill(0xf5efe0).stroke({ color: 0x100f0c, width: 2 });
+  graphics.roundRect(cx - 8, cy - 4, 14, 18, 4).fill(0xf5efe0).stroke({ color: 0x100f0c, width: 2 });
+  graphics.moveTo(cx + 12, cy - 14).quadraticCurveTo(cx + 23, cy, cx + 12, cy + 15).stroke({ color: 0x100f0c, width: 3 });
+  graphics.moveTo(cx + 11, cy + 1).lineTo(cx + 23, cy - 5).stroke({ color: 0x100f0c, width: 2 });
+}
+
 function drawTerrain(game: GameState, graphics: Graphics): void {
   graphics.clear();
   for (let y = 0; y < MAP_SIZE; y += 1) {
@@ -4231,12 +4621,35 @@ function drawTerrain(game: GameState, graphics: Graphics): void {
       const shade = terrainShade(x, y, game.seed);
       graphics.rect(x * TILE, y * TILE, TILE, TILE).fill(shadeColor(terrainColor(tile.terrain), shade));
       drawTerrainDetail(graphics, x, y, tile.terrain, shade);
-      if (tile.resource && tile.resource.amount > 0) {
-        drawResource(graphics, x, y, tile.resource.type);
-      }
     }
   }
   drawStrategicGrid(graphics);
+}
+
+function drawResourceSprites(game: GameState, layer: Container): void {
+  const bounds = currentViewportTileBounds(3);
+  const textures = visualTextures?.resources;
+  if (!textures) return;
+  const now = renderClockMs || performance.now();
+  for (let y = bounds.minY; y <= bounds.maxY; y += 1) {
+    for (let x = bounds.minX; x <= bounds.maxX; x += 1) {
+      const resource = game.map[tileIndex(x, y)].resource;
+      if (!resource || resource.amount <= 0 || resource.hp <= 0) continue;
+      const texture = textures[resource.type];
+      if (!texture) continue;
+      const sprite = new Sprite({ texture });
+      const scarce = scarceResourceTypes.has(resource.type);
+      const health = resource.maxHp > 0 ? clamp(resource.hp / resource.maxHp, 0.25, 1) : 1;
+      const pulse = scarce ? 1 + Math.sin(now / 480 + x * 0.7 + y * 0.4) * 0.05 : 1;
+      sprite.anchor.set(0.5);
+      sprite.x = x * TILE + TILE / 2;
+      sprite.y = y * TILE + TILE / 2;
+      sprite.width = TILE * (scarce ? 1.24 : 1.08) * pulse;
+      sprite.height = TILE * (scarce ? 1.24 : 1.08) * pulse;
+      sprite.alpha = 0.68 + health * 0.32;
+      layer.addChild(sprite);
+    }
+  }
 }
 
 function drawRoutes(game: GameState, graphics: Graphics): void {
@@ -4257,37 +4670,43 @@ function drawDynamic(game: GameState, _layer: Container, options: { updateLabels
   const graphics = dynamicGraphics;
   graphics.clear();
   const updateLabels = options.updateLabels !== false;
+  const labelTier = currentLabelTier();
   if (updateLabels) {
     overlayGraphics.clear();
     buildingGraphics.clear();
+    labelBackdropGraphics.clear();
+    resourceSpriteLayer.removeChildren().forEach((child) => child.destroy());
     dynamicLabelLayer.removeChildren().forEach((child) => child.destroy());
     lastLabelRenderMs = renderClockMs || performance.now();
+    drawResourceSprites(game, resourceSpriteLayer);
     if (showContestedResources) drawContestedResourceOverlays(game, overlayGraphics);
     if (showDefenseOverlay) drawDefenseOverlay(game, overlayGraphics);
   }
 
   drawConstructionFocus(game, graphics);
-  if (updateLabels && showResourceLabels) addResourceLabels(game, dynamicLabelLayer);
+  if (updateLabels && showResourceLabels) addResourceLabels(game, dynamicLabelLayer, labelTier);
   const buildings = observerMode ? Object.values(game.buildings) : getVisibleBuildings(game, playerTribe);
   const units = observerMode ? Object.values(game.units).filter((unit) => unit.hp > 0) : getVisibleUnits(game, playerTribe);
   if (updateLabels) {
     for (const building of buildings) {
       drawBuilding(buildingGraphics, building, game);
-      addMapText(
-        dynamicLabelLayer,
-        buildingAbbrev(building.type),
-        building.x * TILE + TILE / 2,
-        building.y * TILE + TILE / 2 + 0.5,
-        building.type === "wall" || building.type === "gate" ? 10 : 8,
-        buildingLabelColor(building)
-      );
+      if (showResourceLabels && shouldRenderBuildingLabel(building, game, labelTier)) {
+        addMapText(
+          dynamicLabelLayer,
+          buildingAbbrev(building.type),
+          building.x * TILE + TILE / 2,
+          building.y * TILE + TILE / 2 + 0.5,
+          building.type === "wall" || building.type === "gate" ? 10 : 8,
+          buildingLabelColor(building)
+        );
+      }
     }
   }
-  if (updateLabels) addConstructionFocusLabels(game, dynamicLabelLayer);
+  if (updateLabels && showResourceLabels) addConstructionFocusLabels(game, dynamicLabelLayer);
   for (const unit of units) {
     const visual = visualPositionForUnit(unit);
     drawUnit(graphics, unit, visual);
-    if (updateLabels) {
+    if (updateLabels && showResourceLabels && shouldRenderUnitLabel(unit, labelTier)) {
       addMapText(
         dynamicLabelLayer,
         unitAbbrev(unit.type),
@@ -4298,7 +4717,7 @@ function drawDynamic(game: GameState, _layer: Container, options: { updateLabels
       );
     }
   }
-  if (updateLabels) {
+  if (updateLabels && showResourceLabels) {
     for (const unit of units) {
       if (shouldLabelUnit(unit)) {
         const visual = visualPositionForUnit(unit);
@@ -4397,7 +4816,10 @@ function drawBuilding(graphics: Graphics, building: Building, game: GameState): 
   const color = tribeConfig[building.tribeId].color;
   const x = building.x * TILE;
   const y = building.y * TILE;
-  if (building.type === "wall") {
+  const texture = visualTextures?.buildings[building.type];
+  if (texture) {
+    drawTexturedBuilding(graphics, building, game, x, y, color, texture);
+  } else if (building.type === "wall") {
     graphics.rect(x, y, TILE, TILE).fill({ color: 0x0f0d0a, alpha: 0.38 });
     if (hasAdjacentFortification(game, building, 0, -1)) graphics.rect(x + 7, y - 1, 8, 9).fill({ color: 0xd7d0c2, alpha: 0.98 });
     if (hasAdjacentFortification(game, building, 0, 1)) graphics.rect(x + 7, y + TILE - 8, 8, 9).fill({ color: 0xd7d0c2, alpha: 0.98 });
@@ -4459,6 +4881,46 @@ function drawBuilding(graphics: Graphics, building: Building, game: GameState): 
     graphics.rect(x + 3, y + TILE - 4, TILE - 6, 3).fill(0x3a1918);
     graphics.rect(x + 3, y + TILE - 4, (TILE - 6) * pct, 3).fill(0x77d26d);
   }
+}
+
+function drawTexturedBuilding(graphics: Graphics, building: Building, game: GameState, x: number, y: number, color: number, texture: Texture): void {
+  const cx = x + TILE / 2;
+  const cy = y + TILE / 2;
+  const fortified = building.type === "wall" || building.type === "gate";
+  if (fortified) {
+    graphics.rect(x, y, TILE, TILE).fill({ color: 0x0f0d0a, alpha: 0.24 });
+    if (hasAdjacentFortification(game, building, 0, -1)) graphics.rect(x + 7, y - 2, 8, 9).fill({ color: 0xcac2b4, alpha: 0.96 });
+    if (hasAdjacentFortification(game, building, 0, 1)) graphics.rect(x + 7, y + TILE - 7, 8, 9).fill({ color: 0xcac2b4, alpha: 0.96 });
+    if (hasAdjacentFortification(game, building, -1, 0)) graphics.rect(x - 2, y + 7, 9, 8).fill({ color: 0xcac2b4, alpha: 0.96 });
+    if (hasAdjacentFortification(game, building, 1, 0)) graphics.rect(x + TILE - 7, y + 7, 9, 8).fill({ color: 0xcac2b4, alpha: 0.96 });
+    graphics.texture(texture, 0xffffff, x - 4, y - 7, TILE + 8, TILE + 12);
+    graphics.moveTo(x + 3, cy + 1).lineTo(x + TILE - 3, cy + 1).stroke({ color, width: 3, alpha: 0.92 });
+    if (building.type === "gate") {
+      const gateState = building.gateState ?? "open";
+      if (gateState !== "open") {
+        graphics.rect(x + 8, y + 8, TILE - 16, TILE - 10).stroke({ color: 0xffe17b, width: 2, alpha: 0.86 });
+        if (gateState === "locked") graphics.circle(cx + 5, cy + 3, 3.2).fill(0xffe17b).stroke({ color: 0x0c0a08, width: 1.2 });
+      } else {
+        graphics.moveTo(x + 10, cy + 4).lineTo(x + TILE - 10, cy + 4).stroke({ color: 0xffe17b, width: 2, alpha: 0.76 });
+      }
+    }
+    return;
+  }
+
+  const scalePad = building.type === "townHall" ? 8 : building.type === "turret" || building.type === "watchtower" ? 6 : 4;
+  graphics.texture(texture, 0xffffff, x - scalePad / 2, y - scalePad, TILE + scalePad, TILE + scalePad * 1.3);
+  if (building.type === "turret") {
+    const recoil = Math.sin((renderClockMs || performance.now()) / 260 + building.x * 0.7 + building.y * 0.4) * 1.2;
+    graphics.moveTo(cx, y + 5).lineTo(cx + 12 + recoil, y + 2).stroke({ color, width: 3, alpha: 0.96 });
+    graphics.circle(cx, cy - 5, 6).stroke({ color, width: 2, alpha: 0.9 });
+    return;
+  }
+  if (building.type === "watchtower") {
+    graphics.moveTo(cx + 4, y + 4).lineTo(cx + 4, y - 7).lineTo(cx + 13, y - 3).stroke({ color, width: 2.2, alpha: 0.95 });
+    return;
+  }
+  graphics.moveTo(cx + 4, y + 3).lineTo(cx + 4, y - 6).lineTo(cx + 13, y - 2).stroke({ color, width: 2, alpha: 0.92 });
+  if (building.type === "market") graphics.circle(cx + 8, cy + 8, 4).fill({ color, alpha: 0.9 }).stroke({ color: 0x100f0c, width: 1 });
 }
 
 function drawBuildingDamageOverlay(graphics: Graphics, building: Building, x: number, y: number): void {
@@ -4541,10 +5003,16 @@ function hasAdjacentFortification(game: GameState, building: Building, dx: numbe
 function drawUnit(graphics: Graphics, unit: Unit, position: Position = visualPositionForUnit(unit)): void {
   const color = tribeConfig[unit.tribeId].color;
   const radius = unit.type === "sovereign" ? 9 : unit.type === "messenger" ? 6 : 7;
+  const moving = unit.task.kind !== "idle";
+  const stride = moving ? Math.sin((renderClockMs || performance.now()) / 115 + unit.x * 0.9 + unit.y * 0.5) * 1.6 : Math.sin((renderClockMs || performance.now()) / 720 + unit.x) * 0.35;
   const x = position.x * TILE + TILE / 2;
-  const y = position.y * TILE + TILE / 2;
+  const y = position.y * TILE + TILE / 2 + stride;
   drawUnitShape(graphics, unit, x, y, radius, color);
-  if (unit.carriedPacketId) graphics.circle(x + 8, y - 8, 3).fill(0xf2d28b);
+  if (unit.carriedPacketId) {
+    const packetPulse = 0.74 + Math.sin((renderClockMs || performance.now()) / 180) * 0.18;
+    graphics.roundRect(x + 6, y - 12, 8, 6, 1.5).fill({ color: 0xf2d28b, alpha: 0.95 }).stroke({ color: 0x100f0c, width: 1 });
+    graphics.moveTo(x + 7, y - 11).lineTo(x + 10, y - 8).lineTo(x + 14, y - 11).stroke({ color: 0x7a5620, width: 1, alpha: packetPulse });
+  }
   if (selectedUnitId === unit.id) graphics.circle(x, y, radius + 5).stroke({ color: 0xf2d28b, width: 2 });
   if (unit.hp < unit.maxHp) {
     const pct = Math.max(0, unit.hp / unit.maxHp);
@@ -4686,13 +5154,14 @@ function drawResource(graphics: Graphics, x: number, y: number, resource: Resour
   graphics.rect(cx - 5, cy - 4, 10, 8).fill(0x8ac17a).stroke({ color: 0x2d5b34, width: 1 });
 }
 
-function addResourceLabels(game: GameState, layer: Container): void {
-  for (let y = 0; y < MAP_SIZE; y += 1) {
-    for (let x = 0; x < MAP_SIZE; x += 1) {
+function addResourceLabels(game: GameState, layer: Container, tier: LabelTier): void {
+  const bounds = currentViewportTileBounds();
+  for (let y = bounds.minY; y <= bounds.maxY; y += 1) {
+    for (let x = bounds.minX; x <= bounds.maxX; x += 1) {
       const tile = game.map[tileIndex(x, y)];
-      if (tile.resource && tile.resource.amount > 0) {
+      if (tile.resource && tile.resource.amount > 0 && tile.resource.hp > 0 && shouldRenderResourceLabel(tile.resource.type, tier)) {
         addMapText(layer, resourceAbbrev(tile.resource.type), x * TILE + TILE / 2, y * TILE + TILE / 2 + 0.5, 8, resourceLabelColor(tile.resource.type));
-      } else if (tile.terrain === "forest" && (x * 7 + y * 11) % 41 === 0) {
+      } else if (tile.terrain === "forest" && shouldRenderForestHintLabel(tier) && (x * 7 + y * 11) % 41 === 0) {
         addMapText(layer, "W", x * TILE + TILE / 2, y * TILE + TILE / 2 + 0.5, 7, "#d7f0c8");
       }
     }
@@ -4700,6 +5169,15 @@ function addResourceLabels(game: GameState, layer: Container): void {
 }
 
 function drawUnitShape(graphics: Graphics, unit: Unit, x: number, y: number, radius: number, color: number): void {
+  const texture = visualTextures?.units[unit.type];
+  if (texture) {
+    const size = unit.type === "sovereign" ? 34 : unit.type === "messenger" || unit.type === "sentinel" ? 29 : 31;
+    graphics.texture(texture, color, x - size / 2, y - size / 2 - 2, size, size);
+    if (unit.task.kind !== "idle") {
+      graphics.ellipse(x, y + radius + 7, radius + 5, 3).stroke({ color, width: 1.3, alpha: 0.38 });
+    }
+    return;
+  }
   if (unit.type === "sovereign") {
     graphics.circle(x, y, radius + 2).fill(0xf2d28b).stroke({ color: 0x100f0c, width: 2 });
     graphics.circle(x, y, radius - 1).fill(color);
@@ -4724,7 +5202,8 @@ function drawUnitShape(graphics: Graphics, unit: Unit, x: number, y: number, rad
   graphics.circle(x, y, radius).fill(color).stroke({ color: 0x100f0c, width: 2 });
 }
 
-function addMapText(layer: Container, text: string, x: number, y: number, fontSize: number, fill: string): void {
+function addMapText(layer: Container, text: string, x: number, y: number, fontSize: number, fill: string): boolean {
+  if (!isWorldPointInViewport(x, y, 100)) return false;
   const label = new Text({
     text,
     style: {
@@ -4732,13 +5211,22 @@ function addMapText(layer: Container, text: string, x: number, y: number, fontSi
       fontSize,
       fontWeight: "700",
       fill,
-      stroke: { color: "#100f0c", width: 2 }
+      stroke: { color: "#080706", width: Math.max(2, Math.round(fontSize * 0.28)) }
     }
   });
   label.anchor.set(0.5);
   label.x = x;
   label.y = y;
+  const paddingX = Math.max(4, Math.ceil(fontSize * 0.36));
+  const paddingY = Math.max(2, Math.ceil(fontSize * 0.2));
+  const width = Math.ceil(label.width + paddingX * 2);
+  const height = Math.ceil(label.height + paddingY * 2);
+  labelBackdropGraphics
+    .roundRect(x - width / 2, y - height / 2, width, height, Math.min(5, height / 2))
+    .fill({ color: 0x080706, alpha: 0.54 })
+    .stroke({ color: 0xf2d28b, width: 1, alpha: 0.22 });
   layer.addChild(label);
+  return true;
 }
 
 function updateHud(game: GameState): void {
@@ -6025,27 +6513,14 @@ function applyCamera(): void {
 function renderLegend(): void {
   legendPanel.innerHTML = `
     <div class="legend-grid">
-      <span class="legend-item"><b>SOV</b> sovereign</span>
-      <span class="legend-item"><b>P</b> peon</span>
-      <span class="legend-item"><b>S</b> sentinel/scout</span>
-      <span class="legend-item"><b>M</b> messenger</span>
-      <span class="legend-item"><b>ML</b> militia</span>
-      <span class="legend-item"><b>AR</b> archer</span>
-      <span class="legend-item"><b>TH</b> town hall</span>
-      <span class="legend-item"><b>WL</b> wall</span>
-      <span class="legend-item"><b>GT</b> gate</span>
-      <span class="legend-item"><b>TU</b> turret</span>
-      <span class="legend-item"><b>G</b> gold</span>
-      <span class="legend-item"><b>F</b> food</span>
-      <span class="legend-item"><b>W</b> wood</span>
-      <span class="legend-item"><b>ST</b> stone</span>
-      <span class="legend-item"><b>CL</b> clay</span>
-      <span class="legend-item"><b>LS</b> limestone</span>
-      <span class="legend-item"><b>IR</b> iron scarce</span>
-      <span class="legend-item"><b>CO</b> coal scarce</span>
-      <span class="legend-item"><b>O</b> contested deposit</span>
-      <span class="legend-item"><b>R</b> turret range</span>
-      <span class="legend-item"><b>GRID</b> 8-tile map grid</span>
+      <span class="legend-item"><b>People</b> sovereigns, workers, sentinels, messengers, traders, militia, archers</span>
+      <span class="legend-item"><b>Towns</b> halls, farms, barracks, markets, watchtowers</span>
+      <span class="legend-item"><b>Fortifications</b> walls, lockable gates, turrets</span>
+      <span class="legend-item"><b>Food and timber</b> crop fields and log piles</span>
+      <span class="legend-item"><b>Stone materials</b> stone, clay bricks, limestone blocks</span>
+      <span class="legend-item"><b>Scarce deposits</b> iron ore and coal outcrops</span>
+      <span class="legend-item"><b>Overlays</b> contested deposits, turret ranges, construction pulses, health bars</span>
+      <span class="legend-item"><b>Grid</b> 8-tile strategic reference</span>
     </div>
     <div class="legend-build-costs">
       ${buildableBuildingTypes

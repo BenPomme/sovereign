@@ -221,11 +221,14 @@ for (const label of [
   if (!debugText.includes(label)) throw new Error(`Missing debug control: ${label}`);
 }
 const mapLayerText = await page.locator("#mapLayerPanel").innerText();
-for (const label of ["Resource labels", "Contested deposits", "Walls, gates, and turret ranges"]) {
+for (const label of ["Debug map labels", "Contested deposits", "Walls, gates, and turret ranges"]) {
   if (!mapLayerText.includes(label)) throw new Error(`Missing map layer control: ${label}`);
 }
 const mapLayerState = await page.evaluate(() => {
-  const read = () => JSON.parse(window.render_game_to_text()).mapLayers;
+  const read = () => {
+    const parsed = JSON.parse(window.render_game_to_text());
+    return { ...parsed.mapLayers, boardReadability: parsed.boardReadability };
+  };
   const resourceLabels = document.querySelector("#showResourceLabelsToggle");
   const contested = document.querySelector("#showContestedResourcesToggle");
   const defense = document.querySelector("#showDefenseOverlayToggle");
@@ -251,7 +254,7 @@ const mapLayerState = await page.evaluate(() => {
 });
 if (!mapLayerState.ok) throw new Error(`Map layer controls did not initialize: ${JSON.stringify(mapLayerState)}`);
 if (
-  mapLayerState.before?.resourceLabels !== true ||
+  mapLayerState.before?.resourceLabels !== false ||
   mapLayerState.before?.contestedResources !== true ||
   mapLayerState.before?.defenseOverlay !== true ||
   mapLayerState.off?.resourceLabels !== false ||
@@ -262,6 +265,23 @@ if (
   mapLayerState.on?.defenseOverlay !== true
 ) {
   throw new Error(`Map layer controls did not update render_game_to_text: ${JSON.stringify(mapLayerState)}`);
+}
+if (
+  mapLayerState.before?.boardReadability?.labelContrastMode !== "backed" ||
+  mapLayerState.before?.boardReadability?.resourceLabelsVisible !== false ||
+  mapLayerState.before?.boardReadability?.visibleResourceLabelCount !== 0 ||
+  mapLayerState.before?.boardReadability?.totalVisibleLabelCount !== 0 ||
+  mapLayerState.before?.boardReadability?.spriteVisuals?.atlasReady !== true ||
+  mapLayerState.before?.boardReadability?.spriteVisuals?.visibleResourceSpriteCount <= 0 ||
+  mapLayerState.off?.boardReadability?.resourceLabelsVisible !== false ||
+  mapLayerState.off?.boardReadability?.visibleResourceLabelCount !== 0 ||
+  mapLayerState.off?.boardReadability?.totalVisibleLabelCount !== 0 ||
+  mapLayerState.on?.boardReadability?.resourceLabelsVisible !== true ||
+  mapLayerState.on?.boardReadability?.visibleResourceLabelCount <= 0 ||
+  mapLayerState.on?.boardReadability?.totalVisibleLabelCount <= 0 ||
+  mapLayerState.on?.boardReadability?.spriteVisuals?.atlasReady !== true
+) {
+  throw new Error(`Board readability telemetry did not track sprite-first visuals and debug labels through map toggles: ${JSON.stringify(mapLayerState)}`);
 }
 const constructionBoost = await page.evaluate(() => {
   if (typeof window.force_resource_boost_for_test !== "function") return { ok: false, reason: "missing resource boost hook" };
@@ -339,6 +359,20 @@ if (
 if (!wallState.readability?.resourceAbbreviations?.some((entry) => entry.type === "coal" && entry.label === "CO" && entry.scarce)) {
   throw new Error(`Board readability hook did not expose scarce resource abbreviations: ${JSON.stringify(wallState.readability)}`);
 }
+if (
+  wallState.readability?.labelContrastMode !== "backed" ||
+  !["overview", "tactical", "detail"].includes(wallState.readability?.labelTier) ||
+  wallState.readability?.spriteVisuals?.atlasReady !== true ||
+  wallState.readability?.spriteVisuals?.visibleResourceSpriteCount <= 0 ||
+  wallState.readability?.spriteVisuals?.buildingTextureTypes < 8 ||
+  wallState.readability?.spriteVisuals?.unitTextureTypes < 7 ||
+  wallState.readability?.visibleBuildingLabelCount <= 0 ||
+  wallState.readability?.constructionLabelCount <= 0 ||
+  wallState.readability?.totalVisibleLabelCount <= 0 ||
+  !wallState.readability?.resourceAbbreviations?.some((entry) => entry.type === "wood" && entry.visibleAtTier === false)
+) {
+  throw new Error(`Board readability hook did not expose sprite-first visuals and optional debug labels after construction: ${JSON.stringify(wallState.readability)}`);
+}
 if (!wallState.contestedIron.length || !wallState.contestedCoal.length) {
   throw new Error(`No contested scarce-resource sites were exposed by render_game_to_text: ${JSON.stringify(wallState)}`);
 }
@@ -410,23 +444,22 @@ if (!aiBugText.includes("AI") && !aiBugText.includes("Turn")) {
 
 const legendText = await page.locator("#legendPanel").innerText();
 for (const label of [
-  "SOV",
-  "peon",
+  "People",
+  "sovereigns",
+  "workers",
   "messenger",
-  "WL",
-  "wall",
-  "GT",
-  "gate",
-  "TU",
-  "turret",
-  "CL",
-  "LS",
-  "IR",
-  "CO",
-  "coal scarce",
-  "8-tile map grid",
-  "contested deposit",
-  "turret range",
+  "Towns",
+  "Fortifications",
+  "walls",
+  "lockable gates",
+  "turrets",
+  "Stone materials",
+  "Scarce deposits",
+  "iron ore",
+  "coal outcrops",
+  "8-tile strategic reference",
+  "contested deposits",
+  "turret ranges",
   "20 wood, 30 stone, 25 clay, 15 limestone",
   "45 iron",
   "30 coal"

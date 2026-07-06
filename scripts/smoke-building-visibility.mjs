@@ -103,6 +103,7 @@ const buildingState = await page.evaluate(() => {
   return {
     selected: parsed.selected,
     combatStatCoverage: parsed.combatStatCoverage,
+    boardReadability: parsed.boardReadability,
     constructionFeedback: parsed.constructionFeedback,
     recentConstructionFeedback: parsed.recentConstructionFeedback,
     focused,
@@ -117,6 +118,17 @@ const buildingState = await page.evaluate(() => {
 });
 if (!buildingState.combatStatCoverage?.ok) {
   throw new Error(`Combat stat coverage failed after building setup: ${JSON.stringify(buildingState.combatStatCoverage)}`);
+}
+if (
+  buildingState.boardReadability?.labelContrastMode !== "backed" ||
+  buildingState.boardReadability?.resourceLabelsVisible !== false ||
+  buildingState.boardReadability?.totalVisibleLabelCount !== 0 ||
+  buildingState.boardReadability?.spriteVisuals?.atlasReady !== true ||
+  buildingState.boardReadability?.spriteVisuals?.visibleResourceSpriteCount <= 0 ||
+  buildingState.boardReadability?.spriteVisuals?.buildingTextureTypes < 8 ||
+  buildingState.boardReadability?.spriteVisuals?.unitTextureTypes < 7
+) {
+  throw new Error(`Sprite-first board readability telemetry failed after building setup: ${JSON.stringify(buildingState.boardReadability)}`);
 }
 for (const type of ["farm", "watchtower", "wall", "gate", "turret"]) {
   if ((buildingState.ownedBuildableCounts[type] ?? 0) < 1) {
