@@ -150,7 +150,7 @@ if (
 ) {
   throw new Error(`render_game_to_text did not expose compact AI status: ${JSON.stringify(hookCheck.compactAiStatus)}`);
 }
-if (!hookCheck.combatStatCoverage?.ok || hookCheck.combatStatCoverage?.byKind?.unitType !== 7 || hookCheck.combatStatCoverage?.byKind?.buildingType !== 8) {
+if (!hookCheck.combatStatCoverage?.ok || hookCheck.combatStatCoverage?.byKind?.unitType !== 8 || hookCheck.combatStatCoverage?.byKind?.buildingType !== 8) {
   throw new Error(`render_game_to_text did not expose complete combat stat coverage: ${JSON.stringify(hookCheck.combatStatCoverage)}`);
 }
 await page.waitForFunction(
@@ -365,7 +365,8 @@ if (
   wallState.readability?.spriteVisuals?.atlasReady !== true ||
   wallState.readability?.spriteVisuals?.visibleResourceSpriteCount <= 0 ||
   wallState.readability?.spriteVisuals?.buildingTextureTypes < 8 ||
-  wallState.readability?.spriteVisuals?.unitTextureTypes < 7 ||
+  wallState.readability?.spriteVisuals?.unitTextureTypes < 8 ||
+  wallState.readability?.spriteVisuals?.siegeEngineTexture !== true ||
   wallState.readability?.visibleBuildingLabelCount <= 0 ||
   wallState.readability?.constructionLabelCount <= 0 ||
   wallState.readability?.totalVisibleLabelCount <= 0 ||

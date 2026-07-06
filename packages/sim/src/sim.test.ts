@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TICKS_PER_GAME_YEAR, TICK_RATE, advanceGame, advanceGameTicks, appendSovereignMemory, applyTribeIdentity, assignGathering, attachReplyToPacket, buildStructure, buildingTypes, createGame, createResourceDeposit, damageBuilding, damageResourceDeposit, formAlliance, getBuildingCombatStats, getBuildingTypeCombatStats, getCombatStatCoverageReport, getCurrentYear, getBuildingCost, getBuildingRepairCost, getPacketItemCombatStats, getPacketItemTypeCombatStats, getRecentVisibleEvents, getResourceControlSummary, getResourceDepositCombatStats, getResourceDepositPosturesForTribe, getResourceTypeCombatStats, getTownHall, getUnitCombatStats, getUnitTypeCombatStats, getVictoryPressure, getVisibleBuildings, getVisibleUnits, isTileWalkable, issueSovereignOrder, recordAiDecision, renameUnits, resourceTypes, sendPlayerMessage, setAllControllers, setGateState, summarizeDiplomaticIntel, summarizeSovereignMemory, tileIndex, unitTypes, worldSignature } from "./index";
+import { TICKS_PER_GAME_YEAR, TICK_RATE, advanceGame, advanceGameTicks, appendSovereignMemory, applyTribeIdentity, assignGathering, attachReplyToPacket, buildStructure, buildingTypes, createGame, createResourceDeposit, damageBuilding, damageResourceDeposit, estimateBreachTicks, formAlliance, getBuildingCombatStats, getBuildingTypeCombatStats, getCombatStatCoverageReport, getCurrentYear, getBuildingCost, getBuildingRepairCost, getEffectiveBuildingCost, getPacketItemCombatStats, getPacketItemTypeCombatStats, getRecentVisibleEvents, getResourceControlSummary, getResourceDepositCombatStats, getResourceDepositPosturesForTribe, getResourceTypeCombatStats, getTownHall, getTribeBuildingRepairCost, getUnitCombatStats, getUnitTypeCombatStats, getVictoryPressure, getVisibleBuildings, getVisibleUnits, isTileWalkable, issueSovereignOrder, recordAiDecision, renameUnits, resourceTypes, sendPlayerMessage, setAllControllers, setGateState, summarizeDiplomaticIntel, summarizeSovereignMemory, tileIndex, unitTypes, worldSignature } from "./index";
 
 describe("Sovereign Worlds vertical slice simulation", () => {
   it("is deterministic for the same seed and elapsed time", () => {
@@ -590,6 +590,35 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     expect(state.events.some((event) => event.type === "STRUCTURE_REPAIRED" && event.body.includes(wall.id))).toBe(true);
   });
 
+  it("applies development effects as capabilities instead of scripted strategy", () => {
+    const state = createGame(2026070601);
+    state.tribes.blue.resources = { gold: 1000, food: 1000, wood: 1000, stone: 1000, clay: 1000, limestone: 1000, iron: 1000, coal: 1000 };
+    expect(issueSovereignOrder(state, "blue", { type: "DEVELOP", priority: 1, developmentId: "masonry", reason: "Unlock stonework." }).ok).toBe(true);
+    const built = buildStructure(state, "blue", "wall", getTownHall(state, "blue"));
+    expect(built.ok).toBe(true);
+    if (!built.ok) throw new Error("Wall unexpectedly failed to build");
+    const wall = state.buildings[built.buildingId];
+    const baseWall = { maxHp: wall.maxHp, armor: wall.armor };
+
+    expect(issueSovereignOrder(state, "blue", { type: "DEVELOP", priority: 1, developmentId: "brick_kilns", reason: "Adopt stronger fired brickwork." }).ok).toBe(true);
+    expect(state.buildings[wall.id].maxHp).toBeGreaterThan(baseWall.maxHp);
+    expect(state.buildings[wall.id].armor).toBeGreaterThan(baseWall.armor);
+
+    state.buildings[wall.id].hp = state.buildings[wall.id].maxHp - 180;
+    const baseRepair = getBuildingRepairCost(state.buildings[wall.id]);
+    expect(issueSovereignOrder(state, "blue", { type: "DEVELOP", priority: 1, developmentId: "public_works", reason: "Create repair crews." }).ok).toBe(true);
+    const publicRepair = getTribeBuildingRepairCost(state, "blue", state.buildings[wall.id]);
+    expect(publicRepair.stone ?? 0).toBeLessThan(baseRepair.stone ?? 0);
+
+    const farmCostBefore = getEffectiveBuildingCost(state, "blue", "farm");
+    const happinessBeforeForcedLabor = state.tribes.blue.happiness;
+    expect(issueSovereignOrder(state, "blue", { type: "DEVELOP", priority: 1, developmentId: "taxation", reason: "Raise treasury capacity." }).ok).toBe(true);
+    expect(issueSovereignOrder(state, "blue", { type: "DEVELOP", priority: 1, developmentId: "forced_labor", reason: "Coerce labor for rapid works." }).ok).toBe(true);
+    const farmCostAfter = getEffectiveBuildingCost(state, "blue", "farm");
+    expect(farmCostAfter.wood ?? 0).toBeLessThan(farmCostBefore.wood ?? 0);
+    expect(state.tribes.blue.happiness).toBeLessThan(happinessBeforeForcedLabor);
+  });
+
   it("rejects repair orders for missing, foreign, destroyed, and full-health buildings", () => {
     const state = createGame(938);
     const ownTownHall = getTownHall(state, "blue");
@@ -1085,6 +1114,74 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     expect(isTileWalkable(state, 50, 50)).toBe(true);
     expect(state.events.some((event) => event.type === "WAR_SIEGE_ORDER" && event.body.includes("test_red_wall"))).toBe(true);
     expect(state.events.some((event) => event.type === "STRUCTURE_DESTROYED" && event.body.includes("50,50"))).toBe(true);
+  });
+
+  it("lets a sovereign unlock, recruit, and use a siege engine against a fortification", () => {
+    const state = createGame(2026070602);
+    state.tribes.blue.resources = { gold: 1000, food: 1000, wood: 1000, stone: 1000, clay: 1000, limestone: 1000, iron: 1000, coal: 1000 };
+    const rejected = issueSovereignOrder(state, "blue", {
+      type: "RECRUIT",
+      priority: 1,
+      unitType: "siege_engine",
+      reason: "Try to recruit a siege engine before the institution exists."
+    });
+    expect(rejected.ok).toBe(false);
+    if (rejected.ok) throw new Error("Siege engine unexpectedly recruited before Siege Engineering");
+    expect(rejected.reason).toContain("Siege Engineering");
+
+    for (const developmentId of ["ironworking", "public_works", "siege_engineering"] as const) {
+      expect(issueSovereignOrder(state, "blue", { type: "DEVELOP", priority: 1, developmentId, reason: `Unlock ${developmentId}.` }).ok).toBe(true);
+    }
+    const recruited = issueSovereignOrder(state, "blue", {
+      type: "RECRUIT",
+      priority: 1,
+      unitType: "siege_engine",
+      reason: "Build a breach tool."
+    });
+    expect(recruited.ok).toBe(true);
+    const siegeEngine = Object.values(state.units).find((unit) => unit.tribeId === "blue" && unit.type === "siege_engine");
+    if (!siegeEngine) throw new Error("Expected a trained siege engine");
+
+    const stats = getBuildingTypeCombatStats("wall");
+    state.buildings.red_siege_wall = {
+      id: "red_siege_wall",
+      type: "wall",
+      tribeId: "red",
+      x: 50,
+      y: 50,
+      hp: 100,
+      maxHp: stats.maxHp,
+      armor: stats.armor,
+      attack: stats.attack,
+      range: stats.range,
+      attackCooldown: 0
+    };
+    for (const pos of [
+      { x: 48, y: 50 },
+      { x: 49, y: 50 },
+      { x: 50, y: 50 }
+    ]) {
+      state.map[tileIndex(pos.x, pos.y)].terrain = "grass";
+      delete state.map[tileIndex(pos.x, pos.y)].resource;
+    }
+    siegeEngine.x = 48;
+    siegeEngine.y = 50;
+    siegeEngine.task = { kind: "idle" };
+    const breachEstimate = estimateBreachTicks(state, "blue", "red_siege_wall");
+    expect(breachEstimate).toBeDefined();
+    expect(breachEstimate).toBeLessThanOrEqual(60);
+
+    const attack = issueSovereignOrder(state, "blue", {
+      type: "ATTACK",
+      priority: 1,
+      targetBuildingId: "red_siege_wall",
+      reason: "Use the siege engine to breach the visible wall."
+    });
+    expect(attack.ok).toBe(true);
+    expect(siegeEngine.task.kind).toBe("attackBuilding");
+    advanceGameTicks(state, 80);
+    expect(state.buildings.red_siege_wall).toBeUndefined();
+    expect(state.events.some((event) => event.type === "WAR_SIEGE_ORDER" && event.body.includes("red_siege_wall"))).toBe(true);
   });
 
   it("lets targeted siege orders destroy gates and turrets through normal combat", () => {

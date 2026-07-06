@@ -126,7 +126,8 @@ if (
   buildingState.boardReadability?.spriteVisuals?.atlasReady !== true ||
   buildingState.boardReadability?.spriteVisuals?.visibleResourceSpriteCount <= 0 ||
   buildingState.boardReadability?.spriteVisuals?.buildingTextureTypes < 8 ||
-  buildingState.boardReadability?.spriteVisuals?.unitTextureTypes < 7
+  buildingState.boardReadability?.spriteVisuals?.unitTextureTypes < 8 ||
+  buildingState.boardReadability?.spriteVisuals?.siegeEngineTexture !== true
 ) {
   throw new Error(`Sprite-first board readability telemetry failed after building setup: ${JSON.stringify(buildingState.boardReadability)}`);
 }
@@ -147,6 +148,7 @@ const siegeStates = [];
 for (const type of ["wall", "gate", "turret"]) {
   siegeStates.push(await assertExplicitSiegeOrder(page, type));
 }
+const siegeEngineState = await assertSiegeEngineOrder(page);
 const resourceRaidState = await assertResourceRaidOrder(page);
 const damageState = await assertDamageVisualization(page);
 const repairState = await assertRepairOrder(page);
@@ -175,6 +177,7 @@ console.log(
       screenshotBytes: screenshot.size,
       buildingState,
       siegeStates,
+      siegeEngineState,
       resourceRaidState,
       damageState,
       repairState,
@@ -331,6 +334,29 @@ async function assertExplicitSiegeOrder(page, type) {
   }
   if (!state.recentEvents?.some((event) => event.includes("STRUCTURE_DESTROYED") && event.includes(type))) {
     throw new Error(`Explicit ${type} siege order did not emit destruction evidence: ${JSON.stringify(state)}`);
+  }
+  return state;
+}
+
+async function assertSiegeEngineOrder(page) {
+  const state = await page.evaluate(() => {
+    if (typeof window.force_siege_engine_for_test !== "function") return { ok: false, reason: "missing siege engine hook" };
+    return window.force_siege_engine_for_test();
+  });
+  if (!state.ok || state.unitType !== "siege_engine" || state.destroyed !== true || !state.targetBuildingId) {
+    throw new Error(`Siege engine order did not train and destroy a hostile wall: ${JSON.stringify(state)}`);
+  }
+  if (typeof state.breachEstimateBefore !== "number" || state.breachEstimateBefore <= 0) {
+    throw new Error(`Siege engine order did not expose a useful breach estimate: ${JSON.stringify(state)}`);
+  }
+  if (!state.attackerTasks?.some((task) => task.includes(`Attacking wall ${state.targetBuildingId}`))) {
+    throw new Error(`Siege engine attack did not expose attack-building task text: ${JSON.stringify(state)}`);
+  }
+  if (!state.recentEvents?.some((event) => event.includes("WAR_SIEGE_ORDER") && event.includes(state.targetBuildingId))) {
+    throw new Error(`Siege engine attack did not emit siege order evidence: ${JSON.stringify(state)}`);
+  }
+  if (!state.recentEvents?.some((event) => event.includes("STRUCTURE_DESTROYED") && event.includes("wall"))) {
+    throw new Error(`Siege engine attack did not emit wall destruction evidence: ${JSON.stringify(state)}`);
   }
   return state;
 }

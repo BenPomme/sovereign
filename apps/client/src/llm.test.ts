@@ -1883,11 +1883,59 @@ describe("Ollama JSON recovery", () => {
     expect(body.prompt).toContain("Visible foreign buildings:");
     expect(body.prompt).toContain("red_test_wall: red wall at 24,20 hp 50 armor 6");
     expect(body.prompt).toContain("targetBuildingId options red_test_wall:red:wall:24,20");
+    expect(body.prompt).toContain("breach estimate");
     expect(decision.orders[0]).toMatchObject({
       type: "ATTACK",
       recipientTribeId: "red",
       targetBuildingId: "red_test_wall"
     });
+  });
+
+  it("exposes development and siege-engine capabilities without prescribing strategy", async () => {
+    const game = createGame(2026070603);
+    game.tribes.blue.resources = { gold: 1000, food: 1000, wood: 1000, stone: 1000, clay: 1000, limestone: 1000, iron: 1000, coal: 1000 };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        response: JSON.stringify({
+          freeformStrategy: "I will compare institutions before choosing how to protect my people.",
+          strategySummary: "Keep options open.",
+          memoryNote: "Development choices are tools, not a fixed path.",
+          orders: [
+            {
+              type: "SET_POLICY",
+              priority: 1,
+              messageType: "LETTER",
+              diplomacyIntent: "NONE",
+              subject: "",
+              body: "",
+              reason: "Review development options before committing."
+            }
+          ],
+          unitNames: [],
+          bugReport: "",
+          bugSeverity: "low"
+        })
+      })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("window", {
+      setTimeout: globalThis.setTimeout,
+      clearTimeout: globalThis.clearTimeout
+    });
+
+    const decision = await requestSovereignDecision(game, "blue", "qwen3.5:9b-mlx");
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+
+    expect(body.prompt).toContain("Siege Engineering");
+    expect(body.prompt).toContain("Forced Labor");
+    expect(body.prompt).toContain("Abolition");
+    expect(body.prompt).toContain("RECRUIT siege_engine unavailable requires development Siege Engineering");
+    expect(body.prompt).toContain("DEVELOP with developmentId masonry, brick_kilns");
+    expect(body.prompt).not.toContain("choose DEVELOP masonry first");
+    expect(body.format.properties.orders.items.properties.unitType.enum).toContain("siege_engine");
+    expect(body.format.properties.orders.items.properties.developmentId.enum).toContain("forced_labor");
+    expect(decision.orders[0]).toMatchObject({ type: "SET_POLICY" });
   });
 
   it("preserves LLM-authored resource raid targets on attack orders", async () => {

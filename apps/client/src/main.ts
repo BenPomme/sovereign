@@ -15,9 +15,10 @@ import {
   createGame,
   createResourceDeposit,
   damageBuilding,
-  getBuildingCost,
-  getBuildingRepairCost,
+  estimateBreachTicks,
+  getEffectiveBuildingCost,
   getBuildingRequirements,
+  getTribeBuildingRepairCost,
   getCombatStatCoverageReport,
   getDevelopment,
   getMissingBuildingDevelopments,
@@ -206,6 +207,17 @@ declare global {
       afterHp?: number | null;
       beforeWalkable?: boolean;
       afterWalkable?: boolean;
+      attackerTasks?: string[];
+      recentEvents?: string[];
+      reason?: string;
+    };
+    force_siege_engine_for_test?: () => {
+      ok: boolean;
+      unitId?: string;
+      unitType?: UnitType;
+      targetBuildingId?: string;
+      breachEstimateBefore?: number | null;
+      destroyed?: boolean;
       attackerTasks?: string[];
       recentEvents?: string[];
       reason?: string;
@@ -948,6 +960,7 @@ function installTestHooks(): void {
   window.force_gate_state_for_test = forceGateStateForTest;
   window.force_damage_building_for_test = forceDamageBuildingForTest;
   window.force_siege_for_test = forceSiegeForTest;
+  window.force_siege_engine_for_test = forceSiegeEngineForTest;
   window.force_resource_raid_for_test = forceResourceRaidForTest;
   window.force_repair_for_test = forceRepairForTest;
   window.force_visual_motion_for_test = forceVisualMotionForTest;
@@ -1767,7 +1780,7 @@ function renderGameToText(): string {
         eliminated: state.tribes[tribeId].eliminated,
         eliminatedYear: state.tribes[tribeId].eliminatedYear ?? null,
         units: units.length,
-        military: units.filter((unit) => unit.type === "militia" || unit.type === "archer").length,
+        military: units.filter((unit) => unit.type === "militia" || unit.type === "archer" || unit.type === "siege_engine").length,
         messengers: units.filter((unit) => unit.type === "messenger").length,
         developments: state.tribes[tribeId].developments.map((id) => ({
           id,
@@ -1793,7 +1806,7 @@ function renderGameToText(): string {
     combatStatCoverage: getCombatStatCoverageReport(state),
     buildingCosts: buildableBuildingTypes.map((type) => ({
       type,
-      cost: getBuildingCost(type),
+      cost: getEffectiveBuildingCost(state, playerTribe, type),
       requirements: getBuildingRequirements(type).map((id) => ({
         id,
         name: getDevelopment(id).name
@@ -1848,6 +1861,7 @@ function renderGameToText(): string {
         gateAccessPolicy: building.type === "gate" ? building.gateAccessPolicy ?? "owner_allies" : null,
         gatePassableBy: building.type === "gate" ? tribeIds.filter((tribeId) => !isBuildingMovementBlockingForDisplay(building, tribeId)) : [],
         blocksMovement: durability.blocksMovement,
+        breachEstimateTicks: building.tribeId !== playerTribe ? estimateBreachTicks(state, playerTribe, building.id) ?? null : null,
         requirements: isBuildableBuilding(building.type) ? getBuildingRequirements(building.type) : [],
         selected: building.id === selectedBuildingId,
         constructionFocus: building.id === constructionFlash?.buildingId,
@@ -2207,6 +2221,82 @@ function forceSiegeForTest(buildingType: "wall" | "gate" | "turret" = "wall"): {
   };
 }
 
+function forceSiegeEngineForTest(): {
+  ok: boolean;
+  unitId?: string;
+  unitType?: UnitType;
+  targetBuildingId?: string;
+  breachEstimateBefore?: number | null;
+  destroyed?: boolean;
+  attackerTasks?: string[];
+  recentEvents?: string[];
+  reason?: string;
+} {
+  const tribe = state.tribes[playerTribe];
+  for (const type of resourceTypes) tribe.resources[type] = Math.max(tribe.resources[type], 900);
+  for (const developmentId of ["ironworking", "public_works", "siege_engineering"] as const) {
+    const result = chooseDevelopment(state, playerTribe, developmentId);
+    if (!result.ok && !tribe.developments.includes(developmentId)) return { ok: false, reason: result.reason };
+  }
+  const trained = trainUnit(state, playerTribe, "siege_engine");
+  if (!trained.ok) return { ok: false, reason: trained.reason };
+  const siegeEngine = state.units[trained.unitId];
+  const targetBuildingId = "test_siege_engine_wall";
+  const stats = getBuildingTypeCombatStats("wall");
+  state.buildings[targetBuildingId] = {
+    id: targetBuildingId,
+    type: "wall",
+    tribeId: "red",
+    x: 52,
+    y: 50,
+    hp: 90,
+    maxHp: stats.maxHp,
+    armor: stats.armor,
+    attack: stats.attack,
+    range: stats.range,
+    attackCooldown: 0
+  };
+  for (const pos of [
+    { x: 49, y: 50 },
+    { x: 50, y: 50 },
+    { x: 51, y: 50 },
+    { x: 52, y: 50 }
+  ]) {
+    state.map[tileIndex(pos.x, pos.y)].terrain = "grass";
+    delete state.map[tileIndex(pos.x, pos.y)].resource;
+  }
+  siegeEngine.x = 49;
+  siegeEngine.y = 50;
+  siegeEngine.attackCooldown = 0;
+  siegeEngine.task = { kind: "idle" };
+  const breachEstimateBefore = estimateBreachTicks(state, playerTribe, targetBuildingId) ?? null;
+  const result = issueSovereignOrder(state, playerTribe, {
+    type: "ATTACK",
+    priority: 1,
+    targetBuildingId,
+    reason: "Browser smoke siege-engine test: use a trained siege engine against a hostile wall."
+  });
+  if (!result.ok) {
+    render();
+    return { ok: false, unitId: siegeEngine.id, unitType: siegeEngine.type, targetBuildingId, breachEstimateBefore, reason: result.reason };
+  }
+  const attackers = Object.values(state.units).filter((unit) => unit.tribeId === playerTribe && unit.task.kind === "attackBuilding");
+  const attackerTasks = attackers.map((unit) => describeUnitTask(state, unit));
+  advanceSimulationTicks(100, { scheduleAi: false, render: false });
+  render({ forceHud: true, forceLabels: true, forceFog: true });
+  const remaining = state.buildings[targetBuildingId];
+  return {
+    ok: !remaining && breachEstimateBefore !== null,
+    unitId: siegeEngine.id,
+    unitType: siegeEngine.type,
+    targetBuildingId,
+    breachEstimateBefore,
+    destroyed: !remaining,
+    attackerTasks,
+    recentEvents: state.events.slice(-8).map((event) => `${event.type}:${event.body}`)
+  };
+}
+
 function forceResourceRaidForTest(): {
   ok: boolean;
   target?: { x: number; y: number; type: ResourceType };
@@ -2320,7 +2410,7 @@ function forceRepairForTest(): {
   }
   selectAndShowBuilding(building);
   const damagedSnapshot = buildingDurabilitySnapshot(state, building);
-  const repairCost = getBuildingRepairCost(building);
+  const repairCost = getTribeBuildingRepairCost(state, playerTribe, building);
   for (const type of resourceTypes) {
     const needed = repairCost[type] ?? 0;
     if (tribe.resources[type] < needed) tribe.resources[type] = needed;
@@ -3490,7 +3580,7 @@ function buildAiReportTurnContext(decision: AiDecision): string {
   const tribe = state.tribes[decision.tribeId];
   const units = Object.values(state.units).filter((unit) => unit.tribeId === decision.tribeId && unit.hp > 0);
   const buildings = Object.values(state.buildings).filter((building) => building.tribeId === decision.tribeId && building.hp > 0);
-  const military = units.filter((unit) => unit.type === "militia" || unit.type === "archer").length;
+  const military = units.filter((unit) => unit.type === "militia" || unit.type === "archer" || unit.type === "siege_engine").length;
   const walls = buildings.filter((building) => building.type === "wall").length;
   const gates = buildings.filter((building) => building.type === "gate").length;
   const turrets = buildings.filter((building) => building.type === "turret").length;
@@ -3585,7 +3675,7 @@ function buildAiReportSnapshot(
     },
     counts: {
       ownUnits: ownUnits.length,
-      ownMilitary: ownUnits.filter((unit) => unit.type === "militia" || unit.type === "archer").length,
+      ownMilitary: ownUnits.filter((unit) => unit.type === "militia" || unit.type === "archer" || unit.type === "siege_engine").length,
       ownBuildings: ownBuildings.length,
       walls: ownBuildings.filter((building) => building.type === "wall").length,
       gates: ownBuildings.filter((building) => building.type === "gate").length,
@@ -4280,7 +4370,7 @@ function shouldRenderUnitLabel(unit: Unit, tier: LabelTier): boolean {
   if (unit.id === selectedUnitId || unit.carriedPacketId !== undefined) return true;
   if (unit.type === "sovereign" || unit.type === "messenger") return true;
   if (tier === "detail") return true;
-  if (tier === "tactical") return unit.type === "militia" || unit.type === "archer" || unit.type === "sentinel";
+  if (tier === "tactical") return unit.type === "militia" || unit.type === "archer" || unit.type === "siege_engine" || unit.type === "sentinel";
   return false;
 }
 
@@ -4345,8 +4435,9 @@ function buildBoardReadabilitySnapshot(game: GameState, visibleUnits: Unit[], vi
       resourceTextureTypes: resourceTypes.length,
       buildingTextureTypes: buildingTypes.length,
       unitTextureTypes: unitTypes.length,
-      unitAnimation: "frame-time bob and packet pulse",
-      buildingAnimation: "turret recoil and construction focus pulse"
+      siegeEngineTexture: Boolean(visualTextures?.units.siege_engine),
+      unitAnimation: "frame-time bob, siege-engine wheel silhouette, and packet pulse",
+      buildingAnimation: "turret recoil, gate lock state, fortification joins, and construction focus pulse"
     },
     viewportTiles,
     strategicGridStep: 8,
@@ -4362,7 +4453,7 @@ function buildBoardReadabilitySnapshot(game: GameState, visibleUnits: Unit[], vi
       resources: "sprite-textured deposits drawn from live resource health and culled to the viewport",
       labels: "debug-only map text, disabled by default",
       forts: "textured walls, gates, and turrets with damage, repair, gate state, and range overlays",
-      units: "textured unit silhouettes with frame-time movement bob and packet satchels"
+      units: "textured unit silhouettes with frame-time movement bob, packet satchels, and siege-engine machine sprites"
     }
   };
 }
@@ -4598,6 +4689,16 @@ function drawUnitTexture(graphics: Graphics, type: UnitType, size: number): void
     graphics.roundRect(cx + 5, cy + 1, 12, 13, 3).fill(0xd6b782).stroke({ color: 0x100f0c, width: 2 });
     graphics.circle(cx + 7, cy + 16, 3).fill(0x100f0c);
     graphics.circle(cx + 15, cy + 16, 3).fill(0x100f0c);
+    return;
+  }
+  if (type === "siege_engine") {
+    graphics.roundRect(cx - 17, cy - 9, 31, 17, 3).fill(0x8f6b45).stroke({ color: 0x100f0c, width: 2 });
+    graphics.moveTo(cx - 15, cy - 9).lineTo(cx - 4, cy - 18).lineTo(cx + 11, cy - 9).closePath().fill(0xb99a6c).stroke({ color: 0x100f0c, width: 2 });
+    graphics.roundRect(cx + 5, cy - 2, 18, 6, 2).fill(0x5a3923).stroke({ color: 0x100f0c, width: 1.5 });
+    graphics.moveTo(cx + 21, cy + 1).lineTo(cx + 27, cy - 2).lineTo(cx + 27, cy + 4).closePath().fill(0x3a2114);
+    graphics.circle(cx - 10, cy + 11, 5).fill(0x2a2018).stroke({ color: 0xf5efe0, width: 1.5 });
+    graphics.circle(cx + 10, cy + 11, 5).fill(0x2a2018).stroke({ color: 0xf5efe0, width: 1.5 });
+    graphics.moveTo(cx - 14, cy + 1).lineTo(cx + 12, cy + 1).stroke({ color: 0xd7c09a, width: 2, alpha: 0.85 });
     return;
   }
   if (type === "militia") {
@@ -5002,7 +5103,7 @@ function hasAdjacentFortification(game: GameState, building: Building, dx: numbe
 
 function drawUnit(graphics: Graphics, unit: Unit, position: Position = visualPositionForUnit(unit)): void {
   const color = tribeConfig[unit.tribeId].color;
-  const radius = unit.type === "sovereign" ? 9 : unit.type === "messenger" ? 6 : 7;
+  const radius = unit.type === "sovereign" ? 9 : unit.type === "siege_engine" ? 9 : unit.type === "messenger" ? 6 : 7;
   const moving = unit.task.kind !== "idle";
   const stride = moving ? Math.sin((renderClockMs || performance.now()) / 115 + unit.x * 0.9 + unit.y * 0.5) * 1.6 : Math.sin((renderClockMs || performance.now()) / 720 + unit.x) * 0.35;
   const x = position.x * TILE + TILE / 2;
@@ -5171,7 +5272,7 @@ function addResourceLabels(game: GameState, layer: Container, tier: LabelTier): 
 function drawUnitShape(graphics: Graphics, unit: Unit, x: number, y: number, radius: number, color: number): void {
   const texture = visualTextures?.units[unit.type];
   if (texture) {
-    const size = unit.type === "sovereign" ? 34 : unit.type === "messenger" || unit.type === "sentinel" ? 29 : 31;
+    const size = unit.type === "sovereign" ? 34 : unit.type === "siege_engine" ? 38 : unit.type === "messenger" || unit.type === "sentinel" ? 29 : 31;
     graphics.texture(texture, color, x - size / 2, y - size / 2 - 2, size, size);
     if (unit.task.kind !== "idle") {
       graphics.ellipse(x, y + radius + 7, radius + 5, 3).stroke({ color, width: 1.3, alpha: 0.38 });
@@ -5313,8 +5414,8 @@ function selectedMarkup(game: GameState): string {
           ? `<div class="selected-row">Gate: ${building.gateState ?? "open"}; access ${formatGateAccessPolicy(building.gateAccessPolicy ?? "owner_allies")}</div>`
           : ""
       }
-      ${isBuildableBuilding(building.type) ? `<div class="selected-row">Build cost: ${formatCost(getBuildingCost(building.type))}</div>` : ""}
-      ${building.hp < building.maxHp ? `<div class="selected-row">Repair cost: ${formatCost(getBuildingRepairCost(building))}</div>` : ""}
+      ${isBuildableBuilding(building.type) ? `<div class="selected-row">Build cost: ${formatCost(getEffectiveBuildingCost(game, building.tribeId, building.type))}</div>` : ""}
+      ${building.hp < building.maxHp ? `<div class="selected-row">Repair cost: ${formatCost(getTribeBuildingRepairCost(game, building.tribeId, building))}</div>` : ""}
       <div class="selected-row">${buildingRole(building.type)}</div>
     `;
   }
@@ -5919,7 +6020,7 @@ function tribeMarkup(game: GameState): string {
   return tribeIds
     .map((tribeId) => {
       const units = Object.values(game.units).filter((unit) => unit.tribeId === tribeId && unit.hp > 0);
-      const military = units.filter((unit) => unit.type === "militia" || unit.type === "archer").length;
+      const military = units.filter((unit) => unit.type === "militia" || unit.type === "archer" || unit.type === "siege_engine").length;
       const messengers = units.filter((unit) => unit.type === "messenger").length;
       const packets = Object.values(game.packets).filter(
         (packet) =>
@@ -6524,7 +6625,7 @@ function renderLegend(): void {
     </div>
     <div class="legend-build-costs">
       ${buildableBuildingTypes
-        .map((type) => `<div><strong>${labelBuilding(type)}</strong><span>${formatCost(getBuildingCost(type))}</span></div>`)
+        .map((type) => `<div><strong>${labelBuilding(type)}</strong><span>${formatCost(getEffectiveBuildingCost(state, playerTribe, type))}</span></div>`)
         .join("")}
     </div>
     <p class="muted">Observer mode shows all tribes so AI behavior is inspectable. LLM prompts still use each tribe's own visible state and public events.</p>
@@ -6557,6 +6658,8 @@ function unitAbbrev(type: Unit["type"]): string {
       return "ML";
     case "archer":
       return "AR";
+    case "siege_engine":
+      return "SE";
   }
 }
 

@@ -2619,3 +2619,33 @@ Original prompt: ok continue with roadmap make sure the AIs can report bugs and 
   - expand AI iteration memory beyond short report/lesson snippets so each sovereign can reason over richer report context without leaking synthetic QA reports,
   - add normal-play quality-loop evidence that live sovereign reports, not only canaries, produce later changed strategy,
   - keep default report review focused on current live unresolved buckets while preserving synthetic/failure-path QA coverage.
+
+### 2026-07-06 Development Capabilities, Siege Engine, And Sprite QA
+
+- Reaffirmed the design constraint: strategy must not be hardcoded. The simulation now gives sovereigns tools, requirements, costs, visibility, and consequences; LLMs decide whether to use, delay, reject, combine, negotiate around, or lie about those tools.
+- Delivered the first functional development-tree expansion:
+  - implemented development IDs now include Siege Engineering, Road Engineering, Gate Machinery, Taxation, Council Governance, Free Press, Propaganda, Forced Labor, Abolition, and Espionage in addition to the existing construction/military nodes,
+  - developments now modify real simulation behavior such as wall/gate/turret durability, turret attack/range, repair speed, construction costs, unit speed, vision, yearly taxation, happiness, safety scoring, and labor tradeoffs,
+  - LLM order availability now exposes prerequisites and consequences without telling AIs to follow a fixed build order.
+- Delivered the first advanced siege foundation:
+  - added `siege_engine` as a trainable unit gated by Siege Engineering,
+  - siege engines use the same health, armor, attack, range, and cooldown stat contract as other units,
+  - siege engines target hostile buildings through normal `ATTACK targetBuildingId` orders and have bonus damage against walls, gates, turrets, and watchtowers,
+  - hostile building targets now expose approximate breach estimates to the AI and browser hook.
+- Delivered a small PixiJS readability pass:
+  - siege engines render as a larger wheeled war machine texture instead of a text-only symbol,
+  - smoke telemetry now checks that all eight unit types, including siege engines, have readable texture coverage.
+- QA completed:
+  - `pnpm build` passed,
+  - `pnpm test` passed: 117 tests,
+  - `pnpm smoke:buildings` passed with `siege_engine_0001`, breach estimate 36 ticks, `WAR_SIEGE_ORDER`, and `STRUCTURE_DESTROYED` evidence,
+  - `pnpm smoke` passed with the full mocked game and persistent learning checks,
+  - `pnpm smoke:smooth` passed with measured FPS 46.7,
+  - `pnpm smoke:mock-ollama` passed,
+  - `pnpm ai:review:strict -- --json --no-write` passed with 0 parser/transport open issues; the remaining actionable backlog is the existing gpt-oss rejected-order bucket,
+  - full `pnpm smoke:live-ai` passed at `http://localhost:5173/` with qwen and gpt-oss assigned lanes, five live identities/doctrines, no first-doctrine fallback, live AI issue feedback, and strict review after the run.
+- Remaining backlog:
+  - scale the implemented tree from 16 functional nodes toward the 100+ planned civilization developments,
+  - expand siege from one engine into multiple siege tools, projectiles, coordinated assaults, feints, retreats, and contested repair under fire,
+  - continue the PixiJS graphics production pass with terrain/resource sprites, richer building silhouettes, animation states, projectiles, and zoom-aware labels,
+  - address the existing gpt-oss rejected-order reports around stale/missing attack targets.

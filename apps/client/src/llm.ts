@@ -4,14 +4,17 @@ import {
   canChooseDevelopment,
   developmentCatalog,
   developmentIds,
-  getBuildingCost,
-  getBuildingRepairCost,
+  estimateBreachTicks,
+  getEffectiveBuildingCost,
   getBuildingRequirements,
   getDevelopment,
   getMissingBuildingDevelopments,
+  getMissingUnitDevelopments,
+  getTribeBuildingRepairCost,
   getRecentVisibleEvents,
   getTribeSafetyScore,
   getResourceControlSummary,
+  getUnitCost,
   getVisibleResourceDepositIntel,
   getVictoryPressure,
   getVisibleBuildings,
@@ -19,6 +22,7 @@ import {
   resourceTypes,
   summarizeDiplomaticIntel,
   summarizeSovereignMemory,
+  trainableUnitTypes,
   tribeIds,
   type AiStrategicOrder,
   type Building,
@@ -148,7 +152,7 @@ const decisionSchema = {
           },
           priority: { type: "integer" },
           recipientTribeId: { type: "string", enum: tribeIds },
-          unitType: { type: "string", enum: ["peon", "militia", "archer", "messenger", "sentinel"] },
+          unitType: { type: "string", enum: ["peon", "militia", "archer", "siege_engine", "messenger", "sentinel"] },
           buildingType: { type: "string", enum: ["farm", "watchtower", "wall", "gate", "turret"] },
           buildingId: { type: "string" },
           targetBuildingId: { type: "string" },
@@ -1030,16 +1034,16 @@ Identity: sovereign ${tribe.sovereignName}; naming style ${tribe.namingStyle}; i
 Strategy rule: write freeformStrategy first as your independent doctrine in your own words, in 2-3 concise sentences. This strategy is not limited to the legal order list. You may request information, propose joint strategies, invent money-making schemes, lie, bluff, betray, attack, scout as spies, or prepare war. Then translate only the immediate executable part into up to two legal orders.
 Memory rule: use Sovereign memory as your private continuity. Keep grudges, promises, lies, alliance intentions, war plans, suspicions, and economic schemes consistent unless you deliberately change course. Set memoryNote to one concise private note worth remembering after this turn, or an empty string if nothing changed.
 Diplomatic intelligence rule: use the ledger to track who promised, threatened, asked, demanded, offered, refused, or claimed what. Foreign claims are not facts; they may be honest, mistaken, or deliberate lies.
-	Execution rule: Order availability below is authoritative. If an order or subtype says unavailable, do not output that order this turn. Mention the desire in freeformStrategy or SET_POLICY instead, or pick an available prerequisite.
+	Execution rule: Order availability below is authoritative. If an order or subtype says unavailable, do not output that order this turn. Mention the desire in freeformStrategy or SET_POLICY instead, ask for information, or choose any available prerequisite if it fits your doctrine.
 	Scout rule: only output SCOUT when Order availability says SCOUT available. If SCOUT is unavailable but scouting matters, recruit a sentinel first when available, or record the scouting intent as SET_POLICY/REQUEST_INFO.
-	Prototype priority: physical messenger diplomacy is the core mechanic. Only include SEND_MESSENGER if Idle messenger available is yes.
+Diplomacy priority: physical messenger diplomacy is a core instrument of rule. Only include SEND_MESSENGER if Idle messenger available is yes.
 Message rule: write real first-person diplomatic messages. You may ask questions, negotiate joint plans, threaten, mislead, conceal intent, or set traps. Do not use empty placeholders. The recipient AI will read the delivered text and reply.
 Naming rule: you may rename your own villagers and units through unitNames. Keep names consistent with your naming style. Use exact unitId values. Rename new generic units when useful; an empty unitNames array is allowed.
 Alliance rule: alliances are formed only through chat. Send a SEND_MESSENGER order with messageType TREATY_PROPOSAL and diplomacyIntent ALLIANCE_OFFER if you want to ask for an alliance. If you already have an alliance, do not ask for another.
-War rule: ATTACK with recipientTribeId declares war, breaks any alliance with that target, and sends available military units. To intentionally breach a visible wall, gate, turret, or building, include its exact targetBuildingId from Visible foreign buildings. To raid or deny a visible resource deposit, include targetX, targetY, and targetResourceType from Visible resource raid targets; recipientTribeId is optional unless you mean to declare war over that raid. Use attacks when your doctrine calls for betrayal, preemption, conquest, retaliation, opening a blocked route, or denying coal/iron/gold/stone logistics.
+War rule: ATTACK with recipientTribeId declares war, breaks any alliance with that target, and sends available military units. To intentionally breach a visible wall, gate, turret, or building, include its exact targetBuildingId from Visible foreign buildings or targetBuildingId options; breach estimates are approximate. To raid or deny a visible resource deposit, include targetX, targetY, and targetResourceType from Visible resource raid targets; recipientTribeId is optional unless you mean to declare war over that raid. Use attacks when your doctrine calls for betrayal, preemption, conquest, retaliation, opening a blocked route, or denying coal/iron/gold/stone logistics.
 Defense rule: walls block movement for everyone until destroyed, including your own people. Gates are the only intended passage through walls: open gates follow an access policy of all, owner_allies, or owner_only; closed or locked gates block everyone. Turrets shoot hostile units near your kingdom. Use them when they fit your doctrine and resources.
 Repair rule: damaged owned buildings can be repaired by idle peons. Use REPAIR with targetBuildingId or buildingId from Own buildings when a wall, gate, turret, or other structure is damaged and keeping it alive matters.
-Development rule: choose developments with DEVELOP before building locked fortifications. Masonry unlocks walls. Masonry plus Ironworking unlock gates and locks. Ironworking plus Ballistics unlock turrets. You may pick development paths for your own doctrine; this is a strategic choice, not a fixed build order.
+Development rule: DEVELOP changes what your society can do. Masonry, Brick Kilns, Ironworking, Ballistics, Military Architecture, Public Works, Siege Engineering, Road Engineering, Gate Machinery, Taxation, Council Governance, Free Press, Propaganda, Forced Labor, Abolition, and Espionage are strategic tools with costs, prerequisites, benefits, and trade-offs. You may pick, delay, reject, or combine development paths for your own doctrine; there is no fixed build order.
 Survival pressure: exact rival wealth is hidden. You may ask another sovereign how wealthy or safe they are, but they may answer truthfully, refuse, exaggerate, or lie. Use scouting, messenger questions, trade offers, threats, raids, alliances, and deception to infer who may be vulnerable before each century review. Never treat review elimination as an acceptable loss for your own people.
 Information rule: use REQUEST_INFO when you need strategic information, map intelligence, economic data, enemy intent, or world-state context that is not currently visible. This is a request for future intelligence, not a bug.
 Bug reporting: if you notice impossible world state, invalid feedback, missing information that should already be available, or broken world behavior, either spend a legal REPORT_BUG order with subject/body/reason or set bugReport to a concise bug. REPORT_BUG is best when the issue blocks your strategy or should be investigated outside your world. For REPORT_BUG, also fill suspectedArea, expectedBehavior, actualBehavior, reproductionSteps, strategyImpact, and bugSeverity when you can. Do not report ordinary lack of resources, population cap, busy messengers, no idle sentinel, unavailable orders, or normal uncertainty as bugs. Otherwise set bugReport to an empty string.
@@ -1077,10 +1081,10 @@ Recent diplomacy you can remember: ${summarizeDiplomacy(state, tribeId, sinceTic
 
 Legal order types:
 - SEND_MESSENGER with recipientTribeId, messageType, diplomacyIntent, subject, body
-- RECRUIT with unitType peon, militia, archer, messenger, or sentinel
+- RECRUIT with unitType peon, militia, archer, siege_engine, messenger, or sentinel
 - BUILD with buildingType farm, watchtower, wall, gate, or turret. You may include targetX and targetY map coordinates; use them for deliberate wall/gate/turret placement.
 - SET_GATE with gateState open, closed, or locked, optional buildingId for a specific owned gate, and optional gateAccessPolicy all, owner_allies, or owner_only.
-- DEVELOP with developmentId masonry, brick_kilns, ironworking, ballistics, military_architecture, or public_works
+- DEVELOP with developmentId ${developmentIds.join(", ")}
 - SCOUT
 - DEFEND
 - ATTACK with optional recipientTribeId, optional targetBuildingId for a visible hostile wall/gate/turret/building, or targetX, targetY, and targetResourceType for a visible resource deposit raid
@@ -1576,16 +1580,13 @@ function summarizeOrderAvailability(
   const population = Object.values(state.units).filter((unit) => unit.tribeId === tribeId && unit.hp > 0).length;
   const idleSentinel = ownUnits.some((unit) => unit.type === "sentinel" && unit.task?.kind === "idle");
   const defenders = ownUnits.filter((unit) => unit.type === "militia" || unit.type === "archer").length;
-  const canTrainPeon = population < tribe.populationCap && tribe.resources.food >= 50;
-  const canTrainMilitia = population < tribe.populationCap && tribe.resources.food >= 60 && tribe.resources.gold >= 20;
-  const canTrainArcher = population < tribe.populationCap && tribe.resources.food >= 40 && tribe.resources.gold >= 30 && tribe.resources.wood >= 25;
   const canTrainMessenger = population < tribe.populationCap && tribe.resources.food >= 40 && tribe.resources.gold >= 10;
   const canTrainSentinel = population < tribe.populationCap && tribe.resources.food >= 30 && tribe.resources.gold >= 20;
-  const farmCost = getBuildingCost("farm");
-  const watchtowerCost = getBuildingCost("watchtower");
-  const wallCost = getBuildingCost("wall");
-  const gateCost = getBuildingCost("gate");
-  const turretCost = getBuildingCost("turret");
+  const farmCost = getEffectiveBuildingCost(state, tribeId, "farm");
+  const watchtowerCost = getEffectiveBuildingCost(state, tribeId, "watchtower");
+  const wallCost = getEffectiveBuildingCost(state, tribeId, "wall");
+  const gateCost = getEffectiveBuildingCost(state, tribeId, "gate");
+  const turretCost = getEffectiveBuildingCost(state, tribeId, "turret");
   const idlePeons = ownUnits.filter((unit) => unit.type === "peon" && unit.task?.kind === "idle").length;
   const ownGates = Object.values(state.buildings).filter((building) => building.tribeId === tribeId && building.type === "gate" && building.hp > 0);
   const damagedOwnBuildings = Object.values(state.buildings)
@@ -1597,7 +1598,8 @@ function summarizeOrderAvailability(
     .sort((left, right) => buildingAttackPriority(right.type) - buildingAttackPriority(left.type))
     .slice(0, 8);
   const visibleResourceTargets = summarizeVisibleResourceTargets(state, tribeId);
-  const canAttack = ownUnits.some((unit) => unit.type === "militia" || unit.type === "archer");
+  const canAttackStructures = ownUnits.some((unit) => unit.type === "militia" || unit.type === "archer" || unit.type === "siege_engine");
+  const canRaidResources = ownUnits.some((unit) => unit.type === "militia" || unit.type === "archer");
   const scoutAvailability = idleSentinel
     ? "SCOUT available: idle sentinel ready"
     : canTrainSentinel
@@ -1615,9 +1617,7 @@ function summarizeOrderAvailability(
     `SEND_MESSENGER ${idleMessenger ? "available" : "unavailable"}`,
     scoutAvailability,
     `DEFEND ${defenders > 0 ? `${defenders} defenders available` : "unavailable"}`,
-    `RECRUIT peon ${canTrainPeon ? "available" : "unavailable"}`,
-    `RECRUIT militia ${canTrainMilitia ? "available" : "unavailable"}`,
-    `RECRUIT archer ${canTrainArcher ? "available" : "unavailable"}`,
+    ...trainableUnitTypes.map((unitType) => `RECRUIT ${unitType} ${unitAvailability(state, tribeId, unitType, population)}`),
     `RECRUIT messenger ${canTrainMessenger ? "available" : "unavailable"}`,
     `RECRUIT sentinel ${canTrainSentinel ? "available" : "unavailable"}`,
     `BUILD farm ${buildAvailability(state, tribeId, "farm", farmCost)}`,
@@ -1633,7 +1633,7 @@ function summarizeOrderAvailability(
     `REPAIR ${
       damagedOwnBuildings.length > 0 && idlePeons > 0
         ? `available with ${idlePeons} idle peon${idlePeons === 1 ? "" : "s"} for ${damagedOwnBuildings
-            .map((building) => `${building.id}:${building.type}:hp${Math.ceil(building.hp)}/${building.maxHp}:cost ${formatCost(getBuildingRepairCost(building))}`)
+            .map((building) => `${building.id}:${building.type}:hp${Math.ceil(building.hp)}/${building.maxHp}:cost ${formatCost(getTribeBuildingRepairCost(state, tribeId, building))}`)
             .join("/")}`
         : damagedOwnBuildings.length > 0
           ? `unavailable: damaged owned buildings exist (${damagedOwnBuildings.map((building) => `${building.id}:${building.type}`).join("/")}) but no idle peon`
@@ -1641,9 +1641,9 @@ function summarizeOrderAvailability(
     }`,
     developmentAvailability,
     `ATTACK ${
-      canAttack
-        ? `available${visibleSiegeTargets.length > 0 ? `; targetBuildingId options ${visibleSiegeTargets.map((building) => `${building.id}:${building.tribeId}:${building.type}:${building.x},${building.y}`).join("/")}` : ""}${
-            visibleResourceTargets !== "none currently visible" ? `; targetResource options ${visibleResourceTargets}` : ""
+      canAttackStructures
+        ? `available${visibleSiegeTargets.length > 0 ? `; targetBuildingId options ${visibleSiegeTargets.map((building) => formatSiegeTargetOption(state, tribeId, building)).join("/")}` : ""}${
+            canRaidResources && visibleResourceTargets !== "none currently visible" ? `; targetResource options ${visibleResourceTargets}` : ""
           }`
         : "unavailable"
     }`,
@@ -1660,6 +1660,21 @@ function buildingAttackPriority(type: Building["type"]): number {
   return 1;
 }
 
+function formatSiegeTargetOption(state: GameState, tribeId: TribeId, building: Building): string {
+  const breachTicks = estimateBreachTicks(state, tribeId, building.id);
+  const breachEstimate = breachTicks === undefined ? "breach unknown" : `breach estimate ${breachTicks} ticks`;
+  return `${building.id}:${building.tribeId}:${building.type}:${building.x},${building.y}:${breachEstimate}`;
+}
+
+function unitAvailability(state: GameState, tribeId: TribeId, unitType: (typeof trainableUnitTypes)[number], population: number): string {
+  const tribe = state.tribes[tribeId];
+  if (population >= tribe.populationCap) return "unavailable: population cap";
+  const missingDevelopments = getMissingUnitDevelopments(state, tribeId, unitType);
+  if (missingDevelopments.length > 0) return `unavailable requires development ${formatDevelopmentNames(missingDevelopments)}`;
+  const cost = getUnitCost(unitType);
+  return canAfford(tribe.resources, cost) ? `available cost ${formatCost(cost)}` : `unavailable needs ${formatCost(cost)}`;
+}
+
 function canAfford(resources: Resources, cost: ResourceCost): boolean {
   return resourceTypes.every((type) => resources[type] >= (cost[type] ?? 0));
 }
@@ -1667,7 +1682,7 @@ function canAfford(resources: Resources, cost: ResourceCost): boolean {
 function buildAvailability(state: GameState, tribeId: TribeId, buildingType: BuildableBuildingType, cost: ResourceCost): string {
   const missingDevelopments = getMissingBuildingDevelopments(state, tribeId, buildingType);
   if (missingDevelopments.length > 0) {
-    return `unavailable requires development ${formatDevelopmentNames(missingDevelopments)}; choose DEVELOP ${missingDevelopments[0]} first when available`;
+    return `unavailable requires development ${formatDevelopmentNames(missingDevelopments)}`;
   }
   return canAfford(state.tribes[tribeId].resources, cost) ? "available" : `unavailable needs ${formatCost(cost)}`;
 }
@@ -1702,7 +1717,7 @@ function normalizeOrder(raw: RawOrder, state: GameState, self: TribeId): AiStrat
     type,
     priority: Number.isFinite(raw.priority) ? Number(raw.priority) : 1,
     recipientTribeId: normalizeTribeId(raw.recipientTribeId, self, type),
-    unitType: raw.unitType,
+    unitType: normalizeOrderUnitType(raw.unitType),
     buildingType: normalizeBuildingType(raw.buildingType),
     buildingId: raw.buildingId ? cleanText(raw.buildingId, 80) : undefined,
     targetBuildingId: raw.targetBuildingId ? cleanText(raw.targetBuildingId, 80) : undefined,
@@ -1841,7 +1856,7 @@ function executableOrderFromPolicyIntent(order: AiStrategicOrder, state: GameSta
       reason: cleanText(`Converted ${buildingType} policy into prerequisite development: ${order.reason}`, 180)
     };
   }
-  if (missing.length > 0 || !canAfford(state.tribes[self].resources, getBuildingCost(buildingType))) return undefined;
+  if (missing.length > 0 || !canAfford(state.tribes[self].resources, getEffectiveBuildingCost(state, self, buildingType))) return undefined;
   const target = normalizeBuildTarget(order.targetX, order.targetY);
   return {
     type: "BUILD",
@@ -1859,6 +1874,16 @@ function inferPolicyDevelopmentIntent(text: string): DevelopmentId | undefined {
   if (/\b(ballistics?|projectile\s+engineering)\b/.test(text)) return "ballistics";
   if (/\b(military\s+architecture|fortification\s+layout|kill\s+zones?)\b/.test(text)) return "military_architecture";
   if (/\b(public\s+works|road\s+works|civic\s+construction)\b/.test(text)) return "public_works";
+  if (/\b(siege\s+engineering|siege\s+engines?|breaching\s+gear|rams?|mantlets?)\b/.test(text)) return "siege_engineering";
+  if (/\b(road\s+engineering|roads?|supply\s+lanes?|bridges?)\b/.test(text)) return "road_engineering";
+  if (/\b(gate\s+machinery|gate\s+controls?|counterweights?)\b/.test(text)) return "gate_machinery";
+  if (/\b(taxation|taxes|tribute)\b/.test(text)) return "taxation";
+  if (/\b(council\s+governance|councils?|representative\s+council)\b/.test(text)) return "council_governance";
+  if (/\b(free\s+press|independent\s+press|public\s+debate)\b/.test(text)) return "free_press";
+  if (/\b(propaganda|centralized\s+narrative|public\s+narratives?)\b/.test(text)) return "propaganda";
+  if (/\b(forced\s+labor|coerced\s+labor|labour\s+levy|labor\s+levy)\b/.test(text)) return "forced_labor";
+  if (/\b(abolition|abolish|wage\s+labor|citizenship)\b/.test(text)) return "abolition";
+  if (/\b(espionage|spies|spy\s+network|informants?|coded\s+letters?)\b/.test(text)) return "espionage";
   return undefined;
 }
 
@@ -1907,6 +1932,10 @@ function canRecruitSentinel(state: GameState, tribeId: TribeId): boolean {
 
 function normalizeBuildingType(value: unknown): BuildableBuildingType | undefined {
   return value === "farm" || value === "watchtower" || value === "wall" || value === "gate" || value === "turret" ? value : undefined;
+}
+
+function normalizeOrderUnitType(value: unknown): NonNullable<AiStrategicOrder["unitType"]> | undefined {
+  return value === "peon" || value === "militia" || value === "archer" || value === "siege_engine" || value === "messenger" || value === "sentinel" ? value : undefined;
 }
 
 function normalizeResourceType(value: unknown): ResourceType | undefined {

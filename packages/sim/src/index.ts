@@ -14,12 +14,29 @@ export type UnitType =
   | "messenger"
   | "trader"
   | "militia"
-  | "archer";
+  | "archer"
+  | "siege_engine";
 export type GateState = "open" | "closed" | "locked";
 export type GateAccessPolicy = "all" | "owner_allies" | "owner_only";
 export type BuildingType = "townHall" | "farm" | "barracks" | "market" | "watchtower" | "wall" | "gate" | "turret";
 export type BuildableBuildingType = "farm" | "watchtower" | "wall" | "gate" | "turret";
-export type DevelopmentId = "masonry" | "brick_kilns" | "ironworking" | "ballistics" | "military_architecture" | "public_works";
+export type DevelopmentId =
+  | "masonry"
+  | "brick_kilns"
+  | "ironworking"
+  | "ballistics"
+  | "military_architecture"
+  | "public_works"
+  | "siege_engineering"
+  | "road_engineering"
+  | "gate_machinery"
+  | "taxation"
+  | "council_governance"
+  | "free_press"
+  | "propaganda"
+  | "forced_labor"
+  | "abolition"
+  | "espionage";
 export type MessageType = "LETTER" | "REPLY" | "TREATY_PROPOSAL" | "THREAT" | "DEMAND";
 export type DiplomacyIntent =
   | "NONE"
@@ -153,7 +170,7 @@ export type AiStrategicOrder = {
   type: AiOrderType;
   priority: number;
   recipientTribeId?: TribeId;
-  unitType?: "peon" | "militia" | "archer" | "messenger" | "sentinel";
+  unitType?: "peon" | "militia" | "archer" | "siege_engine" | "messenger" | "sentinel";
   buildingType?: BuildableBuildingType;
   buildingId?: string;
   targetBuildingId?: string;
@@ -512,7 +529,7 @@ export type GameState = {
 };
 
 export const tribeIds: TribeId[] = ["blue", "red", "green", "yellow", "purple"];
-export const unitTypes: readonly UnitType[] = ["sovereign", "peon", "sentinel", "messenger", "trader", "militia", "archer"] as const;
+export const unitTypes: readonly UnitType[] = ["sovereign", "peon", "sentinel", "messenger", "trader", "militia", "archer", "siege_engine"] as const;
 export const buildingTypes: readonly BuildingType[] = ["townHall", "farm", "barracks", "market", "watchtower", "wall", "gate", "turret"] as const;
 
 export const tribeConfig: Record<TribeId, Pick<Tribe, "id" | "name" | "color" | "colorText" | "controller">> = {
@@ -570,7 +587,8 @@ const unitStats: Record<UnitType, UnitStatDefinition> = {
   messenger: { hp: 25, maxHp: 25, armor: 0, speed: 1.6, visionRadius: 5, attack: 0, range: 0, attackCooldown: 0 },
   trader: { hp: 44, maxHp: 44, armor: 1, speed: 1.1, visionRadius: 5, attack: 0, range: 0, attackCooldown: 0 },
   militia: { hp: 55, maxHp: 55, armor: 2, speed: 1.05, visionRadius: 5, attack: 7, range: 1.2, attackCooldown: 0 },
-  archer: { hp: 40, maxHp: 40, armor: 1, speed: 1.0, visionRadius: 6, attack: 5, range: 4.4, attackCooldown: 0 }
+  archer: { hp: 40, maxHp: 40, armor: 1, speed: 1.0, visionRadius: 6, attack: 5, range: 4.4, attackCooldown: 0 },
+  siege_engine: { hp: 110, maxHp: 110, armor: 4, speed: 0.62, visionRadius: 4, attack: 18, range: 3.2, attackCooldown: 0 }
 };
 
 const packetStats: CombatStats = { hp: 8, maxHp: 8, armor: 0, attack: 0, range: 0, attackCooldown: 0 };
@@ -578,14 +596,45 @@ const packetStats: CombatStats = { hp: 8, maxHp: 8, armor: 0, attack: 0, range: 
 const REPAIR_RANGE = 1.2;
 const REPAIR_HP_PER_TICK = 5;
 
+function repairHpPerTick(state: GameState, tribeId: TribeId): number {
+  let amount = REPAIR_HP_PER_TICK;
+  if (hasDevelopment(state, tribeId, "public_works")) amount += 2;
+  if (hasDevelopment(state, tribeId, "road_engineering")) amount += 1;
+  if (hasActiveForcedLabor(state, tribeId)) amount += 2;
+  return amount;
+}
+
 export const resourceTypes: readonly ResourceType[] = ["gold", "food", "wood", "stone", "clay", "limestone", "iron", "coal"] as const;
+export const trainableUnitTypes: readonly ("peon" | "militia" | "archer" | "siege_engine")[] = ["peon", "militia", "archer", "siege_engine"] as const;
+const unitTrainingCosts: Record<(typeof trainableUnitTypes)[number], ResourceCost> = {
+  peon: { food: 50 },
+  militia: { food: 60, gold: 20 },
+  archer: { food: 40, gold: 30, wood: 25 },
+  siege_engine: { wood: 120, stone: 80, iron: 35, coal: 20, gold: 70 }
+};
+const unitDevelopmentRequirements: Record<(typeof trainableUnitTypes)[number], DevelopmentId[]> = {
+  peon: [],
+  militia: [],
+  archer: [],
+  siege_engine: ["siege_engineering"]
+};
 export const developmentIds: readonly DevelopmentId[] = [
   "masonry",
   "brick_kilns",
   "ironworking",
   "ballistics",
   "military_architecture",
-  "public_works"
+  "public_works",
+  "siege_engineering",
+  "road_engineering",
+  "gate_machinery",
+  "taxation",
+  "council_governance",
+  "free_press",
+  "propaganda",
+  "forced_labor",
+  "abolition",
+  "espionage"
 ] as const;
 
 export const developmentCatalog: Record<DevelopmentId, Development> = {
@@ -603,7 +652,7 @@ export const developmentCatalog: Record<DevelopmentId, Development> = {
     description: "Clay firing and standardized bricks for stronger settlement logistics.",
     cost: { wood: 45, clay: 45, limestone: 15, gold: 25 },
     prerequisites: ["masonry"],
-    unlocks: ["future stronger walls", "granaries", "archives"]
+    unlocks: ["stronger wall and gate bodies", "granaries", "archives"]
   },
   ironworking: {
     id: "ironworking",
@@ -611,7 +660,7 @@ export const developmentCatalog: Record<DevelopmentId, Development> = {
     description: "Bloomery iron tools, fittings, and weapon-ready metal supply chains.",
     cost: { wood: 40, iron: 25, coal: 15, gold: 35 },
     prerequisites: [],
-    unlocks: ["turret components", "gate hinges and locks", "future siege tools"]
+    unlocks: ["turret components", "gate hinges and locks", "siege metalwork"]
   },
   ballistics: {
     id: "ballistics",
@@ -627,7 +676,7 @@ export const developmentCatalog: Record<DevelopmentId, Development> = {
     description: "Purpose-built fortification layouts, kill zones, and protected logistics.",
     cost: { stone: 70, clay: 35, limestone: 45, iron: 15, gold: 55 },
     prerequisites: ["masonry", "ballistics"],
-    unlocks: ["future gates", "future stronger walls", "future siege-resistant districts"]
+    unlocks: ["harder wall and gate networks", "stronger turrets", "siege-resistant districts"]
   },
   public_works: {
     id: "public_works",
@@ -635,7 +684,87 @@ export const developmentCatalog: Record<DevelopmentId, Development> = {
     description: "State-managed labor crews for roads, repairs, and civic construction.",
     cost: { wood: 40, stone: 30, gold: 40 },
     prerequisites: [],
-    unlocks: ["future roads", "future repair logistics"]
+    unlocks: ["faster repairs", "cheaper civic maintenance"]
+  },
+  siege_engineering: {
+    id: "siege_engineering",
+    name: "Siege Engineering",
+    description: "Purpose-built rams, mantlets, ladders, and breach crews for destroying fortifications.",
+    cost: { wood: 90, stone: 55, iron: 45, coal: 25, gold: 75 },
+    prerequisites: ["ironworking", "public_works"],
+    unlocks: ["siege engine recruitment", "breach bonuses against walls, gates, and turrets"]
+  },
+  road_engineering: {
+    id: "road_engineering",
+    name: "Road Engineering",
+    description: "Surveyed roadbeds, bridges, and supply lanes that make labor and messengers move more reliably.",
+    cost: { wood: 50, stone: 55, limestone: 35, gold: 45 },
+    prerequisites: ["public_works"],
+    unlocks: ["faster workers and messengers", "faster field repairs"]
+  },
+  gate_machinery: {
+    id: "gate_machinery",
+    name: "Gate Machinery",
+    description: "Counterweights, iron controls, and guard procedures for stronger controlled passages.",
+    cost: { wood: 50, stone: 45, limestone: 35, iron: 35, gold: 55 },
+    prerequisites: ["masonry", "ironworking"],
+    unlocks: ["stronger gates", "future automated gate controls"]
+  },
+  taxation: {
+    id: "taxation",
+    name: "Taxation",
+    description: "Regular tribute assessment that turns population and commerce into yearly gold.",
+    cost: { gold: 35 },
+    prerequisites: [],
+    unlocks: ["yearly gold income", "wealth growth pressure"]
+  },
+  council_governance: {
+    id: "council_governance",
+    name: "Council Governance",
+    description: "Representative councils that reduce unrest and make difficult policies easier to sustain.",
+    cost: { wood: 20, gold: 45 },
+    prerequisites: ["taxation"],
+    unlocks: ["happiness buffer", "lower tax unrest"]
+  },
+  free_press: {
+    id: "free_press",
+    name: "Free Press",
+    description: "Independent messengers, notices, and public debate that raise trust but expose failures.",
+    cost: { wood: 35, gold: 35 },
+    prerequisites: ["council_governance"],
+    unlocks: ["happiness from truthful public accountability", "propaganda resistance"]
+  },
+  propaganda: {
+    id: "propaganda",
+    name: "Propaganda",
+    description: "Centralized public narratives that can raise morale while making diplomacy less trustworthy.",
+    cost: { wood: 25, gold: 35 },
+    prerequisites: ["taxation"],
+    unlocks: ["morale buffer", "future deception tools"]
+  },
+  forced_labor: {
+    id: "forced_labor",
+    name: "Forced Labor",
+    description: "Coerced labor levies that accelerate construction and repair while harming happiness and legitimacy.",
+    cost: { gold: 25 },
+    prerequisites: ["taxation"],
+    unlocks: ["cheaper building and repair labor", "happiness and safety penalties"]
+  },
+  abolition: {
+    id: "abolition",
+    name: "Abolition",
+    description: "Ends coerced labor institutions and redirects legitimacy toward wage labor and citizenship.",
+    cost: { gold: 55 },
+    prerequisites: ["forced_labor", "council_governance"],
+    unlocks: ["forced labor penalties removed", "happiness recovery"]
+  },
+  espionage: {
+    id: "espionage",
+    name: "Espionage",
+    description: "Informant networks, coded letters, and scouts trained to discover hidden military and economic intent.",
+    cost: { gold: 65, iron: 10 },
+    prerequisites: ["council_governance"],
+    unlocks: ["wider sentinel vision", "future spy missions"]
   }
 };
 
@@ -679,6 +808,55 @@ const buildingStats: Record<
   gate: { maxHp: 220, armor: 5, visionRadius: 4, blocksMovement: false, attack: 0, range: 0, cooldownTicks: 0 },
   turret: { maxHp: 320, armor: 5, visionRadius: 11, blocksMovement: false, attack: 9, range: 7, cooldownTicks: Math.round(TICK_RATE * 1.4) }
 };
+
+type BuildingStatDefinition = (typeof buildingStats)[BuildingType];
+
+function effectiveUnitStats(state: GameState, tribeId: TribeId, type: UnitType): UnitStatDefinition {
+  const stats = { ...unitStats[type] };
+  if (hasDevelopment(state, tribeId, "road_engineering") && (type === "peon" || type === "messenger" || type === "trader" || type === "siege_engine")) {
+    stats.speed = Number((stats.speed + 0.14).toFixed(2));
+  }
+  if (hasDevelopment(state, tribeId, "espionage") && type === "sentinel") {
+    stats.visionRadius += 3;
+  }
+  if (hasDevelopment(state, tribeId, "military_architecture") && (type === "militia" || type === "archer" || type === "siege_engine")) {
+    stats.armor += 1;
+  }
+  return stats;
+}
+
+function effectiveBuildingStats(state: GameState, tribeId: TribeId, type: BuildingType): BuildingStatDefinition {
+  const stats = { ...buildingStats[type] };
+  if (hasDevelopment(state, tribeId, "brick_kilns") && (type === "wall" || type === "gate")) {
+    stats.maxHp += 60;
+    stats.armor += 1;
+  }
+  if (hasDevelopment(state, tribeId, "gate_machinery") && type === "gate") {
+    stats.maxHp += 70;
+    stats.armor += 1;
+  }
+  if (hasDevelopment(state, tribeId, "ballistics") && type === "turret") {
+    stats.attack += 2;
+    stats.range += 1;
+  }
+  if (hasDevelopment(state, tribeId, "military_architecture")) {
+    if (type === "wall" || type === "gate") {
+      stats.maxHp += 90;
+      stats.armor += 2;
+    }
+    if (type === "turret" || type === "watchtower") {
+      stats.maxHp += 60;
+      stats.armor += 1;
+      stats.visionRadius += 1;
+    }
+    if (type === "turret") stats.range += 1;
+  }
+  return stats;
+}
+
+function hasActiveForcedLabor(state: GameState, tribeId: TribeId): boolean {
+  return hasDevelopment(state, tribeId, "forced_labor") && !hasDevelopment(state, tribeId, "abolition");
+}
 
 export function createGame(seed = 1337): GameState {
   const state: GameState = {
@@ -967,8 +1145,9 @@ function issueAttackOrder(
     if (targetBuilding.tribeId === tribeId) return { ok: false, reason: "cannot attack own building" };
   }
   const attackers = Object.values(state.units)
-    .filter((unit) => unit.tribeId === tribeId && unit.hp > 0 && (unit.type === "militia" || unit.type === "archer"))
-    .slice(0, 4);
+    .filter((unit) => unit.tribeId === tribeId && unit.hp > 0 && (targetBuilding ? isSiegeCapableUnit(unit) : isFieldCombatUnit(unit)))
+    .sort((left, right) => siegeUnitPriority(right) - siegeUnitPriority(left) || left.id.localeCompare(right.id))
+    .slice(0, targetBuilding ? 5 : 4);
   if (attackers.length === 0) return { ok: false, reason: "no military units available" };
   declareWar(state, tribeId, resolvedTargetTribeId, reason ?? "AI attack order");
   if (targetBuilding) {
@@ -1030,7 +1209,7 @@ function issueResourceAttackOrder(
     if (state.tribes[targetTribeId].eliminated) return { ok: false, reason: `${state.tribes[targetTribeId].name} has been eliminated` };
   }
   const attackers = Object.values(state.units)
-    .filter((unit) => unit.tribeId === tribeId && unit.hp > 0 && (unit.type === "militia" || unit.type === "archer"))
+    .filter((unit) => unit.tribeId === tribeId && unit.hp > 0 && isFieldCombatUnit(unit))
     .slice(0, 4);
   if (attackers.length === 0) return { ok: false, reason: "no military units available" };
   if (targetTribeId) declareWar(state, tribeId, targetTribeId, reason ?? "AI resource raid order");
@@ -1069,6 +1248,18 @@ function findResourceAttackPosition(state: GameState, unit: Unit, target: Positi
   return findTargetInteractionPosition(state, unit, target, unit.range);
 }
 
+function isBuildingUnderSiege(state: GameState, building: Building): boolean {
+  return Object.values(state.units).some(
+    (unit) =>
+      unit.hp > 0 &&
+      unit.tribeId !== building.tribeId &&
+      areHostile(state, unit.tribeId, building.tribeId) &&
+      (unit.task.kind === "attackBuilding" && unit.task.targetBuildingId === building.id
+        ? true
+        : distance(unit, building) <= Math.max(unit.range, 1.2))
+  );
+}
+
 function findTargetInteractionPosition(state: GameState, unit: Unit, target: Position, interactionRange: number): Position {
   if (distance(unit, target) <= interactionRange) return { x: Math.round(unit.x), y: Math.round(unit.y) };
   const radius = Math.max(1, Math.ceil(interactionRange));
@@ -1103,7 +1294,7 @@ function issueRepairOrder(
     .sort((left, right) => distance(left, building) - distance(right, building))
     .slice(0, 2);
   if (peons.length === 0) return { ok: false, reason: "no idle peon available for repair" };
-  const cost = getBuildingRepairCost(building);
+  const cost = getTribeBuildingRepairCost(state, tribeId, building);
   if (!canAfford(state.tribes[tribeId].resources, cost)) return { ok: false, reason: `Not enough resources to repair ${building.type}. Need ${formatResourceCost(cost)}.` };
   spendResources(state.tribes[tribeId].resources, cost);
   for (const peon of peons) {
@@ -1114,7 +1305,9 @@ function issueRepairOrder(
     state,
     "AI_REPAIR_ORDER",
     `${state.tribes[tribeId].name} repairs ${labelBuildingType(building.type)}`,
-    `${peons.length} peon${peons.length === 1 ? "" : "s"} repair ${building.id} at ${building.x},${building.y}. Cost: ${formatResourceCost(cost)}.`,
+    `${peons.length} peon${peons.length === 1 ? "" : "s"} repair ${building.id} at ${building.x},${building.y}. Cost: ${formatResourceCost(cost)}.${
+      isBuildingUnderSiege(state, building) ? " The work crew is repairing under hostile pressure." : ""
+    }`,
     "all"
   );
   return { ok: true, summary: `sent ${peons.length} peon${peons.length === 1 ? "" : "s"} to repair ${building.type} ${building.id}` };
@@ -1273,17 +1466,21 @@ export function summarizeDiplomaticIntel(state: GameState, tribeId: TribeId, lim
     .join(" | ");
 }
 
-export function trainUnit(state: GameState, tribeId: TribeId, unitType: "peon" | "militia" | "archer"): { ok: true; unitId: string } | { ok: false; reason: string } {
+export function trainUnit(
+  state: GameState,
+  tribeId: TribeId,
+  unitType: (typeof trainableUnitTypes)[number]
+): { ok: true; unitId: string } | { ok: false; reason: string } {
   const tribe = state.tribes[tribeId];
   const population = Object.values(state.units).filter((unit) => unit.tribeId === tribeId && unit.hp > 0).length;
   if (population >= tribe.populationCap) return { ok: false, reason: "Population cap reached. Build more houses later; this slice starts with a cap of 20." };
-  const cost = unitType === "peon" ? { food: 50, gold: 0, wood: 0 } : unitType === "militia" ? { food: 60, gold: 20, wood: 0 } : { food: 40, gold: 30, wood: 25 };
-  if (tribe.resources.food < cost.food || tribe.resources.gold < cost.gold || tribe.resources.wood < cost.wood) return { ok: false, reason: `Not enough resources to train ${unitType}.` };
+  const missingDevelopments = getMissingUnitDevelopments(state, tribeId, unitType);
+  if (missingDevelopments.length > 0) return { ok: false, reason: `${unitType} requires ${formatDevelopmentList(missingDevelopments)}` };
+  const cost = getUnitCost(unitType);
+  if (!canAfford(tribe.resources, cost)) return { ok: false, reason: `Not enough resources to train ${unitType}. Need ${formatResourceCost(cost)}.` };
   const source = unitType === "peon" ? findTownHall(state, tribeId) : Object.values(state.buildings).find((building) => building.tribeId === tribeId && building.type === "barracks");
   if (!source) return { ok: false, reason: `No production building for ${unitType}.` };
-  tribe.resources.food -= cost.food;
-  tribe.resources.gold -= cost.gold;
-  tribe.resources.wood -= cost.wood;
+  spendResources(tribe.resources, cost);
   const unit = addUnit(state, tribeId, unitType, source.x + 1, source.y + 1);
   addEvent(state, "UNIT_TRAINED", `${tribe.name} trains ${unitType}`, `${unit.name} is ready for orders.`, "all");
   updateVisibility(state);
@@ -1294,6 +1491,12 @@ export function getBuildingCost(buildingType: BuildableBuildingType): ResourceCo
   return { ...buildingCosts[buildingType] };
 }
 
+export function getEffectiveBuildingCost(state: GameState, tribeId: TribeId, buildingType: BuildableBuildingType): ResourceCost {
+  let cost = buildingCosts[buildingType];
+  if (hasActiveForcedLabor(state, tribeId)) cost = scaleResourceCost(cost, 0.85);
+  return { ...cost };
+}
+
 export function getBuildingRepairCost(buildingOrType: Pick<Building, "type" | "hp" | "maxHp"> | BuildingType): ResourceCost {
   const type = typeof buildingOrType === "string" ? buildingOrType : buildingOrType.type;
   const base = buildingRepairCosts[type];
@@ -1302,6 +1505,26 @@ export function getBuildingRepairCost(buildingOrType: Pick<Building, "type" | "h
   if (missingHp <= 0 || buildingOrType.maxHp <= 0) return {};
   const scale = Math.max(0.05, Math.min(1, missingHp / buildingOrType.maxHp));
   return scaleResourceCost(base, scale);
+}
+
+export function getTribeBuildingRepairCost(state: GameState, tribeId: TribeId, buildingOrType: Pick<Building, "type" | "hp" | "maxHp"> | BuildingType): ResourceCost {
+  let cost = getBuildingRepairCost(buildingOrType);
+  if (hasDevelopment(state, tribeId, "public_works")) cost = scaleResourceCost(cost, 0.85);
+  if (hasDevelopment(state, tribeId, "road_engineering")) cost = scaleResourceCost(cost, 0.9);
+  if (hasActiveForcedLabor(state, tribeId)) cost = scaleResourceCost(cost, 0.75);
+  return cost;
+}
+
+export function getUnitCost(unitType: (typeof trainableUnitTypes)[number]): ResourceCost {
+  return { ...unitTrainingCosts[unitType] };
+}
+
+export function getUnitRequirements(unitType: (typeof trainableUnitTypes)[number]): DevelopmentId[] {
+  return [...unitDevelopmentRequirements[unitType]];
+}
+
+export function getMissingUnitDevelopments(state: GameState, tribeId: TribeId, unitType: (typeof trainableUnitTypes)[number]): DevelopmentId[] {
+  return unitDevelopmentRequirements[unitType].filter((developmentId) => !hasDevelopment(state, tribeId, developmentId));
 }
 
 export function getDevelopment(developmentId: DevelopmentId): Development {
@@ -1351,6 +1574,7 @@ export function chooseDevelopment(
   const development = developmentCatalog[developmentId];
   spendResources(state.tribes[tribeId].resources, development.cost);
   state.tribes[tribeId].developments.push(developmentId);
+  applyDevelopmentEffects(state, tribeId, developmentId);
   addEvent(
     state,
     "DEVELOPMENT_CHOSEN",
@@ -1359,6 +1583,46 @@ export function chooseDevelopment(
     "all"
   );
   return { ok: true, summary: `developed ${development.name}` };
+}
+
+function applyDevelopmentEffects(state: GameState, tribeId: TribeId, developmentId: DevelopmentId): void {
+  const tribe = state.tribes[tribeId];
+  if (developmentId === "forced_labor") tribe.happiness = Math.round(clamp(tribe.happiness - 10, 0, 100));
+  if (developmentId === "abolition") tribe.happiness = Math.round(clamp(tribe.happiness + 12, 0, 100));
+  if (developmentId === "council_governance") tribe.happiness = Math.round(clamp(tribe.happiness + 4, 0, 100));
+  if (developmentId === "free_press") tribe.happiness = Math.round(clamp(tribe.happiness + 3, 0, 100));
+  if (developmentId === "propaganda") tribe.happiness = Math.round(clamp(tribe.happiness + 2, 0, 100));
+  refreshTribeUnitStats(state, tribeId);
+  refreshTribeBuildingStats(state, tribeId);
+  updateVisibility(state);
+}
+
+function refreshTribeUnitStats(state: GameState, tribeId: TribeId): void {
+  for (const unit of Object.values(state.units)) {
+    if (unit.tribeId !== tribeId || unit.hp <= 0) continue;
+    const ratio = unit.maxHp > 0 ? unit.hp / unit.maxHp : 1;
+    const stats = effectiveUnitStats(state, tribeId, unit.type);
+    unit.maxHp = stats.maxHp;
+    unit.hp = Math.max(1, Math.min(stats.maxHp, Math.round(stats.maxHp * ratio)));
+    unit.armor = stats.armor;
+    unit.speed = stats.speed;
+    unit.visionRadius = stats.visionRadius;
+    unit.attack = stats.attack;
+    unit.range = stats.range;
+  }
+}
+
+function refreshTribeBuildingStats(state: GameState, tribeId: TribeId): void {
+  for (const building of Object.values(state.buildings)) {
+    if (building.tribeId !== tribeId || building.hp <= 0) continue;
+    const ratio = building.maxHp > 0 ? building.hp / building.maxHp : 1;
+    const stats = effectiveBuildingStats(state, tribeId, building.type);
+    building.maxHp = stats.maxHp;
+    building.hp = Math.max(1, Math.min(stats.maxHp, Math.round(stats.maxHp * ratio)));
+    building.armor = stats.armor;
+    building.attack = stats.attack;
+    building.range = stats.range;
+  }
 }
 
 export function buildStructure(
@@ -1372,7 +1636,7 @@ export function buildStructure(
   if (missingDevelopments.length > 0) {
     return { ok: false, reason: `${labelBuildingType(buildingType)} requires development ${formatDevelopmentList(missingDevelopments)}.` };
   }
-  const cost = buildingCosts[buildingType];
+  const cost = getEffectiveBuildingCost(state, tribeId, buildingType);
   if (!canAfford(tribe.resources, cost)) return { ok: false, reason: `Not enough resources to build ${buildingType}. Need ${formatResourceCost(cost)}.` };
   const site = findBuildSite(state, near);
   if (!site) return { ok: false, reason: "No clear build site nearby." };
@@ -1767,7 +2031,8 @@ export function getTribeSafetyScore(state: GameState, tribeId: TribeId): number 
   const population = countLivingPopulation(state, tribeId);
   if (state.tribes[tribeId].eliminated || population === 0) return 0;
   const ownUnits = Object.values(state.units).filter((unit) => unit.tribeId === tribeId && unit.hp > 0);
-  const military = ownUnits.filter((unit) => unit.type === "militia" || unit.type === "archer").length;
+  const military = ownUnits.filter((unit) => isSiegeCapableUnit(unit)).length;
+  const siegeEngines = ownUnits.filter((unit) => unit.type === "siege_engine").length;
   const sentinels = ownUnits.filter((unit) => unit.type === "sentinel").length;
   const ownBuildings = Object.values(state.buildings).filter((building) => building.tribeId === tribeId && building.hp > 0);
   const walls = ownBuildings.filter((building) => building.type === "wall").length;
@@ -1781,11 +2046,15 @@ export function getTribeSafetyScore(state: GameState, tribeId: TribeId): number 
     34 +
     townHall +
     military * 5 +
+    siegeEngines * 4 +
     sentinels * 3 +
     walls * 2 +
     gates * 3 +
     turrets * 8 +
     watchtowers * 5 +
+    (hasDevelopment(state, tribeId, "council_governance") ? 3 : 0) +
+    (hasDevelopment(state, tribeId, "abolition") ? 4 : 0) -
+    (hasActiveForcedLabor(state, tribeId) ? 6 : 0) +
     resourceControl.survivalBonus -
     activeWars * 10 -
     Math.max(0, 10 - population) * 1.5;
@@ -2192,6 +2461,7 @@ function recordResourceDenial(
 }
 
 function unitResourceControlPower(type: UnitType): number {
+  if (type === "siege_engine") return 3;
   if (type === "militia" || type === "archer") return 5;
   if (type === "sentinel") return 4;
   if (type === "sovereign") return 3.5;
@@ -2200,6 +2470,7 @@ function unitResourceControlPower(type: UnitType): number {
 }
 
 function unitResourceDefensePower(type: UnitType): number {
+  if (type === "siege_engine") return 3;
   if (type === "militia" || type === "archer") return 5;
   if (type === "sentinel") return 2.5;
   if (type === "sovereign") return 2;
@@ -2412,7 +2683,7 @@ function spawnTribe(state: GameState, tribeId: TribeId, start: Position): void {
 
 function addUnit(state: GameState, tribeId: TribeId, type: UnitType, x: number, y: number): Unit {
   const id = nextId(state, type);
-  const stats = unitStats[type];
+  const stats = effectiveUnitStats(state, tribeId, type);
   const unit: Unit = {
     id,
     name: id,
@@ -2429,7 +2700,7 @@ function addUnit(state: GameState, tribeId: TribeId, type: UnitType, x: number, 
 
 function addBuilding(state: GameState, tribeId: TribeId, type: BuildingType, x: number, y: number): Building {
   const id = nextId(state, type);
-  const stats = buildingStats[type];
+  const stats = effectiveBuildingStats(state, tribeId, type);
   const building: Building = {
     id,
     type,
@@ -2904,7 +3175,7 @@ function updateRepairer(state: GameState, unit: Unit): void {
     }
     return;
   }
-  building.hp = Math.min(building.maxHp, building.hp + REPAIR_HP_PER_TICK);
+  building.hp = Math.min(building.maxHp, building.hp + repairHpPerTick(state, unit.tribeId));
   if (building.hp < building.maxHp) return;
   addEvent(
     state,
@@ -2931,7 +3202,7 @@ function updateCombat(state: GameState): void {
         areHostile(state, unit.tribeId, assignedTarget.tribeId) &&
         distance(unit, assignedTarget) <= unit.range
       ) {
-        applyBuildingDamage(state, assignedTarget, unit.attack, unit.tribeId);
+        applyBuildingDamage(state, assignedTarget, buildingAttackDamage(state, unit, assignedTarget), unit.tribeId);
         unit.attackCooldown = Math.round(TICK_RATE * 1.2);
         continue;
       }
@@ -2958,14 +3229,14 @@ function updateCombat(state: GameState): void {
         areHostile(state, unit.tribeId, other.tribeId) &&
         distance(unit, other) <= unit.range
     );
-    if (target) {
+    if (target && unit.type !== "siege_engine") {
       applyUnitDamage(state, target, unit.attack, unit.tribeId);
       unit.attackCooldown = Math.round(TICK_RATE * 1.2);
       continue;
     }
     const buildingTarget = findHostileBuildingInRange(state, unit);
     if (!buildingTarget) continue;
-    applyBuildingDamage(state, buildingTarget, unit.attack, unit.tribeId);
+    applyBuildingDamage(state, buildingTarget, buildingAttackDamage(state, unit, buildingTarget), unit.tribeId);
     unit.attackCooldown = Math.round(TICK_RATE * 1.2);
   }
 }
@@ -2974,7 +3245,7 @@ function updateTurrets(state: GameState): void {
   const living = Object.values(state.units).filter((unit) => unit.hp > 0);
   for (const turret of Object.values(state.buildings)) {
     if (turret.type !== "turret" || turret.hp <= 0) continue;
-    const stats = buildingStats[turret.type];
+    const stats = effectiveBuildingStats(state, turret.tribeId, turret.type);
     turret.attackCooldown = Math.max(0, turret.attackCooldown - 1);
     if (turret.attackCooldown > 0) continue;
     const target = living
@@ -2983,19 +3254,35 @@ function updateTurrets(state: GameState): void {
           unit.tribeId !== turret.tribeId &&
           !isProtectedMessenger(unit) &&
           areHostile(state, turret.tribeId, unit.tribeId) &&
-          distance(turret, unit) <= stats.range
+          distance(turret, unit) <= turret.range
       )
       .sort((left, right) => targetPriority(right) - targetPriority(left) || distance(turret, left) - distance(turret, right))[0];
     if (!target) continue;
-    applyUnitDamage(state, target, stats.attack, turret.tribeId);
+    applyUnitDamage(state, target, turret.attack, turret.tribeId);
     turret.attackCooldown = stats.cooldownTicks;
   }
 }
 
 function targetPriority(unit: Unit): number {
+  if (unit.type === "siege_engine") return 4;
   if (unit.type === "archer" || unit.type === "militia") return 3;
   if (unit.type === "sovereign") return 2;
   return 1;
+}
+
+function isFieldCombatUnit(unit: Unit): boolean {
+  return unit.type === "militia" || unit.type === "archer";
+}
+
+function isSiegeCapableUnit(unit: Unit): boolean {
+  return isFieldCombatUnit(unit) || unit.type === "siege_engine";
+}
+
+function siegeUnitPriority(unit: Unit): number {
+  if (unit.type === "siege_engine") return 4;
+  if (unit.type === "archer") return 2;
+  if (unit.type === "militia") return 1;
+  return 0;
 }
 
 function findHostileBuildingInRange(state: GameState, unit: Unit): Building | undefined {
@@ -3016,6 +3303,32 @@ function buildingTargetPriority(building: Building): number {
   if (building.type === "wall") return 3;
   if (building.type === "watchtower") return 2;
   return 1;
+}
+
+function isFortificationBuilding(type: BuildingType): boolean {
+  return type === "wall" || type === "gate" || type === "turret" || type === "watchtower";
+}
+
+function buildingAttackDamage(state: GameState, unit: Unit, building: Building): number {
+  let amount = unit.attack;
+  if (unit.type === "siege_engine") {
+    amount += building.type === "wall" || building.type === "gate" ? 10 : isFortificationBuilding(building.type) ? 6 : 2;
+  }
+  if (isFortificationBuilding(building.type) && hasDevelopment(state, unit.tribeId, "siege_engineering")) amount += 2;
+  return amount;
+}
+
+export function estimateBreachTicks(state: GameState, tribeId: TribeId, targetBuildingId: string): number | undefined {
+  const building = state.buildings[targetBuildingId];
+  if (!building || building.hp <= 0 || building.tribeId === tribeId) return undefined;
+  const attackers = Object.values(state.units)
+    .filter((unit) => unit.tribeId === tribeId && unit.hp > 0 && isSiegeCapableUnit(unit))
+    .sort((left, right) => siegeUnitPriority(right) - siegeUnitPriority(left) || left.id.localeCompare(right.id))
+    .slice(0, 5);
+  if (attackers.length === 0) return undefined;
+  const volleyDamage = attackers.reduce((sum, unit) => sum + armoredDamage(buildingAttackDamage(state, unit, building), building.armor), 0);
+  if (volleyDamage <= 0) return undefined;
+  return Math.max(Math.round(TICK_RATE * 1.2), Math.ceil(building.hp / volleyDamage) * Math.round(TICK_RATE * 1.2));
 }
 
 function applyUnitDamage(state: GameState, target: Unit, amount: number, attackerTribeId: TribeId): void {
@@ -3125,6 +3438,7 @@ function updateYearlyWellbeing(state: GameState): void {
     for (const tribeId of tribeIds) {
       const tribe = state.tribes[tribeId];
       if (tribe.eliminated) continue;
+      const developmentHappiness = applyYearlyDevelopmentEffects(state, tribeId, year);
       const wealth = computeWealth(state, tribeId);
       const previous = tribe.lastYearWealth || wealth;
       const wealthGain = wealth - previous;
@@ -3140,11 +3454,32 @@ function updateYearlyWellbeing(state: GameState): void {
       if (foodPerCapita < 10) delta -= 2;
       if (safety < 45) delta -= 2;
       if (safety >= 70) delta += 1;
+      delta += developmentHappiness;
       tribe.happiness = Math.round(clamp(tribe.happiness + delta, 0, 100));
       tribe.lastYearWealth = wealth;
     }
     state.victoryPressure.lastProcessedYear = year;
   }
+}
+
+function applyYearlyDevelopmentEffects(state: GameState, tribeId: TribeId, year: number): number {
+  const tribe = state.tribes[tribeId];
+  const population = countLivingPopulation(state, tribeId);
+  let happinessDelta = 0;
+  if (hasDevelopment(state, tribeId, "taxation")) {
+    const taxYield = Math.max(1, Math.round(population * (hasDevelopment(state, tribeId, "council_governance") ? 1.6 : 2)));
+    tribe.resources.gold += taxYield;
+    happinessDelta -= hasDevelopment(state, tribeId, "council_governance") ? 0 : 1;
+    if (year % 10 === 0) {
+      addEvent(state, "YEARLY_TAXATION", `${tribe.name} collects yearly taxes`, `${taxYield} gold enters the treasury through taxation.`, [tribeId]);
+    }
+  }
+  if (hasDevelopment(state, tribeId, "council_governance")) happinessDelta += 1;
+  if (hasDevelopment(state, tribeId, "free_press")) happinessDelta += hasDevelopment(state, tribeId, "propaganda") ? 0 : 1;
+  if (hasDevelopment(state, tribeId, "propaganda")) happinessDelta += 1;
+  if (hasActiveForcedLabor(state, tribeId)) happinessDelta -= 2;
+  if (hasDevelopment(state, tribeId, "abolition")) happinessDelta += 1;
+  return happinessDelta;
 }
 
 function updateVictoryPressure(state: GameState): void {
