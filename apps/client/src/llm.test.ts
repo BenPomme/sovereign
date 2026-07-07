@@ -251,6 +251,45 @@ describe("Ollama JSON recovery", () => {
     });
   });
 
+  it("turns explicit generated roadmap development names into immediate development orders", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        response: JSON.stringify({
+          freeformStrategy: "I want settlement coherence before border expansion.",
+          strategySummary: "Adopt Unified Settlement Layout.",
+          memoryNote: "Start with explicit generated roadmap institutions when useful.",
+          orders: [
+            {
+              type: "SET_POLICY",
+              priority: 1,
+              messageType: "LETTER",
+              diplomacyIntent: "NONE",
+              subject: "",
+              body: "",
+              reason: "Develop Unified Settlement Layout now so the settlement has a stronger administrative footprint."
+            }
+          ],
+          unitNames: [],
+          bugReport: "",
+          bugSeverity: "low"
+        })
+      })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("window", {
+      setTimeout: globalThis.setTimeout,
+      clearTimeout: globalThis.clearTimeout
+    });
+
+    const decision = await requestSovereignDecision(createGame(20260702), "blue", "qwen3.5:9b-mlx");
+
+    expect(decision.orders[0]).toMatchObject({
+      type: "DEVELOP",
+      developmentId: "sw_001_unified_settlement_layout"
+    });
+  });
+
   it("turns explicit wall policy language into a placed build order after Masonry", async () => {
     const game = createGame(20260702);
     const developed = issueSovereignOrder(game, "blue", {
@@ -1927,15 +1966,59 @@ describe("Ollama JSON recovery", () => {
     const decision = await requestSovereignDecision(game, "blue", "qwen3.5:9b-mlx");
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
 
-    expect(body.prompt).toContain("Siege Engineering");
-    expect(body.prompt).toContain("Forced Labor");
-    expect(body.prompt).toContain("Abolition");
+    expect(body.prompt).toContain("DEVELOP tree total");
+    expect(body.prompt).toContain("available options");
+    expect(body.prompt).toContain("masonry:Masonry");
+    expect(body.prompt).toContain("taxation:Taxation");
     expect(body.prompt).toContain("RECRUIT siege_engine unavailable requires development Siege Engineering");
-    expect(body.prompt).toContain("DEVELOP with developmentId masonry, brick_kilns");
+    expect(body.prompt).toContain("DEVELOP with a developmentId from the currently available Development options");
     expect(body.prompt).not.toContain("choose DEVELOP masonry first");
+    expect(body.prompt.length).toBeLessThan(35_000);
     expect(body.format.properties.orders.items.properties.unitType.enum).toContain("siege_engine");
-    expect(body.format.properties.orders.items.properties.developmentId.enum).toContain("forced_labor");
+    expect(body.format.properties.orders.items.properties.developmentId.enum).toBeUndefined();
+    expect(JSON.stringify(body.format)).not.toContain("sw_175_generational_planning_board");
     expect(decision.orders[0]).toMatchObject({ type: "SET_POLICY" });
+  });
+
+  it("does not auto-convert unavailable development choices into hidden prerequisite strategy", async () => {
+    const game = createGame(2026070604);
+    game.tribes.blue.resources = { gold: 1000, food: 1000, wood: 1000, stone: 1000, clay: 1000, limestone: 1000, iron: 1000, coal: 1000 };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        response: JSON.stringify({
+          freeformStrategy: "I want military architecture eventually, but I have not chosen the required path yet.",
+          strategySummary: "Attempt a locked development.",
+          memoryNote: "Locked plans should stay explicit.",
+          orders: [
+            {
+              type: "DEVELOP",
+              priority: 1,
+              developmentId: "military_architecture",
+              messageType: "LETTER",
+              diplomacyIntent: "NONE",
+              subject: "",
+              body: "",
+              reason: "I want military architecture."
+            }
+          ],
+          unitNames: [],
+          bugReport: "",
+          bugSeverity: "low"
+        })
+      })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("window", {
+      setTimeout: globalThis.setTimeout,
+      clearTimeout: globalThis.clearTimeout
+    });
+
+    const decision = await requestSovereignDecision(game, "blue", "qwen3.5:9b-mlx");
+
+    expect(decision.orders[0]).toMatchObject({ type: "SET_POLICY" });
+    expect(game.tribes.blue.developments).not.toContain("masonry");
+    expect(game.tribes.blue.developments).not.toContain("ballistics");
   });
 
   it("preserves LLM-authored resource raid targets on attack orders", async () => {

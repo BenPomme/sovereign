@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TICKS_PER_GAME_YEAR, TICK_RATE, advanceGame, advanceGameTicks, appendSovereignMemory, applyTribeIdentity, assignGathering, attachReplyToPacket, buildStructure, buildingTypes, createGame, createResourceDeposit, damageBuilding, damageResourceDeposit, estimateBreachTicks, formAlliance, getBuildingCombatStats, getBuildingTypeCombatStats, getCombatStatCoverageReport, getCurrentYear, getBuildingCost, getBuildingRepairCost, getEffectiveBuildingCost, getPacketItemCombatStats, getPacketItemTypeCombatStats, getRecentVisibleEvents, getResourceControlSummary, getResourceDepositCombatStats, getResourceDepositPosturesForTribe, getResourceTypeCombatStats, getTownHall, getTribeBuildingRepairCost, getUnitCombatStats, getUnitTypeCombatStats, getVictoryPressure, getVisibleBuildings, getVisibleUnits, isTileWalkable, issueSovereignOrder, recordAiDecision, renameUnits, resourceTypes, sendPlayerMessage, setAllControllers, setGateState, summarizeDiplomaticIntel, summarizeSovereignMemory, tileIndex, unitTypes, worldSignature } from "./index";
+import { TICKS_PER_GAME_YEAR, TICK_RATE, advanceGame, advanceGameTicks, appendSovereignMemory, applyTribeIdentity, assignGathering, attachReplyToPacket, buildStructure, buildingTypes, createGame, createResourceDeposit, damageBuilding, damageResourceDeposit, developmentCatalog, developmentIds, estimateBreachTicks, formAlliance, getBuildingCombatStats, getBuildingTypeCombatStats, getCombatStatCoverageReport, getCurrentYear, getBuildingCost, getBuildingRepairCost, getDevelopment, getEffectiveBuildingCost, getPacketItemCombatStats, getPacketItemTypeCombatStats, getRecentVisibleEvents, getResourceControlSummary, getResourceDepositCombatStats, getResourceDepositPosturesForTribe, getResourceTypeCombatStats, getTownHall, getTribeBuildingRepairCost, getUnitCombatStats, getUnitTypeCombatStats, getVictoryPressure, getVisibleBuildings, getVisibleUnits, isTileWalkable, issueSovereignOrder, recordAiDecision, renameUnits, resourceTypes, sendPlayerMessage, setAllControllers, setGateState, summarizeDiplomaticIntel, summarizeSovereignMemory, tileIndex, unitTypes, worldSignature } from "./index";
 
 describe("Sovereign Worlds vertical slice simulation", () => {
   it("is deterministic for the same seed and elapsed time", () => {
@@ -8,6 +8,50 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     advanceGame(a, 60);
     advanceGame(b, 60);
     expect(worldSignature(a)).toEqual(worldSignature(b));
+  });
+
+  it("exposes a full metadata-driven development tree with valid functional effects", () => {
+    expect(developmentIds.length).toBeGreaterThanOrEqual(100);
+    expect(new Set(developmentIds).size).toBe(developmentIds.length);
+
+    for (const developmentId of developmentIds) {
+      const development = getDevelopment(developmentId);
+      expect(developmentCatalog[developmentId]).toBeTruthy();
+      expect(development.id).toBe(developmentId);
+      expect(development.name.length).toBeGreaterThan(0);
+      expect(development.category).toBeTruthy();
+      expect(development.phase).toBeTruthy();
+      expect(Object.values(development.cost).every((amount) => Number.isFinite(amount) && amount >= 0)).toBe(true);
+      expect(development.effects.length).toBeGreaterThan(0);
+      for (const effect of development.effects) {
+        expect(effect.description.length).toBeGreaterThan(0);
+        expect(Number.isFinite(effect.amount)).toBe(true);
+      }
+      for (const prerequisite of development.prerequisites) {
+        expect(developmentCatalog[prerequisite], `${developmentId} prerequisite ${prerequisite}`).toBeTruthy();
+      }
+    }
+
+    const visiting = new Set<string>();
+    const visited = new Set<string>();
+    const visit = (developmentId: string): void => {
+      if (visited.has(developmentId)) return;
+      expect(visiting.has(developmentId), `cycle at ${developmentId}`).toBe(false);
+      visiting.add(developmentId);
+      for (const prerequisite of developmentCatalog[developmentId].prerequisites) visit(prerequisite);
+      visiting.delete(developmentId);
+      visited.add(developmentId);
+    };
+    for (const developmentId of developmentIds) visit(developmentId);
+
+    expect(developmentIds.some((id) => id.startsWith("sw_042_"))).toBe(true);
+    expect(developmentIds.some((id) => id.startsWith("sw_098_"))).toBe(true);
+    expect(developmentIds.some((id) => id.startsWith("sw_129_"))).toBe(true);
+
+    const cloned = getDevelopment("masonry");
+    const originalAmount = getDevelopment("masonry").effects[0].amount;
+    cloned.effects[0].amount = 9999;
+    expect(getDevelopment("masonry").effects[0].amount).toBe(originalAmount);
   });
 
   it("keeps distant enemy units out of the player visibility projection", () => {
@@ -617,6 +661,32 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     const farmCostAfter = getEffectiveBuildingCost(state, "blue", "farm");
     expect(farmCostAfter.wood ?? 0).toBeLessThan(farmCostBefore.wood ?? 0);
     expect(state.tribes.blue.happiness).toBeLessThan(happinessBeforeForcedLabor);
+  });
+
+  it("makes generated roadmap developments mechanically active", () => {
+    const state = createGame(2026070603);
+    state.tribes.blue.resources = { gold: 5000, food: 5000, wood: 5000, stone: 5000, clay: 5000, limestone: 5000, iron: 5000, coal: 5000 };
+
+    expect(issueSovereignOrder(state, "blue", { type: "DEVELOP", priority: 1, developmentId: "taxation", reason: "Open tax institutions." }).ok).toBe(true);
+    expect(issueSovereignOrder(state, "blue", { type: "DEVELOP", priority: 1, developmentId: "sw_042_fixed_taxation", reason: "Adopt fixed taxation." }).ok).toBe(true);
+    const goldBeforeYear = state.tribes.blue.resources.gold;
+    advanceGameTicks(state, TICKS_PER_GAME_YEAR);
+    expect(state.tribes.blue.resources.gold).toBeGreaterThan(goldBeforeYear);
+
+    for (const developmentId of ["masonry", "ironworking", "ballistics", "military_architecture", "sw_127_fortress_walls"] as const) {
+      const result = issueSovereignOrder(state, "blue", { type: "DEVELOP", priority: 1, developmentId, reason: `Adopt ${developmentId}.` });
+      expect(result.ok).toBe(true);
+    }
+    const built = buildStructure(state, "blue", "wall", getTownHall(state, "blue"));
+    expect(built.ok).toBe(true);
+    if (!built.ok) throw new Error("Expected generated fortress-wall development to allow wall construction");
+    expect(state.buildings[built.buildingId].maxHp).toBeGreaterThan(getBuildingTypeCombatStats("wall").maxHp + 100);
+
+    const safetyBefore = getVictoryPressure(state).scoreByTribe.find((entry) => entry.tribeId === "blue")?.safety ?? 0;
+    expect(issueSovereignOrder(state, "blue", { type: "DEVELOP", priority: 1, developmentId: "council_governance", reason: "Open civic institutions." }).ok).toBe(true);
+    expect(issueSovereignOrder(state, "blue", { type: "DEVELOP", priority: 1, developmentId: "sw_123_code_of_criminal_law", reason: "Codify criminal law." }).ok).toBe(true);
+    const safetyAfter = getVictoryPressure(state).scoreByTribe.find((entry) => entry.tribeId === "blue")?.safety ?? 0;
+    expect(safetyAfter).toBeGreaterThanOrEqual(safetyBefore);
   });
 
   it("rejects repair orders for missing, foreign, destroyed, and full-health buildings", () => {

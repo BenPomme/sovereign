@@ -8,10 +8,10 @@ const url = process.env.SOVEREIGNS_URL ?? "http://localhost:5173/";
 const screenshotPath =
   process.env.SOVEREIGNS_LIVE_AI_SCREENSHOT ??
   "/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-live-ai-iteration.png";
-const startupTimeoutMs = numberEnv("SOVEREIGNS_LIVE_AI_STARTUP_TIMEOUT_MS", 600_000);
+const startupTimeoutMs = numberEnv("SOVEREIGNS_LIVE_AI_STARTUP_TIMEOUT_MS", 900_000);
 const sampleMs = numberEnv("SOVEREIGNS_LIVE_AI_SAMPLE_MS", 30_000);
 const postFixSampleMs = numberEnv("SOVEREIGNS_LIVE_AI_POST_FIX_SAMPLE_MS", 180_000);
-const postFixDrainMs = numberEnv("SOVEREIGNS_LIVE_AI_POST_FIX_DRAIN_MS", 120_000);
+const postFixDrainMs = numberEnv("SOVEREIGNS_LIVE_AI_POST_FIX_DRAIN_MS", 300_000);
 const postFixMinStrategyTurnsPerFixedTribe = numberEnv("SOVEREIGNS_LIVE_AI_POST_FIX_MIN_STRATEGY_TURNS", 1);
 const minStrategyTurnsPerTribe = numberEnv("SOVEREIGNS_LIVE_AI_MIN_STRATEGY_TURNS", 1);
 const forceLiveIssue = booleanEnv("SOVEREIGNS_FORCE_LIVE_AI_ISSUE", true);
@@ -67,42 +67,7 @@ if (!followupHold.ok || followupHold.enabled !== true) {
   throw new Error(`Could not enable live monitor follow-up strategy hold: ${JSON.stringify(followupHold)}`);
 }
 
-const startupHandle = await page.waitForFunction(
-  (tribeIds) => {
-    let parsed = JSON.parse(window.render_game_to_text());
-    const firstDoctrineTribes = [];
-    for (const decision of parsed.latestAiDecisions ?? []) {
-      if (!tribeIds.includes(decision.tribeId) || firstDoctrineTribes.includes(decision.tribeId)) continue;
-      if ((decision.accepted ?? []).some((entry) => String(entry).startsWith("IDENTITY:"))) continue;
-      if ((decision.accepted ?? []).some((entry) => String(entry).startsWith("REPLY:"))) continue;
-      firstDoctrineTribes.push(decision.tribeId);
-    }
-    if (
-      parsed.llm?.identityProgress?.chosen >= tribeIds.length &&
-      parsed.llm?.firstDoctrineProgress?.written >= tribeIds.length &&
-      tribeIds.every((tribeId) => firstDoctrineTribes.includes(tribeId))
-    ) {
-      return parsed;
-    }
-    window.advanceTime?.(1000);
-    parsed = JSON.parse(window.render_game_to_text());
-    const updatedFirstDoctrineTribes = [];
-    for (const decision of parsed.latestAiDecisions ?? []) {
-      if (!tribeIds.includes(decision.tribeId) || updatedFirstDoctrineTribes.includes(decision.tribeId)) continue;
-      if ((decision.accepted ?? []).some((entry) => String(entry).startsWith("IDENTITY:"))) continue;
-      if ((decision.accepted ?? []).some((entry) => String(entry).startsWith("REPLY:"))) continue;
-      updatedFirstDoctrineTribes.push(decision.tribeId);
-    }
-    return parsed.llm?.identityProgress?.chosen >= tribeIds.length &&
-      parsed.llm?.firstDoctrineProgress?.written >= tribeIds.length &&
-      tribeIds.every((tribeId) => updatedFirstDoctrineTribes.includes(tribeId))
-      ? parsed
-      : null;
-  },
-  requiredTribes,
-  { timeout: startupTimeoutMs, polling: 1000 }
-);
-const startupState = summarizeLiveAiState(await startupHandle.jsonValue(), requiredTribes);
+const startupState = summarizeLiveAiState(await waitForLiveAiStartupState(page, requiredTribes, startupTimeoutMs), requiredTribes);
 
 let liveAuthoredBugReportResult = null;
 let liveAuthoredBugReportState = null;
@@ -165,7 +130,7 @@ if (!followupRelease.ok || followupRelease.enabled !== false) {
 const sampleStartedAt = Date.now();
 let sampledState = startupState;
 while (Date.now() - sampleStartedAt < sampleMs) {
-  await page.waitForTimeout(1000);
+  await sleep(1000);
   const parsed = await page.evaluate(() => {
     window.advanceTime?.(1000);
     return JSON.parse(window.render_game_to_text());
@@ -433,6 +398,41 @@ function summarizeLiveAiState(parsed, tribeIds) {
   };
 }
 
+async function waitForLiveAiStartupState(page, tribeIds, timeoutMs) {
+  const maxAttempts = Math.max(1, Math.ceil(timeoutMs / 1000));
+  let latest = null;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    latest = await page.evaluate((requiredCount) => {
+      const first = JSON.parse(window.render_game_to_text());
+      if (
+        first.llm?.identityProgress?.chosen >= requiredCount &&
+        first.llm?.firstDoctrineProgress?.written >= requiredCount
+      ) {
+        return first;
+      }
+      window.advanceTime?.(1000);
+      return JSON.parse(window.render_game_to_text());
+    }, tribeIds.length);
+    if (isLiveAiStartupComplete(latest, tribeIds)) return latest;
+    await sleep(1000);
+  }
+  throw new Error(
+    `Timed out waiting for live AI startup after ${maxAttempts} polling attempts for ${timeoutMs}ms timeout: ${JSON.stringify(
+      summarizeLiveAiState(latest ?? {}, tribeIds),
+      null,
+      2
+    )}`
+  );
+}
+
+function isLiveAiStartupComplete(parsed, tribeIds) {
+  return (
+    parsed?.llm?.identityProgress?.chosen >= tribeIds.length &&
+    parsed?.llm?.firstDoctrineProgress?.written >= tribeIds.length &&
+    tribeIds.every((tribeId) => firstDoctrineDecisions(parsed.latestAiDecisions ?? [], tribeIds).some((decision) => decision.tribeId === tribeId))
+  );
+}
+
 function firstDoctrineDecisions(decisions, tribeIds) {
   const byTribe = new Map();
   for (const decision of decisions) {
@@ -569,7 +569,7 @@ async function samplePostFixStrategyConsumption(page, results, assignments) {
   let finalState = summarizeLiveAiState(baselineParsed, requiredTribes);
   const startedAt = Date.now();
   while (Date.now() - startedAt < postFixSampleMs) {
-    await page.waitForTimeout(1000);
+    await sleep(1000);
     const parsed = await page.evaluate(() => {
       window.advanceTime?.(1000);
       const stateBeforeAsk = JSON.parse(window.render_game_to_text());
@@ -587,7 +587,7 @@ async function samplePostFixStrategyConsumption(page, results, assignments) {
   let summary = summarizePostFixStrategy(finalState, issues, assignments, baselineTick, targetTribes);
   const drainStartedAt = Date.now();
   while (!postFixTargetsSatisfied(summary) && Date.now() - drainStartedAt < postFixDrainMs && shouldContinuePostFixDrain(summary)) {
-    await page.waitForTimeout(1000);
+    await sleep(1000);
     const parsed = await page.evaluate(() => {
       window.advanceTime?.(1000);
       const stateBeforeAsk = JSON.parse(window.render_game_to_text());
@@ -1276,14 +1276,13 @@ async function markLiveIssueFixed(page, issue, summary, evidence) {
 }
 
 async function waitForIdleLlmLane(page) {
-  await page.waitForFunction(
-    () => {
-      const parsed = JSON.parse(window.render_game_to_text());
-      return (parsed.llm?.activeJobCount ?? 0) === 0;
-    },
-    null,
-    { timeout: 90_000, polling: 1000 }
-  );
+  let latest = null;
+  for (let attempt = 0; attempt < 90; attempt += 1) {
+    latest = await page.evaluate(() => JSON.parse(window.render_game_to_text()));
+    if ((latest.llm?.activeJobCount ?? 0) === 0) return;
+    await sleep(1000);
+  }
+  throw new Error(`Timed out waiting for idle LLM lane: ${JSON.stringify(latest?.llm ?? null)}`);
 }
 
 async function runLiveAuthoredBugReportWithIdleRetry(page, targetTribeId) {
@@ -1297,7 +1296,7 @@ async function runLiveAuthoredBugReportWithIdleRetry(page, targetTribeId) {
       return await window.force_live_authored_bug_report_for_test(targetTribeId);
     }, { targetTribeId });
     if (latestResult?.ok || !String(latestResult?.reason ?? "").includes("model lane is already busy")) return latestResult;
-    await page.waitForTimeout(1500);
+    await sleep(1500);
   }
   return latestResult;
 }
@@ -1324,4 +1323,8 @@ function booleanEnv(name, fallback) {
   const value = String(process.env[name] ?? "").trim().toLowerCase();
   if (!value) return fallback;
   return value === "1" || value === "true" || value === "yes" || value === "on";
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

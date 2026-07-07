@@ -161,7 +161,7 @@ const decisionSchema = {
           gateAccessPolicy: { type: "string", enum: ["all", "owner_allies", "owner_only"] },
           targetX: { type: "integer" },
           targetY: { type: "integer" },
-          developmentId: { type: "string", enum: developmentIds },
+          developmentId: { type: "string" },
           messageType: { type: "string", enum: ["LETTER", "REPLY", "TREATY_PROPOSAL", "THREAT", "DEMAND"] },
           diplomacyIntent: {
             type: "string",
@@ -1034,7 +1034,7 @@ Identity: sovereign ${tribe.sovereignName}; naming style ${tribe.namingStyle}; i
 Strategy rule: write freeformStrategy first as your independent doctrine in your own words, in 2-3 concise sentences. This strategy is not limited to the legal order list. You may request information, propose joint strategies, invent money-making schemes, lie, bluff, betray, attack, scout as spies, or prepare war. Then translate only the immediate executable part into up to two legal orders.
 Memory rule: use Sovereign memory as your private continuity. Keep grudges, promises, lies, alliance intentions, war plans, suspicions, and economic schemes consistent unless you deliberately change course. Set memoryNote to one concise private note worth remembering after this turn, or an empty string if nothing changed.
 Diplomatic intelligence rule: use the ledger to track who promised, threatened, asked, demanded, offered, refused, or claimed what. Foreign claims are not facts; they may be honest, mistaken, or deliberate lies.
-	Execution rule: Order availability below is authoritative. If an order or subtype says unavailable, do not output that order this turn. Mention the desire in freeformStrategy or SET_POLICY instead, ask for information, or choose any available prerequisite if it fits your doctrine.
+	Execution rule: Order availability below is authoritative. If an order or subtype says unavailable, do not output that order this turn. Mention the desire in freeformStrategy or SET_POLICY instead, ask for information, or choose any currently available development if it fits your doctrine.
 	Scout rule: only output SCOUT when Order availability says SCOUT available. If SCOUT is unavailable but scouting matters, recruit a sentinel first when available, or record the scouting intent as SET_POLICY/REQUEST_INFO.
 Diplomacy priority: physical messenger diplomacy is a core instrument of rule. Only include SEND_MESSENGER if Idle messenger available is yes.
 Message rule: write real first-person diplomatic messages. You may ask questions, negotiate joint plans, threaten, mislead, conceal intent, or set traps. Do not use empty placeholders. The recipient AI will read the delivered text and reply.
@@ -1043,7 +1043,7 @@ Alliance rule: alliances are formed only through chat. Send a SEND_MESSENGER ord
 War rule: ATTACK with recipientTribeId declares war, breaks any alliance with that target, and sends available military units. To intentionally breach a visible wall, gate, turret, or building, include its exact targetBuildingId from Visible foreign buildings or targetBuildingId options; breach estimates are approximate. To raid or deny a visible resource deposit, include targetX, targetY, and targetResourceType from Visible resource raid targets; recipientTribeId is optional unless you mean to declare war over that raid. Use attacks when your doctrine calls for betrayal, preemption, conquest, retaliation, opening a blocked route, or denying coal/iron/gold/stone logistics.
 Defense rule: walls block movement for everyone until destroyed, including your own people. Gates are the only intended passage through walls: open gates follow an access policy of all, owner_allies, or owner_only; closed or locked gates block everyone. Turrets shoot hostile units near your kingdom. Use them when they fit your doctrine and resources.
 Repair rule: damaged owned buildings can be repaired by idle peons. Use REPAIR with targetBuildingId or buildingId from Own buildings when a wall, gate, turret, or other structure is damaged and keeping it alive matters.
-Development rule: DEVELOP changes what your society can do. Masonry, Brick Kilns, Ironworking, Ballistics, Military Architecture, Public Works, Siege Engineering, Road Engineering, Gate Machinery, Taxation, Council Governance, Free Press, Propaganda, Forced Labor, Abolition, and Espionage are strategic tools with costs, prerequisites, benefits, and trade-offs. You may pick, delay, reject, or combine development paths for your own doctrine; there is no fixed build order.
+Development rule: DEVELOP changes what your society can do. The full tree spans civic, economic, military, social, information, labor, law, diplomacy, infrastructure, and long-horizon institutions. Use only currently available developmentId values from Order availability; each option exposes costs, prerequisites, benefits, and trade-offs. You may pick, delay, reject, or combine development paths for your own doctrine; there is no fixed build order.
 Survival pressure: exact rival wealth is hidden. You may ask another sovereign how wealthy or safe they are, but they may answer truthfully, refuse, exaggerate, or lie. Use scouting, messenger questions, trade offers, threats, raids, alliances, and deception to infer who may be vulnerable before each century review. Never treat review elimination as an acceptable loss for your own people.
 Information rule: use REQUEST_INFO when you need strategic information, map intelligence, economic data, enemy intent, or world-state context that is not currently visible. This is a request for future intelligence, not a bug.
 Bug reporting: if you notice impossible world state, invalid feedback, missing information that should already be available, or broken world behavior, either spend a legal REPORT_BUG order with subject/body/reason or set bugReport to a concise bug. REPORT_BUG is best when the issue blocks your strategy or should be investigated outside your world. For REPORT_BUG, also fill suspectedArea, expectedBehavior, actualBehavior, reproductionSteps, strategyImpact, and bugSeverity when you can. Do not report ordinary lack of resources, population cap, busy messengers, no idle sentinel, unavailable orders, or normal uncertainty as bugs. Otherwise set bugReport to an empty string.
@@ -1084,7 +1084,7 @@ Legal order types:
 - RECRUIT with unitType peon, militia, archer, siege_engine, messenger, or sentinel
 - BUILD with buildingType farm, watchtower, wall, gate, or turret. You may include targetX and targetY map coordinates; use them for deliberate wall/gate/turret placement.
 - SET_GATE with gateState open, closed, or locked, optional buildingId for a specific owned gate, and optional gateAccessPolicy all, owner_allies, or owner_only.
-- DEVELOP with developmentId ${developmentIds.join(", ")}
+- DEVELOP with a developmentId from the currently available Development options in Order availability
 - SCOUT
 - DEFEND
 - ATTACK with optional recipientTribeId, optional targetBuildingId for a visible hostile wall/gate/turret/building, or targetX, targetY, and targetResourceType for a visible resource deposit raid
@@ -1135,14 +1135,14 @@ Wealth ${computeWealth(state, tribeId)}; happiness ${Math.round(tribe.happiness)
 	${integrityNotice ? "Integrity response rule: your first order must be REPORT_BUG with structured subject, body, suspectedArea, expectedBehavior, actualBehavior, reproductionSteps, strategyImpact, bugSeverity, and reason. Do not choose ordinary strategy orders until this contradiction is reported." : ""}
 		Available orders: ${summarizeOrderAvailability(state, tribeId, ownUnits, idleMessenger)}
 		Visible resource raid targets: ${summarizeVisibleResourceTargets(state, tribeId)}
-	Do not output unavailable orders. If SCOUT is unavailable, choose RECRUIT sentinel when available or explain the scouting plan through SET_POLICY/REQUEST_INFO. If a BUILD is locked, choose an available DEVELOP prerequisite first.
+	Do not output unavailable orders. If SCOUT is unavailable, choose RECRUIT sentinel when available or explain the scouting plan through SET_POLICY/REQUEST_INFO. If a BUILD is locked, discuss the intent or independently choose a currently available development only if it fits your doctrine.
 	Recent diplomacy: ${summarizeDiplomacy(state, tribeId, sinceTick) || "none"}
 
 Return fields:
 - freeformStrategy: 1-2 sentences of independent doctrine. You are not limited to algorithmic choices.
 - strategySummary: one short sentence.
 - memoryNote: one private note or empty string.
-- orders: up to two legal immediate orders. Use SET_POLICY if unsure. Use DEVELOP with developmentId for prerequisite choices. Use BUILD with buildingType and optional targetX/targetY for chosen placement. Use SET_GATE with gateState open/closed/locked and gateAccessPolicy all/owner_allies/owner_only for owned gates. Use ATTACK with targetBuildingId when breaching a visible wall/gate/building is the immediate executable step, or targetX/targetY/targetResourceType for a visible deposit raid. Use REPAIR with targetBuildingId or buildingId when a damaged owned building must be saved. For SEND_MESSENGER, write a real first-person message.
+- orders: up to two legal immediate orders. Use SET_POLICY if unsure. Use DEVELOP with developmentId for institution choices. Use BUILD with buildingType and optional targetX/targetY for chosen placement. Use SET_GATE with gateState open/closed/locked and gateAccessPolicy all/owner_allies/owner_only for owned gates. Use ATTACK with targetBuildingId when breaching a visible wall/gate/building is the immediate executable step, or targetX/targetY/targetResourceType for a visible deposit raid. Use REPAIR with targetBuildingId or buildingId when a damaged owned building must be saved. For SEND_MESSENGER, write a real first-person message.
 - unitNames: optional own unit renames, can be empty.
 - bugReport: empty unless world behavior is impossible or broken. If using a REPORT_BUG order, include subject, body, suspectedArea, expectedBehavior, actualBehavior, reproductionSteps, strategyImpact, and bugSeverity.
 - bugSeverity: low, medium, or high.
@@ -1605,14 +1605,7 @@ function summarizeOrderAvailability(
     : canTrainSentinel
       ? "SCOUT unavailable: no idle sentinel; do not output SCOUT; if scouting matters output RECRUIT sentinel first"
       : "SCOUT unavailable: no idle sentinel and sentinel recruitment unavailable; do not output SCOUT; use SET_POLICY or REQUEST_INFO for scouting intent";
-  const developmentAvailability = developmentIds
-    .map((developmentId) => {
-      const development = getDevelopment(developmentId);
-      if (tribe.developments.includes(developmentId)) return `DEVELOP ${developmentId} already unlocked (${development.name})`;
-      const check = canChooseDevelopment(state, tribeId, developmentId);
-      return `DEVELOP ${developmentId} ${check.ok ? `available: ${development.name}, unlocks ${development.unlocks.join("/")}` : `unavailable: ${check.reason}`}`;
-    })
-    .join("; ");
+  const developmentAvailability = summarizeDevelopmentOptions(state, tribeId);
   return [
     `SEND_MESSENGER ${idleMessenger ? "available" : "unavailable"}`,
     scoutAvailability,
@@ -1660,6 +1653,47 @@ function buildingAttackPriority(type: Building["type"]): number {
   return 1;
 }
 
+function summarizeDevelopmentOptions(state: GameState, tribeId: TribeId): string {
+  const tribe = state.tribes[tribeId];
+  const unlocked = tribe.developments.flatMap((id) => (developmentCatalog[id] ? [developmentCatalog[id]] : []));
+  const available = developmentIds
+    .filter((developmentId) => !tribe.developments.includes(developmentId) && canChooseDevelopment(state, tribeId, developmentId).ok)
+    .map((developmentId) => getDevelopment(developmentId));
+  const lockedCount = developmentIds.length - unlocked.length - available.length;
+  const availableByCategory = summarizeDevelopmentCategoryCounts(available);
+  const availableDetails = available
+    .slice(0, 28)
+    .map(
+      (development) =>
+        `${development.id}:${development.name}:category ${development.category ?? "uncategorized"}:cost ${formatCost(development.cost)}:effects ${formatDevelopmentEffects(development)}`
+    )
+    .join(" | ");
+  const omitted = available.length > 28 ? `; omitted available ${available.length - 28}` : "";
+  const recentUnlocked = unlocked
+    .slice(-12)
+    .map((development) => `${development.id}:${development.name}`)
+    .join(" | ");
+  return `DEVELOP tree total ${developmentIds.length}; unlocked ${unlocked.length}${recentUnlocked ? ` recent ${recentUnlocked}` : ""}; available ${available.length} by category ${availableByCategory}; available options ${availableDetails || "none"}${omitted}; locked ${lockedCount}`;
+}
+
+function summarizeDevelopmentCategoryCounts(developments: ReturnType<typeof getDevelopment>[]): string {
+  const counts = new Map<string, number>();
+  for (const development of developments) {
+    const category = development.category ?? "uncategorized";
+    counts.set(category, (counts.get(category) ?? 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .map(([category, count]) => `${category}:${count}`)
+    .join("/") || "none";
+}
+
+function formatDevelopmentEffects(development: ReturnType<typeof getDevelopment>): string {
+  return development.effects
+    .slice(0, 3)
+    .map((effect) => `${effect.kind}${effect.target ? `:${effect.target}` : ""}${effect.amount > 0 ? "+" : ""}${effect.amount}`)
+    .join("/");
+}
+
 function formatSiegeTargetOption(state: GameState, tribeId: TribeId, building: Building): string {
   const breachTicks = estimateBreachTicks(state, tribeId, building.id);
   const breachEstimate = breachTicks === undefined ? "breach unknown" : `breach estimate ${breachTicks} ticks`;
@@ -1702,12 +1736,19 @@ function formatCost(cost: ResourceCost): string {
 
 function summarizeDevelopmentState(state: GameState, tribeId: TribeId): string {
   const tribe = state.tribes[tribeId];
-  const unlocked = tribe.developments.map((id) => developmentCatalog[id].name).join(", ") || "none yet";
+  const unlockedDevelopments = tribe.developments.flatMap((id) => (developmentCatalog[id] ? [developmentCatalog[id]] : []));
+  const unlocked = unlockedDevelopments
+    .slice(-12)
+    .map((development) => development.name)
+    .join(", ") || "none yet";
   const available = developmentIds
     .filter((id) => !tribe.developments.includes(id) && canChooseDevelopment(state, tribeId, id).ok)
+    .slice(0, 24)
     .map((id) => `${id} (${developmentCatalog[id].name})`)
     .join(", ");
-  return `unlocked: ${unlocked}; available to choose now: ${available || "none"}`;
+  const availableCount = developmentIds.filter((id) => !tribe.developments.includes(id) && canChooseDevelopment(state, tribeId, id).ok).length;
+  const omitted = availableCount > 24 ? `; omitted available ${availableCount - 24}` : "";
+  return `tree total ${developmentIds.length}; unlocked ${unlockedDevelopments.length}: ${unlocked}; available to choose now ${availableCount}: ${available || "none"}${omitted}`;
 }
 
 function normalizeOrder(raw: RawOrder, state: GameState, self: TribeId): AiStrategicOrder {
@@ -1791,16 +1832,6 @@ function normalizeOrder(raw: RawOrder, state: GameState, self: TribeId): AiStrat
     }
     const check = canChooseDevelopment(state, self, normalized.developmentId);
     if (!check.ok) {
-      const development = getDevelopment(normalized.developmentId);
-      const prereq = development.prerequisites.find((id) => canChooseDevelopment(state, self, id).ok);
-      if (prereq) {
-        return {
-          type: "DEVELOP",
-          priority: normalized.priority,
-          developmentId: prereq,
-          reason: cleanText(`${normalized.reason} ${development.name} is not ready; choose prerequisite ${getDevelopment(prereq).name} first.`, 180)
-        };
-      }
       return {
         type: "SET_POLICY",
         priority: normalized.priority,
@@ -1812,16 +1843,6 @@ function normalizeOrder(raw: RawOrder, state: GameState, self: TribeId): AiStrat
     const buildingType = normalized.buildingType ?? "farm";
     const missing = getMissingBuildingDevelopments(state, self, buildingType);
     if (missing.length > 0) {
-      const nextDevelopment = missing.find((developmentId) => canChooseDevelopment(state, self, developmentId).ok);
-      if (nextDevelopment) {
-        const development = getDevelopment(nextDevelopment);
-        return {
-          type: "DEVELOP",
-          priority: normalized.priority,
-          developmentId: nextDevelopment,
-          reason: cleanText(`${normalized.reason} ${buildingType} requires ${development.name}; choose that development first.`, 180)
-        };
-      }
       return {
         type: "SET_POLICY",
         priority: normalized.priority,
@@ -1847,15 +1868,6 @@ function executableOrderFromPolicyIntent(order: AiStrategicOrder, state: GameSta
   const buildingType = inferPolicyBuildingIntent(text);
   if (!buildingType) return undefined;
   const missing = getMissingBuildingDevelopments(state, self, buildingType);
-  const nextDevelopment = missing.find((candidate) => canChooseDevelopment(state, self, candidate).ok);
-  if (nextDevelopment) {
-    return {
-      type: "DEVELOP",
-      priority: order.priority,
-      developmentId: nextDevelopment,
-      reason: cleanText(`Converted ${buildingType} policy into prerequisite development: ${order.reason}`, 180)
-    };
-  }
   if (missing.length > 0 || !canAfford(state.tribes[self].resources, getEffectiveBuildingCost(state, self, buildingType))) return undefined;
   const target = normalizeBuildTarget(order.targetX, order.targetY);
   return {
@@ -1868,23 +1880,56 @@ function executableOrderFromPolicyIntent(order: AiStrategicOrder, state: GameSta
 }
 
 function inferPolicyDevelopmentIntent(text: string): DevelopmentId | undefined {
-  if (/\b(masonry|mason|mortar)\b/.test(text)) return "masonry";
-  if (/\b(brick\s*kilns?|kilns?|brickwork|bricks?)\b/.test(text)) return "brick_kilns";
-  if (/\b(ironworking|iron\s*working|ironwork|bloomery)\b/.test(text)) return "ironworking";
-  if (/\b(ballistics?|projectile\s+engineering)\b/.test(text)) return "ballistics";
-  if (/\b(military\s+architecture|fortification\s+layout|kill\s+zones?)\b/.test(text)) return "military_architecture";
-  if (/\b(public\s+works|road\s+works|civic\s+construction)\b/.test(text)) return "public_works";
-  if (/\b(siege\s+engineering|siege\s+engines?|breaching\s+gear|rams?|mantlets?)\b/.test(text)) return "siege_engineering";
-  if (/\b(road\s+engineering|roads?|supply\s+lanes?|bridges?)\b/.test(text)) return "road_engineering";
-  if (/\b(gate\s+machinery|gate\s+controls?|counterweights?)\b/.test(text)) return "gate_machinery";
-  if (/\b(taxation|taxes|tribute)\b/.test(text)) return "taxation";
-  if (/\b(council\s+governance|councils?|representative\s+council)\b/.test(text)) return "council_governance";
-  if (/\b(free\s+press|independent\s+press|public\s+debate)\b/.test(text)) return "free_press";
-  if (/\b(propaganda|centralized\s+narrative|public\s+narratives?)\b/.test(text)) return "propaganda";
-  if (/\b(forced\s+labor|coerced\s+labor|labour\s+levy|labor\s+levy)\b/.test(text)) return "forced_labor";
-  if (/\b(abolition|abolish|wage\s+labor|citizenship)\b/.test(text)) return "abolition";
-  if (/\b(espionage|spies|spy\s+network|informants?|coded\s+letters?)\b/.test(text)) return "espionage";
-  return undefined;
+  const normalized = normalizeSearchText(text);
+  if (!normalized) return undefined;
+  const paddedText = ` ${normalized} `;
+  let best: { id: DevelopmentId; score: number } | undefined;
+  let tie = false;
+
+  for (const developmentId of developmentIds) {
+    const development = developmentCatalog[developmentId];
+    if (!development) continue;
+    const name = normalizeSearchText(development.name);
+    const idLabel = normalizeSearchText(developmentId);
+    const nameTokens = meaningfulSearchTokens(development.name);
+    const idTokens = meaningfulSearchTokens(developmentId);
+    let score = 0;
+
+    if (hasSearchPhrase(paddedText, idLabel)) score = Math.max(score, 120 + idTokens.length);
+    if (hasSearchPhrase(paddedText, name)) score = Math.max(score, 100 + nameTokens.length);
+    if (nameTokens.length >= 2 && nameTokens.every((token) => paddedText.includes(` ${token} `))) score = Math.max(score, 70 + nameTokens.length);
+    if (idTokens.length >= 2 && idTokens.every((token) => paddedText.includes(` ${token} `))) score = Math.max(score, 60 + idTokens.length);
+    if (nameTokens.length === 1 && nameTokens[0].length >= 6 && paddedText.includes(` ${nameTokens[0]} `)) score = Math.max(score, 50);
+
+    if (score <= 0) continue;
+    if (!best || score > best.score) {
+      best = { id: developmentId, score };
+      tie = false;
+    } else if (score === best.score) {
+      tie = true;
+    }
+  }
+
+  return best && best.score >= 50 && !tie ? best.id : undefined;
+}
+
+function normalizeSearchText(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function hasSearchPhrase(paddedText: string, phrase: string): boolean {
+  return phrase.length > 0 && paddedText.includes(` ${phrase} `);
+}
+
+function meaningfulSearchTokens(text: string): string[] {
+  const stopwords = new Set(["a", "an", "and", "by", "for", "from", "in", "into", "of", "on", "or", "sw", "the", "to", "with"]);
+  return normalizeSearchText(text)
+    .split(" ")
+    .filter((token) => token.length > 2 && !/^\d+$/.test(token) && !stopwords.has(token));
 }
 
 function inferPolicyBuildingIntent(text: string): BuildableBuildingType | undefined {

@@ -20,23 +20,44 @@ export type GateState = "open" | "closed" | "locked";
 export type GateAccessPolicy = "all" | "owner_allies" | "owner_only";
 export type BuildingType = "townHall" | "farm" | "barracks" | "market" | "watchtower" | "wall" | "gate" | "turret";
 export type BuildableBuildingType = "farm" | "watchtower" | "wall" | "gate" | "turret";
-export type DevelopmentId =
-  | "masonry"
-  | "brick_kilns"
-  | "ironworking"
-  | "ballistics"
-  | "military_architecture"
-  | "public_works"
-  | "siege_engineering"
-  | "road_engineering"
-  | "gate_machinery"
-  | "taxation"
-  | "council_governance"
-  | "free_press"
-  | "propaganda"
-  | "forced_labor"
-  | "abolition"
-  | "espionage";
+export type DevelopmentId = string;
+export type DevelopmentCategory =
+  | "foundational"
+  | "governance"
+  | "economy"
+  | "labor"
+  | "social"
+  | "information"
+  | "law"
+  | "security"
+  | "military"
+  | "diplomacy"
+  | "infrastructure"
+  | "long_horizon";
+export type DevelopmentEffectKind =
+  | "instant_happiness"
+  | "yearly_happiness"
+  | "yearly_gold_per_population"
+  | "safety"
+  | "construction_cost_multiplier"
+  | "repair_cost_multiplier"
+  | "repair_speed"
+  | "unit_speed"
+  | "unit_armor"
+  | "unit_attack"
+  | "unit_vision"
+  | "building_max_hp"
+  | "building_armor"
+  | "building_attack"
+  | "building_range"
+  | "resource_control"
+  | "wealth";
+export type DevelopmentEffect = {
+  kind: DevelopmentEffectKind;
+  amount: number;
+  target?: string;
+  description: string;
+};
 export type MessageType = "LETTER" | "REPLY" | "TREATY_PROPOSAL" | "THREAT" | "DEMAND";
 export type DiplomacyIntent =
   | "NONE"
@@ -149,6 +170,9 @@ export type Development = {
   cost: ResourceCost;
   prerequisites: DevelopmentId[];
   unlocks: string[];
+  category?: DevelopmentCategory;
+  phase?: string;
+  effects: DevelopmentEffect[];
 };
 export type ControllerType = "human" | "scripted" | "llm";
 export type AiOrderType =
@@ -597,11 +621,7 @@ const REPAIR_RANGE = 1.2;
 const REPAIR_HP_PER_TICK = 5;
 
 function repairHpPerTick(state: GameState, tribeId: TribeId): number {
-  let amount = REPAIR_HP_PER_TICK;
-  if (hasDevelopment(state, tribeId, "public_works")) amount += 2;
-  if (hasDevelopment(state, tribeId, "road_engineering")) amount += 1;
-  if (hasActiveForcedLabor(state, tribeId)) amount += 2;
-  return amount;
+  return Math.max(1, REPAIR_HP_PER_TICK + developmentEffectAmount(state, tribeId, "repair_speed"));
 }
 
 export const resourceTypes: readonly ResourceType[] = ["gold", "food", "wood", "stone", "clay", "limestone", "iron", "coal"] as const;
@@ -618,7 +638,7 @@ const unitDevelopmentRequirements: Record<(typeof trainableUnitTypes)[number], D
   archer: [],
   siege_engine: ["siege_engineering"]
 };
-export const developmentIds: readonly DevelopmentId[] = [
+const coreDevelopmentIds: readonly DevelopmentId[] = [
   "masonry",
   "brick_kilns",
   "ironworking",
@@ -637,14 +657,17 @@ export const developmentIds: readonly DevelopmentId[] = [
   "espionage"
 ] as const;
 
-export const developmentCatalog: Record<DevelopmentId, Development> = {
+const coreDevelopmentCatalog: Record<DevelopmentId, Development> = {
   masonry: {
     id: "masonry",
     name: "Masonry",
     description: "Stone setting, mortar work, and defensive wall foundations.",
     cost: { stone: 35, clay: 20, limestone: 20, gold: 20 },
     prerequisites: [],
-    unlocks: ["wall construction", "gate foundations"]
+    unlocks: ["wall construction", "gate foundations"],
+    category: "infrastructure",
+    phase: "core",
+    effects: [{ kind: "building_max_hp", amount: 20, target: "fortification", description: "Fortification foundations gain baseline durability." }]
   },
   brick_kilns: {
     id: "brick_kilns",
@@ -652,7 +675,15 @@ export const developmentCatalog: Record<DevelopmentId, Development> = {
     description: "Clay firing and standardized bricks for stronger settlement logistics.",
     cost: { wood: 45, clay: 45, limestone: 15, gold: 25 },
     prerequisites: ["masonry"],
-    unlocks: ["stronger wall and gate bodies", "granaries", "archives"]
+    unlocks: ["stronger wall and gate bodies", "granaries", "archives"],
+    category: "infrastructure",
+    phase: "core",
+    effects: [
+      { kind: "building_max_hp", amount: 60, target: "wall", description: "Walls gain fired-brick durability." },
+      { kind: "building_max_hp", amount: 60, target: "gate", description: "Gates gain fired-brick durability." },
+      { kind: "building_armor", amount: 1, target: "wall", description: "Walls gain brick armor." },
+      { kind: "building_armor", amount: 1, target: "gate", description: "Gates gain brick armor." }
+    ]
   },
   ironworking: {
     id: "ironworking",
@@ -660,7 +691,13 @@ export const developmentCatalog: Record<DevelopmentId, Development> = {
     description: "Bloomery iron tools, fittings, and weapon-ready metal supply chains.",
     cost: { wood: 40, iron: 25, coal: 15, gold: 35 },
     prerequisites: [],
-    unlocks: ["turret components", "gate hinges and locks", "siege metalwork"]
+    unlocks: ["turret components", "gate hinges and locks", "siege metalwork"],
+    category: "economy",
+    phase: "core",
+    effects: [
+      { kind: "unit_attack", amount: 1, target: "military", description: "Iron fittings improve military striking power." },
+      { kind: "wealth", amount: 4, description: "Iron tools increase productive capacity." }
+    ]
   },
   ballistics: {
     id: "ballistics",
@@ -668,7 +705,13 @@ export const developmentCatalog: Record<DevelopmentId, Development> = {
     description: "Projectile engineering for fixed defensive engines.",
     cost: { wood: 60, stone: 40, iron: 25, gold: 45 },
     prerequisites: ["ironworking"],
-    unlocks: ["turret construction"]
+    unlocks: ["turret construction"],
+    category: "military",
+    phase: "core",
+    effects: [
+      { kind: "building_attack", amount: 2, target: "turret", description: "Turrets hit harder." },
+      { kind: "building_range", amount: 1, target: "turret", description: "Turrets reach farther." }
+    ]
   },
   military_architecture: {
     id: "military_architecture",
@@ -676,7 +719,22 @@ export const developmentCatalog: Record<DevelopmentId, Development> = {
     description: "Purpose-built fortification layouts, kill zones, and protected logistics.",
     cost: { stone: 70, clay: 35, limestone: 45, iron: 15, gold: 55 },
     prerequisites: ["masonry", "ballistics"],
-    unlocks: ["harder wall and gate networks", "stronger turrets", "siege-resistant districts"]
+    unlocks: ["harder wall and gate networks", "stronger turrets", "siege-resistant districts"],
+    category: "military",
+    phase: "core",
+    effects: [
+      { kind: "building_max_hp", amount: 90, target: "wall", description: "Walls gain layered fortification layouts." },
+      { kind: "building_max_hp", amount: 90, target: "gate", description: "Gates gain layered fortification layouts." },
+      { kind: "building_max_hp", amount: 60, target: "turret", description: "Turrets gain reinforced emplacements." },
+      { kind: "building_max_hp", amount: 60, target: "watchtower", description: "Watchtowers gain reinforced foundations." },
+      { kind: "building_armor", amount: 2, target: "wall", description: "Walls gain military-grade armor." },
+      { kind: "building_armor", amount: 2, target: "gate", description: "Gates gain military-grade armor." },
+      { kind: "building_armor", amount: 1, target: "turret", description: "Turrets gain military-grade armor." },
+      { kind: "building_armor", amount: 1, target: "watchtower", description: "Watchtowers gain military-grade armor." },
+      { kind: "building_range", amount: 1, target: "turret", description: "Turret sight lines improve." },
+      { kind: "unit_armor", amount: 1, target: "military", description: "Military units drill around protected logistics." },
+      { kind: "safety", amount: 3, description: "Fortified layouts improve population safety." }
+    ]
   },
   public_works: {
     id: "public_works",
@@ -684,7 +742,13 @@ export const developmentCatalog: Record<DevelopmentId, Development> = {
     description: "State-managed labor crews for roads, repairs, and civic construction.",
     cost: { wood: 40, stone: 30, gold: 40 },
     prerequisites: [],
-    unlocks: ["faster repairs", "cheaper civic maintenance"]
+    unlocks: ["faster repairs", "cheaper civic maintenance"],
+    category: "infrastructure",
+    phase: "core",
+    effects: [
+      { kind: "repair_speed", amount: 2, description: "State crews repair structures faster." },
+      { kind: "repair_cost_multiplier", amount: -0.15, description: "Repair logistics waste fewer materials." }
+    ]
   },
   siege_engineering: {
     id: "siege_engineering",
@@ -692,7 +756,13 @@ export const developmentCatalog: Record<DevelopmentId, Development> = {
     description: "Purpose-built rams, mantlets, ladders, and breach crews for destroying fortifications.",
     cost: { wood: 90, stone: 55, iron: 45, coal: 25, gold: 75 },
     prerequisites: ["ironworking", "public_works"],
-    unlocks: ["siege engine recruitment", "breach bonuses against walls, gates, and turrets"]
+    unlocks: ["siege engine recruitment", "breach bonuses against walls, gates, and turrets"],
+    category: "military",
+    phase: "core",
+    effects: [
+      { kind: "unit_attack", amount: 2, target: "siege_engine", description: "Siege engines breach fortifications faster." },
+      { kind: "safety", amount: 1, description: "Breach capacity deters hostile walls from trapping the population." }
+    ]
   },
   road_engineering: {
     id: "road_engineering",
@@ -700,7 +770,14 @@ export const developmentCatalog: Record<DevelopmentId, Development> = {
     description: "Surveyed roadbeds, bridges, and supply lanes that make labor and messengers move more reliably.",
     cost: { wood: 50, stone: 55, limestone: 35, gold: 45 },
     prerequisites: ["public_works"],
-    unlocks: ["faster workers and messengers", "faster field repairs"]
+    unlocks: ["faster workers and messengers", "faster field repairs"],
+    category: "infrastructure",
+    phase: "core",
+    effects: [
+      { kind: "unit_speed", amount: 0.14, target: "logistics", description: "Workers, messengers, traders, and siege engines move faster." },
+      { kind: "repair_speed", amount: 1, description: "Repair crews move and stage materials faster." },
+      { kind: "repair_cost_multiplier", amount: -0.1, description: "Road logistics reduce repair waste." }
+    ]
   },
   gate_machinery: {
     id: "gate_machinery",
@@ -708,7 +785,13 @@ export const developmentCatalog: Record<DevelopmentId, Development> = {
     description: "Counterweights, iron controls, and guard procedures for stronger controlled passages.",
     cost: { wood: 50, stone: 45, limestone: 35, iron: 35, gold: 55 },
     prerequisites: ["masonry", "ironworking"],
-    unlocks: ["stronger gates", "future automated gate controls"]
+    unlocks: ["stronger gates", "future automated gate controls"],
+    category: "infrastructure",
+    phase: "core",
+    effects: [
+      { kind: "building_max_hp", amount: 70, target: "gate", description: "Gates gain stronger machinery housings." },
+      { kind: "building_armor", amount: 1, target: "gate", description: "Gate controls gain armor." }
+    ]
   },
   taxation: {
     id: "taxation",
@@ -716,7 +799,13 @@ export const developmentCatalog: Record<DevelopmentId, Development> = {
     description: "Regular tribute assessment that turns population and commerce into yearly gold.",
     cost: { gold: 35 },
     prerequisites: [],
-    unlocks: ["yearly gold income", "wealth growth pressure"]
+    unlocks: ["yearly gold income", "wealth growth pressure"],
+    category: "economy",
+    phase: "core",
+    effects: [
+      { kind: "yearly_gold_per_population", amount: 2, description: "Each living subject contributes yearly gold." },
+      { kind: "yearly_happiness", amount: -1, description: "Taxes strain happiness unless balanced by legitimacy." }
+    ]
   },
   council_governance: {
     id: "council_governance",
@@ -724,7 +813,15 @@ export const developmentCatalog: Record<DevelopmentId, Development> = {
     description: "Representative councils that reduce unrest and make difficult policies easier to sustain.",
     cost: { wood: 20, gold: 45 },
     prerequisites: ["taxation"],
-    unlocks: ["happiness buffer", "lower tax unrest"]
+    unlocks: ["happiness buffer", "lower tax unrest"],
+    category: "governance",
+    phase: "core",
+    effects: [
+      { kind: "instant_happiness", amount: 4, description: "Councils immediately improve public trust." },
+      { kind: "yearly_happiness", amount: 1, description: "Councils reduce yearly unrest." },
+      { kind: "yearly_gold_per_population", amount: -0.4, description: "Legitimacy limits tax pressure." },
+      { kind: "safety", amount: 3, description: "Representation improves civic stability." }
+    ]
   },
   free_press: {
     id: "free_press",
@@ -732,7 +829,14 @@ export const developmentCatalog: Record<DevelopmentId, Development> = {
     description: "Independent messengers, notices, and public debate that raise trust but expose failures.",
     cost: { wood: 35, gold: 35 },
     prerequisites: ["council_governance"],
-    unlocks: ["happiness from truthful public accountability", "propaganda resistance"]
+    unlocks: ["happiness from truthful public accountability", "propaganda resistance"],
+    category: "information",
+    phase: "core",
+    effects: [
+      { kind: "instant_happiness", amount: 3, description: "Public accountability improves trust." },
+      { kind: "yearly_happiness", amount: 1, description: "Free information reduces yearly suspicion." },
+      { kind: "safety", amount: 1, description: "Public warning channels improve safety." }
+    ]
   },
   propaganda: {
     id: "propaganda",
@@ -740,7 +844,14 @@ export const developmentCatalog: Record<DevelopmentId, Development> = {
     description: "Centralized public narratives that can raise morale while making diplomacy less trustworthy.",
     cost: { wood: 25, gold: 35 },
     prerequisites: ["taxation"],
-    unlocks: ["morale buffer", "future deception tools"]
+    unlocks: ["morale buffer", "future deception tools"],
+    category: "information",
+    phase: "core",
+    effects: [
+      { kind: "instant_happiness", amount: 2, description: "Narrative control creates an immediate morale buffer." },
+      { kind: "yearly_happiness", amount: 1, description: "Narrative control sustains morale." },
+      { kind: "safety", amount: -1, description: "Distorted feedback weakens true safety assessment." }
+    ]
   },
   forced_labor: {
     id: "forced_labor",
@@ -748,7 +859,17 @@ export const developmentCatalog: Record<DevelopmentId, Development> = {
     description: "Coerced labor levies that accelerate construction and repair while harming happiness and legitimacy.",
     cost: { gold: 25 },
     prerequisites: ["taxation"],
-    unlocks: ["cheaper building and repair labor", "happiness and safety penalties"]
+    unlocks: ["cheaper building and repair labor", "happiness and safety penalties"],
+    category: "labor",
+    phase: "core",
+    effects: [
+      { kind: "instant_happiness", amount: -10, description: "Coercion immediately harms happiness." },
+      { kind: "yearly_happiness", amount: -2, description: "Coercion keeps harming yearly happiness." },
+      { kind: "construction_cost_multiplier", amount: -0.15, description: "Coerced labor lowers construction costs." },
+      { kind: "repair_cost_multiplier", amount: -0.25, description: "Coerced labor lowers repair costs." },
+      { kind: "repair_speed", amount: 2, description: "Coerced labor speeds emergency repairs." },
+      { kind: "safety", amount: -6, description: "Coercion undermines civic safety." }
+    ]
   },
   abolition: {
     id: "abolition",
@@ -756,7 +877,14 @@ export const developmentCatalog: Record<DevelopmentId, Development> = {
     description: "Ends coerced labor institutions and redirects legitimacy toward wage labor and citizenship.",
     cost: { gold: 55 },
     prerequisites: ["forced_labor", "council_governance"],
-    unlocks: ["forced labor penalties removed", "happiness recovery"]
+    unlocks: ["forced labor penalties removed", "happiness recovery"],
+    category: "labor",
+    phase: "core",
+    effects: [
+      { kind: "instant_happiness", amount: 12, description: "Abolition immediately restores public trust." },
+      { kind: "yearly_happiness", amount: 1, description: "Abolition supports yearly legitimacy." },
+      { kind: "safety", amount: 4, description: "Rights recovery improves civic safety." }
+    ]
   },
   espionage: {
     id: "espionage",
@@ -764,9 +892,440 @@ export const developmentCatalog: Record<DevelopmentId, Development> = {
     description: "Informant networks, coded letters, and scouts trained to discover hidden military and economic intent.",
     cost: { gold: 65, iron: 10 },
     prerequisites: ["council_governance"],
-    unlocks: ["wider sentinel vision", "future spy missions"]
+    unlocks: ["wider sentinel vision", "future spy missions"],
+    category: "security",
+    phase: "core",
+    effects: [
+      { kind: "unit_vision", amount: 3, target: "sentinel", description: "Sentinels see farther through informant support." },
+      { kind: "safety", amount: 2, description: "Better intelligence improves safety." }
+    ]
   }
 };
+
+const roadmapDevelopmentSeedText = `
+SW-001|Unified Settlement Layout
+SW-002|Census Tablets
+SW-003|Grain Reserve Granary
+SW-004|Basic Standard of Measures
+SW-005|Frontier Wardens
+SW-006|First Magistrate
+SW-007|Stone Marker Boundaries
+SW-008|Night Signal Network
+SW-009|Ritual Court Day
+SW-010|Village Guard Militia
+SW-011|Tribal Council
+SW-012|Hereditary Monarchy
+SW-013|Elective Sovereignty
+SW-014|Regency Council
+SW-015|Provincial Governors
+SW-016|Central Chancellery
+SW-017|Dual-Executive Model
+SW-018|Oath of Office
+SW-019|Constitutional Charter
+SW-020|Succession Law
+SW-021|State Census Hall
+SW-022|Court Faction Registry
+SW-023|Public Petition Office
+SW-024|Rotating Court Location
+SW-025|Provincial Assemblies
+SW-026|Anti-Coup Watch
+SW-027|Succession Crisis Protocol
+SW-028|Exile Tribunal
+SW-029|Heir Education System
+SW-030|Civic Identity Edict
+SW-031|Taxpayer Charter
+SW-032|Court Record Ledger
+SW-033|Municipal Charter
+SW-034|Regency Tax Court
+SW-035|Executive Immunity Limits
+SW-036|Diplomatic Legation Bureau
+SW-037|Succession Council
+SW-038|Civil-Military Boundary Statute
+SW-039|Public Accountability Hearings
+SW-040|Shared Regency Council Seats
+SW-041|Market Square
+SW-042|Fixed Taxation
+SW-043|Progressive Tax Bands
+SW-044|Grain Tithe Tax
+SW-045|Trade Tariff Corridor
+SW-046|Mint and Coinage
+SW-047|Banking Guild
+SW-048|State Treasury Bond
+SW-049|Rural Granary Tax Credit
+SW-050|Infrastructure Bonds
+SW-051|Toll Bridge Network
+SW-052|State Granaries as Depository
+SW-053|Land Tax Assessment
+SW-054|Merchant Charter
+SW-055|Standardized Weights
+SW-056|Caravan Protection
+SW-057|Craft Guild Charter
+SW-058|Public Works Bureau
+SW-059|Slavery Registration
+SW-060|Forced Labor Quota
+SW-061|Abolition Reform
+SW-062|Debt-Bond Registry
+SW-063|Apprenticeship Tax Incentive
+SW-064|Port Levies
+SW-065|Internal Bond Market
+SW-066|Rural Banking Posts
+SW-067|Harvest Insurance Pool
+SW-068|Black-Market Suppression Bureau
+SW-069|Maritime Guild Tax
+SW-070|Industrial Hearth Centers
+SW-071|Transport Guild Monopoly
+SW-072|Land Reform Registry
+SW-073|Anti-Inflation Control
+SW-074|State Monopsony (War-time Procurement)
+SW-075|Regional Resource Charter
+SW-076|Treasury Secrecy Protocol
+SW-077|Trade Mission Network
+SW-078|Provincial Mint Deputies
+SW-079|Public Price Bulletin
+SW-080|Anti-Piracy Statute
+SW-081|Fiscal Forecast Office
+SW-082|Currency Anti-Forger Marks
+SW-083|Debt Jubilation Moratorium
+SW-084|Corporate Charter Monopoly (State-Granted)
+SW-085|Agricultural Research Plots
+SW-086|Tax Farming Outsource
+SW-087|Infrastructure Insurance Levy
+SW-088|Export Quota Framework
+SW-089|Mining Safety Code
+SW-090|Rural Credit Coops
+SW-091|State Schools
+SW-092|Temple-Market Compacts
+SW-093|Public Health Corps
+SW-094|Census Health Registry
+SW-095|Public Education Curriculum
+SW-096|Freedom of Assembly
+SW-097|Censorship Office
+SW-098|Free Press Charter
+SW-099|Civil Rights Codex
+SW-100|Anti-Slavery Sentiment Index
+SW-101|Civil Registry of Persons
+SW-102|Civic Welfare Pensions
+SW-103|Public Works Labor Unions
+SW-104|Cultural Festivals Commission
+SW-105|Elite Patronage Ledger
+SW-106|Anti-Extremism Mediation
+SW-107|Religious Autonomy Board
+SW-108|Controlled Media Network
+SW-109|Migration Registry
+SW-110|Assimilation Program
+SW-111|Migration Restriction Regime
+SW-112|Civil Registry Appeals Court
+SW-113|Womens Guild Inclusion
+SW-114|Child Protection Statute
+SW-115|Population Mobility Infrastructure
+SW-116|Anti-Corruption Hotline
+SW-117|Public Art and Narrative Program
+SW-118|Civic Duty Education
+SW-119|Minority Representation Rule
+SW-120|Public Information Archive
+SW-121|City Garrison
+SW-122|Rural Policing
+SW-123|Code of Criminal Law
+SW-124|Judicial Review Court
+SW-125|Espionage Academy
+SW-126|Counter-Intelligence Bureau
+SW-127|Fortress Walls
+SW-128|Turret Battery Network
+SW-129|Siegeworks Program
+SW-130|Watchtower Grid
+SW-131|Guerrilla Doctrine
+SW-132|Shock Doctrine
+SW-133|Defensive Doctrine
+SW-134|Standing Army
+SW-135|Militia Reserve
+SW-136|Officer Corps Academy
+SW-137|Conscription
+SW-138|Mercenary Charter
+SW-139|Diplomacy Corps
+SW-140|Treaty Ratification
+SW-141|Espionage Countermeasures: False Flag Detectors
+SW-142|Propaganda Network
+SW-143|Public Diplomatic Ledger
+SW-144|Trade Embargo System
+SW-145|Refuge Policy
+SW-146|Naval Patrol
+SW-147|Intelligence Courts
+SW-148|Humanitarian Corridor Protocol
+SW-149|Border Gate Tax Exemption
+SW-150|War Debt Tribunal
+SW-151|Succession Education Academy
+SW-152|Federal Compact
+SW-153|Constitutional Court
+SW-154|National Census + AI Forecast
+SW-155|Merit Rotation Office
+SW-156|Judicial Immunity Reform
+SW-157|Constitutional Revision Convention
+SW-158|Imperial Secretariat
+SW-159|Public Debt Audit
+SW-160|Global Trade Treaty Framework
+SW-161|Universal Draft Registry
+SW-162|Post-War Reconstruction Office
+SW-163|Monumental Infrastructure Corridor
+SW-164|Civic Automation Ledger
+SW-165|Truth and Reconciliation Council
+SW-166|Inter-Regional Water Authority
+SW-167|Digital Archive Simulation
+SW-168|Anti-Extortion Law
+SW-169|Public-Private Partnership Board
+SW-170|Moral Economy Charter
+SW-171|AI Governance Observatory
+SW-172|Emergency Constitutional Lock
+SW-173|Interfaith Arbitration Tribunal
+SW-174|Exile and Reintegration Program
+SW-175|Generational Planning Board
+`;
+
+type RoadmapDevelopmentSeed = {
+  sw: string;
+  id: DevelopmentId;
+  name: string;
+  phase: string;
+  category: DevelopmentCategory;
+  index: number;
+};
+
+function buildGeneratedDevelopmentCatalog(): Record<DevelopmentId, Development> {
+  const seeds = parseRoadmapDevelopmentSeeds();
+  const generated: Record<DevelopmentId, Development> = {};
+  for (const seed of seeds) {
+    generated[seed.id] = {
+      id: seed.id,
+      name: seed.name,
+      description: `${seed.sw} roadmap institution in the ${seed.category.replace("_", " ")} branch.`,
+      cost: inferDevelopmentCost(seed),
+      prerequisites: inferDevelopmentPrerequisites(seed),
+      unlocks: inferDevelopmentUnlocks(seed),
+      category: seed.category,
+      phase: seed.phase,
+      effects: inferDevelopmentEffects(seed)
+    };
+  }
+  return generated;
+}
+
+function parseRoadmapDevelopmentSeeds(): RoadmapDevelopmentSeed[] {
+  return roadmapDevelopmentSeedText
+    .trim()
+    .split("\n")
+    .map((line, index) => {
+      const [sw, name] = line.split("|");
+      const phase = phaseForRoadmapNode(sw);
+      return {
+        sw,
+        id: `${sw.toLowerCase().replace("-", "_")}_${slugify(name)}`,
+        name,
+        phase,
+        category: inferDevelopmentCategory(name, phase),
+        index: index + 1
+      };
+    });
+}
+
+function slugify(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function phaseForRoadmapNode(sw: string): string {
+  const number = Number(sw.replace("SW-", ""));
+  if (number <= 10) return "P0";
+  if (number <= 40) return "P1";
+  if (number <= 90) return "P2";
+  if (number <= 120) return "P3";
+  if (number <= 150) return "P4";
+  return "P5";
+}
+
+function inferDevelopmentCategory(name: string, phase: string): DevelopmentCategory {
+  const text = name.toLowerCase();
+  if (/\b(tax|market|mint|bank|bond|credit|tariff|guild|trade|merchant|currency|price|inflation|debt|export|procurement|monop|treasury|insurance|fiscal|coin|levy|tithe)\b/.test(text)) return "economy";
+  if (/\b(slaver|forced labor|labor|apprentice|union|abolition|bond registry)\b/.test(text)) return "labor";
+  if (/\b(school|education|health|welfare|festival|religious|migration|assembly|rights|child|minority|women|culture|public art|civic duty|sentiment)\b/.test(text)) return "social";
+  if (/\b(press|media|censor|archive|forecast|ledger|bulletin|narrative|information|propaganda|observatory)\b/.test(text)) return "information";
+  if (/\b(law|court|judicial|criminal|tribunal|immunity|charter|constitution|accountability|corruption|petition|magistrate|review)\b/.test(text)) return "law";
+  if (/\b(espionage|counter|intelligence|polic|watch|garrison|warden|anti-coup|anti-piracy|anti-extortion|security)\b/.test(text)) return "security";
+  if (/\b(wall|turret|siege|watchtower|garrison|doctrine|army|militia|officer|conscription|mercenary|fortress|naval|draft)\b/.test(text)) return "military";
+  if (/\b(diplom|treaty|legation|refuge|humanitarian|corridor|interfaith|global trade)\b/.test(text)) return "diplomacy";
+  if (/\b(infrastructure|bridge|transport|granary|hearth|mining|agricultural|water|corridor|mobility|monumental|public works|layout|measures|boundaries)\b/.test(text)) return "infrastructure";
+  if (phase === "P5") return "long_horizon";
+  if (phase === "P1") return "governance";
+  if (phase === "P0") return "foundational";
+  return "governance";
+}
+
+function inferDevelopmentCost(seed: RoadmapDevelopmentSeed): ResourceCost {
+  const tier = Number(seed.phase.slice(1)) + 1;
+  const variance = seed.index % 5;
+  const cost: ResourceCost = { gold: 14 + tier * 9 + variance * 3 };
+  if (seed.category === "infrastructure" || seed.category === "military") {
+    cost.wood = 16 + tier * 8;
+    cost.stone = 12 + tier * 7;
+  }
+  if (seed.category === "military" || seed.category === "security") cost.iron = 6 + tier * 4;
+  if (seed.category === "military" && tier >= 4) cost.coal = 5 + tier * 3;
+  if (seed.category === "social" || seed.category === "information" || seed.category === "law") cost.wood = 8 + tier * 5;
+  if (seed.category === "economy") cost.gold = (cost.gold ?? 0) + 12 + tier * 4;
+  if (seed.category === "labor") cost.food = 8 + tier * 3;
+  if (seed.category === "long_horizon") {
+    cost.gold = (cost.gold ?? 0) + 35;
+    cost.stone = 20 + tier * 8;
+    cost.limestone = 12 + tier * 5;
+  }
+  return cost;
+}
+
+function inferDevelopmentPrerequisites(seed: RoadmapDevelopmentSeed): DevelopmentId[] {
+  const prereqs = new Set<DevelopmentId>();
+  if (seed.phase === "P1") prereqs.add("council_governance");
+  if (seed.phase === "P2") prereqs.add(seed.category === "infrastructure" ? "public_works" : "taxation");
+  if (seed.phase === "P3") prereqs.add(seed.category === "information" ? "free_press" : "council_governance");
+  if (seed.phase === "P4") {
+    if (seed.category === "military") prereqs.add("military_architecture");
+    else if (seed.category === "security") prereqs.add("espionage");
+    else prereqs.add("council_governance");
+  }
+  if (seed.phase === "P5") {
+    prereqs.add("council_governance");
+    if (seed.category === "military" || seed.category === "security") prereqs.add("espionage");
+  }
+  if (seed.category === "labor" && /abolition|anti-slavery/i.test(seed.name)) prereqs.add("forced_labor");
+  if (seed.category === "military" && /siege/i.test(seed.name)) prereqs.add("siege_engineering");
+  if (seed.category === "economy" && /bank|bond|debt|credit|currency|mint/i.test(seed.name)) prereqs.add("taxation");
+  return Array.from(prereqs);
+}
+
+function inferDevelopmentUnlocks(seed: RoadmapDevelopmentSeed): string[] {
+  const unlocks: Record<DevelopmentCategory, string[]> = {
+    foundational: ["administrative stability", "early survival options"],
+    governance: ["legitimacy tools", "state coordination"],
+    economy: ["wealth generation", "market leverage"],
+    labor: ["labor policy trade-offs", "construction capacity"],
+    social: ["happiness and population resilience", "legitimacy paths"],
+    information: ["public information tools", "narrative leverage"],
+    law: ["justice capacity", "institutional safety"],
+    security: ["internal security", "intelligence capacity"],
+    military: ["war-fighting capacity", "defense posture"],
+    diplomacy: ["treaty leverage", "external coordination"],
+    infrastructure: ["logistics and construction efficiency", "resource control"],
+    long_horizon: ["late-game institutional capacity", "cross-century resilience"]
+  };
+  return unlocks[seed.category];
+}
+
+function inferDevelopmentEffects(seed: RoadmapDevelopmentSeed): DevelopmentEffect[] {
+  const text = seed.name.toLowerCase();
+  const effects: DevelopmentEffect[] = [];
+  const add = (kind: DevelopmentEffectKind, amount: number, description: string, target?: string) => effects.push({ kind, amount, target, description });
+
+  if (seed.category === "foundational") {
+    add("safety", 0.8, "Foundational institutions reduce early disorder.");
+    add("resource_control", 0.4, "Foundational mapping improves local control.");
+  }
+  if (seed.category === "governance") {
+    add("yearly_happiness", 0.35, "Governance stability improves yearly legitimacy.");
+    add("safety", 0.9, "Governance institutions reduce civic risk.");
+  }
+  if (seed.category === "economy") {
+    add("yearly_gold_per_population", 0.16, "Economic institutions raise recurring state income.");
+    add("wealth", 2.5, "Economic complexity increases stored productive wealth.");
+  }
+  if (seed.category === "labor") {
+    add("construction_cost_multiplier", -0.025, "Labor institutions change construction throughput.");
+    add("repair_speed", 0.25, "Organized labor can mobilize repairs faster.");
+  }
+  if (seed.category === "social") {
+    add("yearly_happiness", 0.45, "Social institutions improve happiness and cohesion.");
+    add("safety", 0.45, "Social resilience improves public safety.");
+  }
+  if (seed.category === "information") {
+    add("yearly_happiness", 0.25, "Information institutions shape public trust.");
+    add("unit_vision", 0.25, "Information flows improve field awareness.", "sentinel");
+  }
+  if (seed.category === "law") {
+    add("safety", 1.1, "Legal institutions reduce disorder and arbitrary violence.");
+    add("yearly_happiness", 0.2, "Legal recourse supports legitimacy.");
+  }
+  if (seed.category === "security") {
+    add("safety", 1.2, "Security institutions reduce internal and external risk.");
+    add("unit_vision", 0.35, "Security networks improve detection.", "sentinel");
+  }
+  if (seed.category === "military") {
+    add("safety", 0.9, "Military institutions improve deterrence.");
+    add("unit_attack", 0.35, "Military organization improves combat pressure.", "military");
+    add("unit_armor", 0.2, "Military organization improves field protection.", "military");
+  }
+  if (seed.category === "diplomacy") {
+    add("safety", 0.55, "Diplomacy can reduce isolation and war risk.");
+    add("yearly_gold_per_population", 0.06, "Diplomatic channels improve trade and tribute options.");
+  }
+  if (seed.category === "infrastructure") {
+    add("construction_cost_multiplier", -0.018, "Infrastructure reduces construction waste.");
+    add("repair_cost_multiplier", -0.018, "Infrastructure improves maintenance logistics.");
+    add("resource_control", 0.55, "Infrastructure improves access to useful deposits.");
+  }
+  if (seed.category === "long_horizon") {
+    add("yearly_happiness", 0.25, "Long-horizon institutions improve continuity.");
+    add("safety", 0.8, "Long-horizon institutions reduce cross-century fragility.");
+    add("wealth", 2.2, "Long-horizon institutions preserve productive capacity.");
+  }
+
+  if (/\b(slavery|forced labor|quota|tax farming|monopoly|censorship|secrecy|restriction|monopsony)\b/.test(text)) {
+    add("yearly_happiness", -0.55, "Coercive institutions carry recurring legitimacy costs.");
+    add("safety", -0.8, "Coercive institutions create internal safety risks.");
+  }
+  if (/\b(abolition|rights|welfare|protection|minority|womens|refuge|humanitarian|reconciliation|moral)\b/.test(text)) {
+    add("instant_happiness", 2, "Rights reforms immediately improve public trust.");
+    add("yearly_happiness", 0.45, "Rights reforms sustain legitimacy.");
+  }
+  if (/\b(wall|fortress)\b/.test(text)) {
+    add("building_max_hp", 55, "Wall institutions improve fortification durability.", "wall");
+    add("building_armor", 1, "Wall institutions improve fortification armor.", "wall");
+  }
+  if (/\b(gate)\b/.test(text)) {
+    add("building_max_hp", 35, "Gate institutions improve controlled-passage durability.", "gate");
+    add("building_armor", 0.5, "Gate institutions improve controlled-passage armor.", "gate");
+  }
+  if (/\b(turret|battery)\b/.test(text)) {
+    add("building_attack", 1.2, "Turret institutions increase defensive firepower.", "turret");
+    add("building_range", 0.4, "Turret institutions improve defensive reach.", "turret");
+  }
+  if (/\b(watchtower|signal)\b/.test(text)) {
+    add("building_max_hp", 25, "Watchtower institutions improve lookout durability.", "watchtower");
+    add("unit_vision", 0.35, "Watchtower institutions improve scout coordination.", "sentinel");
+  }
+  if (/\b(siege|shock|guerrilla|army|militia|officer|conscription|mercenary|garrison|patrol|draft)\b/.test(text)) {
+    add("unit_attack", 0.45, "Military doctrine improves combat effectiveness.", "military");
+    add("unit_armor", 0.25, "Military doctrine improves combat survivability.", "military");
+  }
+  if (/\b(road|bridge|transport|corridor|mobility|water|infrastructure)\b/.test(text)) {
+    add("unit_speed", 0.025, "Transport institutions improve logistical movement.", "logistics");
+    add("repair_speed", 0.2, "Transport institutions speed repairs.");
+  }
+  if (/\b(espionage|intelligence|counter|false flag|informant)\b/.test(text)) {
+    add("unit_vision", 0.5, "Intelligence institutions improve sentinel awareness.", "sentinel");
+    add("safety", 0.7, "Intelligence institutions reduce surprise.");
+  }
+  if (/\b(health|granary|harvest|food|agricultural)\b/.test(text)) {
+    add("yearly_happiness", 0.25, "Food and health institutions reduce hardship.");
+    add("safety", 0.45, "Food and health institutions improve survival safety.");
+  }
+
+  return effects;
+}
+
+const generatedDevelopmentCatalog = buildGeneratedDevelopmentCatalog();
+export const developmentCatalog: Record<DevelopmentId, Development> = {
+  ...coreDevelopmentCatalog,
+  ...generatedDevelopmentCatalog
+};
+export const developmentIds: readonly DevelopmentId[] = Object.freeze([...coreDevelopmentIds, ...Object.keys(generatedDevelopmentCatalog)]);
 
 const buildingCosts: Record<BuildableBuildingType, ResourceCost> = {
   farm: { wood: 60 },
@@ -813,49 +1372,57 @@ type BuildingStatDefinition = (typeof buildingStats)[BuildingType];
 
 function effectiveUnitStats(state: GameState, tribeId: TribeId, type: UnitType): UnitStatDefinition {
   const stats = { ...unitStats[type] };
-  if (hasDevelopment(state, tribeId, "road_engineering") && (type === "peon" || type === "messenger" || type === "trader" || type === "siege_engine")) {
-    stats.speed = Number((stats.speed + 0.14).toFixed(2));
-  }
-  if (hasDevelopment(state, tribeId, "espionage") && type === "sentinel") {
-    stats.visionRadius += 3;
-  }
-  if (hasDevelopment(state, tribeId, "military_architecture") && (type === "militia" || type === "archer" || type === "siege_engine")) {
-    stats.armor += 1;
-  }
+  stats.speed = Number((stats.speed + developmentEffectAmount(state, tribeId, "unit_speed", type)).toFixed(2));
+  stats.visionRadius += Math.round(developmentEffectAmount(state, tribeId, "unit_vision", type));
+  stats.armor += Math.round(developmentEffectAmount(state, tribeId, "unit_armor", type));
+  stats.attack += Math.round(developmentEffectAmount(state, tribeId, "unit_attack", type));
   return stats;
 }
 
 function effectiveBuildingStats(state: GameState, tribeId: TribeId, type: BuildingType): BuildingStatDefinition {
   const stats = { ...buildingStats[type] };
-  if (hasDevelopment(state, tribeId, "brick_kilns") && (type === "wall" || type === "gate")) {
-    stats.maxHp += 60;
-    stats.armor += 1;
-  }
-  if (hasDevelopment(state, tribeId, "gate_machinery") && type === "gate") {
-    stats.maxHp += 70;
-    stats.armor += 1;
-  }
-  if (hasDevelopment(state, tribeId, "ballistics") && type === "turret") {
-    stats.attack += 2;
-    stats.range += 1;
-  }
-  if (hasDevelopment(state, tribeId, "military_architecture")) {
-    if (type === "wall" || type === "gate") {
-      stats.maxHp += 90;
-      stats.armor += 2;
-    }
-    if (type === "turret" || type === "watchtower") {
-      stats.maxHp += 60;
-      stats.armor += 1;
-      stats.visionRadius += 1;
-    }
-    if (type === "turret") stats.range += 1;
-  }
+  stats.maxHp += Math.round(developmentEffectAmount(state, tribeId, "building_max_hp", type));
+  stats.armor += Math.round(developmentEffectAmount(state, tribeId, "building_armor", type));
+  stats.attack += Math.round(developmentEffectAmount(state, tribeId, "building_attack", type));
+  stats.range += developmentEffectAmount(state, tribeId, "building_range", type);
   return stats;
 }
 
 function hasActiveForcedLabor(state: GameState, tribeId: TribeId): boolean {
   return hasDevelopment(state, tribeId, "forced_labor") && !hasDevelopment(state, tribeId, "abolition");
+}
+
+function developmentEffectAmount(state: GameState, tribeId: TribeId, kind: DevelopmentEffectKind, target?: UnitType | BuildingType | string): number {
+  let total = 0;
+  for (const developmentId of state.tribes[tribeId]?.developments ?? []) {
+    if (!isDevelopmentEffectActive(state, tribeId, developmentId)) continue;
+    const development = developmentCatalog[developmentId];
+    if (!development) continue;
+    for (const effect of development.effects) {
+      if (effect.kind !== kind) continue;
+      if (!developmentEffectMatchesTarget(effect, target)) continue;
+      total += effect.amount;
+    }
+  }
+  return total;
+}
+
+function isDevelopmentEffectActive(state: GameState, tribeId: TribeId, developmentId: DevelopmentId): boolean {
+  return !(developmentId === "forced_labor" && hasDevelopment(state, tribeId, "abolition"));
+}
+
+function developmentEffectMatchesTarget(effect: DevelopmentEffect, target?: UnitType | BuildingType | string): boolean {
+  if (!effect.target || effect.target === "all" || !target) return true;
+  if (effect.target === target) return true;
+  if (effect.target === "military") return target === "militia" || target === "archer" || target === "siege_engine";
+  if (effect.target === "logistics") return target === "peon" || target === "messenger" || target === "trader" || target === "siege_engine";
+  if (effect.target === "worker") return target === "peon";
+  if (effect.target === "fortification") return target === "wall" || target === "gate" || target === "turret" || target === "watchtower";
+  return false;
+}
+
+function developmentCostMultiplier(state: GameState, tribeId: TribeId, kind: "construction_cost_multiplier" | "repair_cost_multiplier"): number {
+  return clamp(1 + developmentEffectAmount(state, tribeId, kind), 0.45, 1.5);
 }
 
 export function createGame(seed = 1337): GameState {
@@ -1492,9 +2059,7 @@ export function getBuildingCost(buildingType: BuildableBuildingType): ResourceCo
 }
 
 export function getEffectiveBuildingCost(state: GameState, tribeId: TribeId, buildingType: BuildableBuildingType): ResourceCost {
-  let cost = buildingCosts[buildingType];
-  if (hasActiveForcedLabor(state, tribeId)) cost = scaleResourceCost(cost, 0.85);
-  return { ...cost };
+  return scaleResourceCost(buildingCosts[buildingType], developmentCostMultiplier(state, tribeId, "construction_cost_multiplier"));
 }
 
 export function getBuildingRepairCost(buildingOrType: Pick<Building, "type" | "hp" | "maxHp"> | BuildingType): ResourceCost {
@@ -1508,11 +2073,7 @@ export function getBuildingRepairCost(buildingOrType: Pick<Building, "type" | "h
 }
 
 export function getTribeBuildingRepairCost(state: GameState, tribeId: TribeId, buildingOrType: Pick<Building, "type" | "hp" | "maxHp"> | BuildingType): ResourceCost {
-  let cost = getBuildingRepairCost(buildingOrType);
-  if (hasDevelopment(state, tribeId, "public_works")) cost = scaleResourceCost(cost, 0.85);
-  if (hasDevelopment(state, tribeId, "road_engineering")) cost = scaleResourceCost(cost, 0.9);
-  if (hasActiveForcedLabor(state, tribeId)) cost = scaleResourceCost(cost, 0.75);
-  return cost;
+  return scaleResourceCost(getBuildingRepairCost(buildingOrType), developmentCostMultiplier(state, tribeId, "repair_cost_multiplier"));
 }
 
 export function getUnitCost(unitType: (typeof trainableUnitTypes)[number]): ResourceCost {
@@ -1533,7 +2094,8 @@ export function getDevelopment(developmentId: DevelopmentId): Development {
     ...development,
     cost: { ...development.cost },
     prerequisites: [...development.prerequisites],
-    unlocks: [...development.unlocks]
+    unlocks: [...development.unlocks],
+    effects: development.effects.map((effect) => ({ ...effect }))
   };
 }
 
@@ -1587,11 +2149,11 @@ export function chooseDevelopment(
 
 function applyDevelopmentEffects(state: GameState, tribeId: TribeId, developmentId: DevelopmentId): void {
   const tribe = state.tribes[tribeId];
-  if (developmentId === "forced_labor") tribe.happiness = Math.round(clamp(tribe.happiness - 10, 0, 100));
-  if (developmentId === "abolition") tribe.happiness = Math.round(clamp(tribe.happiness + 12, 0, 100));
-  if (developmentId === "council_governance") tribe.happiness = Math.round(clamp(tribe.happiness + 4, 0, 100));
-  if (developmentId === "free_press") tribe.happiness = Math.round(clamp(tribe.happiness + 3, 0, 100));
-  if (developmentId === "propaganda") tribe.happiness = Math.round(clamp(tribe.happiness + 2, 0, 100));
+  const development = developmentCatalog[developmentId];
+  const immediateHappiness = development.effects
+    .filter((effect) => effect.kind === "instant_happiness")
+    .reduce((total, effect) => total + effect.amount, 0);
+  if (immediateHappiness !== 0) tribe.happiness = Math.round(clamp(tribe.happiness + immediateHappiness, 0, 100));
   refreshTribeUnitStats(state, tribeId);
   refreshTribeBuildingStats(state, tribeId);
   updateVisibility(state);
@@ -1946,7 +2508,8 @@ export function computeWealth(state: GameState, tribeId: TribeId): number {
     tribe.resources.coal * 0.48;
   const unitValue = Object.values(state.units).filter((u) => u.tribeId === tribeId && u.hp > 0).length * 18;
   const buildingValue = Object.values(state.buildings).filter((b) => b.tribeId === tribeId).length * 55;
-  return Math.round(banked + unitValue + buildingValue);
+  const developmentValue = developmentEffectAmount(state, tribeId, "wealth") * 10;
+  return Math.round(banked + unitValue + buildingValue + developmentValue);
 }
 
 export function getVictoryPressure(state: GameState): VictoryPressureStatus {
@@ -2052,9 +2615,8 @@ export function getTribeSafetyScore(state: GameState, tribeId: TribeId): number 
     gates * 3 +
     turrets * 8 +
     watchtowers * 5 +
-    (hasDevelopment(state, tribeId, "council_governance") ? 3 : 0) +
-    (hasDevelopment(state, tribeId, "abolition") ? 4 : 0) -
-    (hasActiveForcedLabor(state, tribeId) ? 6 : 0) +
+    developmentEffectAmount(state, tribeId, "safety") +
+    developmentEffectAmount(state, tribeId, "resource_control") +
     resourceControl.survivalBonus -
     activeWars * 10 -
     Math.max(0, 10 - population) * 1.5;
@@ -3465,21 +4027,15 @@ function updateYearlyWellbeing(state: GameState): void {
 function applyYearlyDevelopmentEffects(state: GameState, tribeId: TribeId, year: number): number {
   const tribe = state.tribes[tribeId];
   const population = countLivingPopulation(state, tribeId);
-  let happinessDelta = 0;
-  if (hasDevelopment(state, tribeId, "taxation")) {
-    const taxYield = Math.max(1, Math.round(population * (hasDevelopment(state, tribeId, "council_governance") ? 1.6 : 2)));
+  const yearlyGoldPerPopulation = developmentEffectAmount(state, tribeId, "yearly_gold_per_population");
+  if (yearlyGoldPerPopulation > 0 && population > 0) {
+    const taxYield = Math.max(1, Math.round(population * yearlyGoldPerPopulation));
     tribe.resources.gold += taxYield;
-    happinessDelta -= hasDevelopment(state, tribeId, "council_governance") ? 0 : 1;
     if (year % 10 === 0) {
-      addEvent(state, "YEARLY_TAXATION", `${tribe.name} collects yearly taxes`, `${taxYield} gold enters the treasury through taxation.`, [tribeId]);
+      addEvent(state, "YEARLY_TAXATION", `${tribe.name} collects institutional income`, `${taxYield} gold enters the treasury through developed institutions.`, [tribeId]);
     }
   }
-  if (hasDevelopment(state, tribeId, "council_governance")) happinessDelta += 1;
-  if (hasDevelopment(state, tribeId, "free_press")) happinessDelta += hasDevelopment(state, tribeId, "propaganda") ? 0 : 1;
-  if (hasDevelopment(state, tribeId, "propaganda")) happinessDelta += 1;
-  if (hasActiveForcedLabor(state, tribeId)) happinessDelta -= 2;
-  if (hasDevelopment(state, tribeId, "abolition")) happinessDelta += 1;
-  return happinessDelta;
+  return developmentEffectAmount(state, tribeId, "yearly_happiness");
 }
 
 function updateVictoryPressure(state: GameState): void {

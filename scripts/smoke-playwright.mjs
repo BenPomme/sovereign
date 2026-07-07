@@ -117,6 +117,8 @@ const hookCheck = await page.evaluate(() => {
     coordinateSystem: after.coordinateSystem,
     compactAiStatus: after.llm?.compactStatus,
     combatStatCoverage: after.combatStatCoverage,
+    developmentCatalog: after.developmentCatalog,
+    blueDevelopmentSummary: after.tribes?.find((tribe) => tribe.id === "blue")?.developmentSummary,
     visibleUnits: Array.isArray(after.visibleUnits) ? after.visibleUnits.length : 0,
     tribes: Array.isArray(after.tribes) ? after.tribes.length : 0,
     packets: Array.isArray(after.packets) ? after.packets.length : 0,
@@ -152,6 +154,18 @@ if (
 }
 if (!hookCheck.combatStatCoverage?.ok || hookCheck.combatStatCoverage?.byKind?.unitType !== 8 || hookCheck.combatStatCoverage?.byKind?.buildingType !== 8) {
   throw new Error(`render_game_to_text did not expose complete combat stat coverage: ${JSON.stringify(hookCheck.combatStatCoverage)}`);
+}
+if (
+  hookCheck.developmentCatalog?.total < 100 ||
+  hookCheck.developmentCatalog?.sampleCount > 16 ||
+  hookCheck.developmentCatalog?.omittedCount < 1 ||
+  hookCheck.blueDevelopmentSummary?.total !== hookCheck.developmentCatalog?.total ||
+  hookCheck.blueDevelopmentSummary?.availableSample?.length > 16
+) {
+  throw new Error(`render_game_to_text did not expose bounded 100+ development telemetry: ${JSON.stringify({
+    catalog: hookCheck.developmentCatalog,
+    tribe: hookCheck.blueDevelopmentSummary
+  })}`);
 }
 await page.waitForFunction(
   () => {

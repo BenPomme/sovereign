@@ -10,11 +10,13 @@ import {
   assignGathering,
   attachReplyToPacket,
   buildStructure,
+  canChooseDevelopment,
   chooseDevelopment,
   computeWealth,
   createGame,
   createResourceDeposit,
   damageBuilding,
+  developmentIds,
   estimateBreachTicks,
   getEffectiveBuildingCost,
   getBuildingRequirements,
@@ -1671,6 +1673,53 @@ function formatRepairState(repairState: RepairState): string {
   return "none";
 }
 
+function buildDevelopmentCatalogTelemetry() {
+  const categoryCounts = new Map<string, number>();
+  for (const developmentId of developmentIds) {
+    const development = getDevelopment(developmentId);
+    const category = development.category ?? "uncategorized";
+    categoryCounts.set(category, (categoryCounts.get(category) ?? 0) + 1);
+  }
+  return {
+    total: developmentIds.length,
+    categoryCounts: Object.fromEntries(categoryCounts),
+    sample: developmentIds.slice(0, 16).map((id) => {
+      const development = getDevelopment(id);
+      return {
+        id,
+        name: development.name,
+        category: development.category ?? "uncategorized",
+        phase: development.phase ?? "unknown"
+      };
+    }),
+    sampleCount: Math.min(16, developmentIds.length),
+    omittedCount: Math.max(0, developmentIds.length - 16)
+  };
+}
+
+function buildDevelopmentTelemetry(tribeId: TribeId) {
+  const unlocked = state.tribes[tribeId].developments.flatMap((id) => (developmentIds.includes(id) ? [id] : []));
+  const available = developmentIds.filter((id) => !unlocked.includes(id) && canChooseDevelopment(state, tribeId, id).ok);
+  const lockedCount = Math.max(0, developmentIds.length - unlocked.length - available.length);
+  return {
+    total: developmentIds.length,
+    unlockedCount: unlocked.length,
+    availableCount: available.length,
+    lockedCount,
+    unlockedSample: unlocked.slice(-12).map((id) => ({ id, name: getDevelopment(id).name })),
+    availableSample: available.slice(0, 16).map((id) => {
+      const development = getDevelopment(id);
+      return {
+        id,
+        name: development.name,
+        category: development.category ?? "uncategorized",
+        phase: development.phase ?? "unknown"
+      };
+    }),
+    availableOmittedCount: Math.max(0, available.length - 16)
+  };
+}
+
 function renderGameToText(): string {
   const livingUnits = Object.values(state.units).filter((unit) => unit.hp > 0);
   const visibleUnits = observerMode ? livingUnits : getVisibleUnits(state, playerTribe);
@@ -1786,6 +1835,7 @@ function renderGameToText(): string {
           id,
           name: getDevelopment(id).name
         })),
+        developmentSummary: buildDevelopmentTelemetry(tribeId),
         memory: state.sovereignMemories[tribeId]?.notes ?? [],
         diplomaticIntel: summarizeDiplomaticIntel(state, tribeId, 10),
         iterationInbox,
@@ -1803,6 +1853,7 @@ function renderGameToText(): string {
       defenseOverlay: showDefenseOverlay
     },
     boardReadability,
+    developmentCatalog: buildDevelopmentCatalogTelemetry(),
     combatStatCoverage: getCombatStatCoverageReport(state),
     buildingCosts: buildableBuildingTypes.map((type) => ({
       type,
@@ -5874,7 +5925,10 @@ function aiSnapshotPreviewMarkup(): string {
     : "unknown";
   const developments =
     Array.isArray(tribe.developments) && tribe.developments.length > 0
-      ? tribe.developments.map((development) => development.name ?? development.id ?? "unknown").join(", ")
+      ? `${tribe.developments
+          .slice(-12)
+          .map((development) => development.name ?? development.id ?? "unknown")
+          .join(", ")}${tribe.developments.length > 12 ? ` (+${tribe.developments.length - 12} more)` : ""}`
       : "none";
   const events = (snapshot.recentEvents ?? [])
     .slice(0, 3)

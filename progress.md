@@ -2649,3 +2649,44 @@ Original prompt: ok continue with roadmap make sure the AIs can report bugs and 
   - expand siege from one engine into multiple siege tools, projectiles, coordinated assaults, feints, retreats, and contested repair under fire,
   - continue the PixiJS graphics production pass with terrain/resource sprites, richer building silhouettes, animation states, projectiles, and zoom-aware labels,
   - address the existing gpt-oss rejected-order reports around stale/missing attack targets.
+
+### 2026-07-07 Full Development Tree Foundation
+
+- Delivered roadmap step 1 as a functional foundation:
+  - preserved the 16 stable core development IDs for backwards compatibility,
+  - generated 175 roadmap `SW-*` development nodes from the design roadmap,
+  - total selectable development catalog is now 191 nodes,
+  - every generated node has category, phase, cost, prerequisites, unlocks, and numeric effect metadata,
+  - generic effect handling now feeds yearly gold, wealth, happiness, safety, resource control, construction/repair cost, unit stats, building health, armor, attack, and range.
+- Kept the AI side non-scripted:
+  - removed the full `developmentId` enum from the Ollama schema so the tree can scale,
+  - prompts now expose bounded available-development summaries instead of dumping all 191 nodes,
+  - unavailable `DEVELOP` and locked `BUILD` orders no longer auto-convert into hidden prerequisite strategy,
+  - policy-to-development inference is catalog-driven and conservative, not a hardcoded legacy keyword list.
+- Browser and telemetry updates:
+  - `render_game_to_text()` now exposes catalog totals, category counts, bounded samples, omitted counts, and per-tribe unlocked/available/locked counts,
+  - AI snapshot UI bounds development display to avoid long comma-list overflow,
+  - live smoke timing was hardened to use Node-side sleeps for real Ollama latency instead of accelerated Playwright/browser waits.
+- QA completed:
+  - `pnpm exec tsc --noEmit` passed,
+  - focused `pnpm exec vitest run apps/client/src/llm.test.ts packages/sim/src/sim.test.ts --reporter=dot` passed: 116 tests,
+  - full `pnpm test` passed before final smoke-script hardening: 120 tests,
+  - `pnpm build` passed,
+  - `git diff --check` passed,
+  - `node --check scripts/smoke-live-ai-iteration.mjs` passed,
+  - `pnpm ai:review:strict -- --json --no-write` passed with 0 parser/transport open and the same existing gpt-oss stale/missing attack-target backlog,
+  - `pnpm smoke:buildings` passed with combat-stat coverage, wall/gate/turret destruction, siege engine, resource raid, damage, and repair evidence,
+  - `pnpm smoke:smooth` passed at 50.6 FPS with continuous visual interpolation,
+  - `pnpm smoke:mock-ollama` passed with parser recovery, transport cooldown/recovery, and gpt-oss chat-adapter coverage,
+  - full `pnpm smoke` passed and confirmed `developmentCatalog.total = 191`, `sampleCount = 16`, `omittedCount = 175`, and generated SW nodes in available options,
+  - `pnpm smoke:live-ai` passed with qwen/gpt-oss assigned lanes, 5/5 identities, 5/5 first doctrines, 0 fallback decisions, 0 parser/transport open issues, live issue feedback, fixed-lesson consumption, and strict review after the run.
+- Visual QA:
+  - inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-live-ai-iteration.png`,
+  - inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-smoke.png`,
+  - inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-buildings.png`,
+  - inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-smooth-frame-loop.png`.
+- Remaining backlog:
+  - tune the 191-node tree for balance, unique tradeoffs, synergies, and richer per-node mechanics,
+  - add UI search/filtering for the large development tree,
+  - address the existing gpt-oss stale/missing attack-target validation bucket,
+  - continue PixiJS production graphics: terrain/resource sprites, richer building silhouettes, animations, route previews, projectiles, and zoom-aware overlays.
