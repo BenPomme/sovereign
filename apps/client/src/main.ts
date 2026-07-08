@@ -25,8 +25,11 @@ import {
   getDevelopment,
   getMissingBuildingDevelopments,
   getPacketItemCombatStats,
+  getPopulationCap,
+  getRecentResourceDepletions,
   getRecentVisibleEvents,
   getResourceControlSummary,
+  getActiveGateAccessTreaties,
   getTownHall,
   getVictoryPressure,
   getVisibleResourceDepositIntel,
@@ -35,11 +38,13 @@ import {
   getBuildingTypeCombatStats,
   issueSovereignOrder,
   isBuildingMovementBlocking,
+  isTribeActive,
   isTileWalkable,
   recordAiDecision,
   renameUnits,
   buildingTypes,
   resourceTypes,
+  scarceMapResourceTypes,
   setGateState,
   summarizeDiplomaticIntel,
   summarizeSovereignMemory,
@@ -59,14 +64,23 @@ import {
   type DevelopmentId,
   type DiplomacyIntent,
   type GateAccessPolicy,
+  type GateDetainedPacketAction,
+  type GatePassageAction,
+  type GateSabotageAction,
   type GateState,
+  type GateTollMode,
   type GameState,
   type Packet,
+  type PerimeterDirection,
+  type PerimeterPattern,
   type Position,
   type PostGameLearning,
   type ResourceCost,
+  type ResourceDepletionRecord,
+  type ResourceDenialRecord,
   type ResourceDeposit,
   type ResourceType,
+  type SiegeProjectile,
   type TerrainType,
   type TribeId,
   type Unit,
@@ -146,6 +160,10 @@ declare global {
       tribeId?: TribeId,
       body?: string
     ) => { ok: boolean; requestCount: number; answerStatus: string | null; answer: string | null; accepted: string[]; rejected: string[] };
+    force_diplomacy_for_test?: (
+      recipientTribeId?: TribeId,
+      intent?: "peace" | "warning"
+    ) => { ok: boolean; packetId?: string; packetState?: Packet["state"]; messageIds?: string[]; reason?: string };
     hold_llm_followup_strategy_for_test?: (enabled?: boolean) => { ok: boolean; enabled: boolean };
     force_survival_review_for_test?: () => {
       ok: boolean;
@@ -188,6 +206,87 @@ declare global {
       buildingId?: string,
       gateAccessPolicy?: GateAccessPolicy
     ) => { ok: boolean; buildingId?: string; gateState?: GateState; gateAccessPolicy?: GateAccessPolicy; reason?: string };
+    force_gate_operation_for_test?: (
+      tribeId?: TribeId,
+      buildingId?: string,
+      gateOperationIntent?: string,
+      gateTerms?: string,
+      gateState?: GateState,
+      gateAccessPolicy?: GateAccessPolicy,
+      gateEntryAction?: GatePassageAction,
+      gateTollMode?: GateTollMode,
+      gateUnpaidAction?: GatePassageAction,
+      gatePublicNotice?: string
+    ) => {
+      ok: boolean;
+      buildingId?: string;
+      gateOperationIntent?: string;
+      gateTerms?: string;
+      gateEntryAction?: GatePassageAction;
+      gateTollMode?: GateTollMode;
+      gateUnpaidAction?: GatePassageAction;
+      gatePublicNotice?: string;
+      gateOperationCount?: number;
+      reason?: string;
+    };
+    force_gate_ransom_for_test?: () => {
+      ok: boolean;
+      buildingId?: string;
+      packetId?: string;
+      packetState?: Packet["state"];
+      gateDetainedPacketAction?: GateDetainedPacketAction;
+      releaseMessage?: string;
+      messageCount?: number;
+      blueGoldBefore?: number;
+      blueGoldAfter?: number;
+      redGoldBefore?: number;
+      redGoldAfter?: number;
+      eventTypes?: string[];
+      reason?: string;
+    };
+    force_gate_access_sabotage_for_test?: () => {
+      ok: boolean;
+      buildingId?: string;
+      grantTreatyId?: string;
+      revokeTreatyId?: string;
+      redPassableBefore?: boolean;
+      redPassableAfterGrant?: boolean;
+      redPassableAfterRevoke?: boolean;
+      redPassableAfterSabotage?: boolean;
+      redPassableAfterSabotageExpires?: boolean;
+      treatyPacketId?: string;
+      treatyPacketState?: Packet["state"];
+      treatyPacketGateIds?: string[];
+      treatyPacketRouteMemory?: string[];
+      treatyIncidentId?: string;
+      treatyIncidentAction?: GatePassageAction;
+      treatyIncidentSummary?: string;
+      treatyIncidentParticipants?: TribeId[];
+      treatyIncidentWitnesses?: TribeId[];
+      sabotageAction?: GateSabotageAction;
+      sabotageHistoryCount?: number;
+      damageBefore?: number;
+      damageAfter?: number;
+      eventTypes?: string[];
+      reason?: string;
+    };
+    force_perimeter_for_test?: () => {
+      ok: boolean;
+      buildingIds?: string[];
+      wallCount?: number;
+      gateCount?: number;
+      planCount?: number;
+      groupId?: string;
+      pattern?: PerimeterPattern;
+      direction?: PerimeterDirection;
+      length?: number;
+      gateIndex?: number;
+      wallBlocks?: boolean;
+      gatePassable?: boolean;
+      placementPreview?: unknown;
+      recentEvents?: string[];
+      reason?: string;
+    };
     force_damage_building_for_test?: () => {
       ok: boolean;
       targetBuildingId?: string;
@@ -224,6 +323,60 @@ declare global {
       recentEvents?: string[];
       reason?: string;
     };
+    force_artillery_for_test?: () => {
+      ok: boolean;
+      unitId?: string;
+      unitType?: UnitType;
+      targetBuildingId?: string;
+      projectileSeen?: boolean;
+      impactSeen?: boolean;
+      destroyed?: boolean;
+      projectileSnapshots?: Array<{ id: string; x: number; y: number; targetBuildingId: string; impactTick: number }>;
+      recentEvents?: string[];
+      reason?: string;
+    };
+    force_retreat_for_test?: () => {
+      ok: boolean;
+      targetBuildingId?: string;
+      retreatTarget?: Position;
+      retreatedUnits?: string[];
+      attackTasksBefore?: string[];
+      moveTasksAfter?: string[];
+      siegePlan?: unknown;
+      recentEvents?: string[];
+      reason?: string;
+    };
+    force_coordinated_feint_for_test?: () => {
+      ok: boolean;
+      coordinated?: {
+        ok: boolean;
+        targetBuildingId: string;
+        assemblyTarget: Position;
+        assembleTasksBefore: string[];
+        attackTasksAfter: string[];
+        siegePlan?: unknown;
+        recentEvents: string[];
+      };
+      wave?: {
+        ok: boolean;
+        targetBuildingId: string;
+        holdTarget: Position;
+        waitingTasksBefore: string[];
+        releaseTasksAfter: string[];
+        siegePlan?: unknown;
+        recentEvents: string[];
+      };
+      feint?: {
+        ok: boolean;
+        targetBuildingId: string;
+        retreatTarget: Position;
+        attackTasksBefore: string[];
+        moveTasksAfter: string[];
+        siegePlan?: unknown;
+        recentEvents: string[];
+      };
+      reason?: string;
+    };
     force_resource_raid_for_test?: () => {
       ok: boolean;
       target?: { x: number; y: number; type: ResourceType };
@@ -241,6 +394,33 @@ declare global {
       recentEvents?: string[];
       reason?: string;
     };
+    force_resource_depletion_for_test?: () => {
+      ok: boolean;
+      target?: { x: number; y: number; type: ResourceType };
+      beforeAmount?: number;
+      afterAmount?: number | null;
+      stockpileBefore?: number;
+      stockpileAfter?: number;
+      depleted?: boolean;
+      resourceDepletions?: unknown[];
+      recentEvents?: string[];
+      workerTask?: string;
+      reason?: string;
+    };
+    force_civilization_merger_for_test?: () => {
+      ok: boolean;
+      packetId?: string;
+      messageId?: string;
+      mergerRecordId?: string;
+      leaderTribeId?: TribeId;
+      mergedTribeId?: TribeId;
+      mergedIntoTribeId?: TribeId | null;
+      leaderPopulation?: number;
+      mergedPopulation?: number;
+      leaderResources?: Partial<Record<ResourceType, number>>;
+      recentMergers?: unknown[];
+      reason?: string;
+    };
     force_repair_for_test?: () => {
       ok: boolean;
       targetBuildingId?: string;
@@ -254,6 +434,18 @@ declare global {
       recentEvents?: string[];
       reason?: string;
     };
+    force_repair_under_fire_for_test?: () => {
+      ok: boolean;
+      targetBuildingId?: string;
+      beforeHp?: number;
+      afterHp?: number | null;
+      interrupted?: boolean;
+      completed?: boolean;
+      repairerTasks?: string[];
+      interruptedEvents?: string[];
+      selectedPanel?: string;
+      reason?: string;
+    };
     force_visual_motion_for_test?: () => { ok: boolean; unitId?: string; reason?: string };
   }
 }
@@ -263,9 +455,9 @@ const playerTribe: TribeId = "blue";
 const observerMode = true;
 const llmIntervalTicks = 420;
 const targetConcurrentLlmJobs = 3;
-const buildableBuildingTypes: BuildableBuildingType[] = ["farm", "watchtower", "wall", "gate", "turret"];
+const buildableBuildingTypes: BuildableBuildingType[] = ["farm", "house", "watchtower", "wall", "gate", "turret"];
 const contestedResourceTypes = new Set<ResourceType>(["coal", "iron", "limestone", "clay", "stone", "gold"]);
-const scarceResourceTypes = new Set<ResourceType>(["coal", "iron"]);
+const scarceResourceTypes = new Set<ResourceType>(scarceMapResourceTypes);
 const constructionResourceTypes = new Set<ResourceType>(["wood", "stone", "clay", "limestone", "iron", "coal"]);
 const persistentLearningStorageKey = "sovereign-worlds.learning.v1";
 const persistentLearningSchema = "sovereign-worlds-learning-v1";
@@ -275,7 +467,18 @@ const maxSimulationStepsPerFrame = 24;
 const minimumSmoothFps = 24;
 const llmFramePressureCooldownMs = 2500;
 
-const state = createGame(20260628);
+function initialGameSeed(): number {
+  const explicitSeed = new URLSearchParams(window.location.search).get("seed");
+  if (explicitSeed) {
+    const parsed = Number(explicitSeed);
+    if (Number.isFinite(parsed)) return Math.max(1, Math.floor(parsed)) >>> 0;
+  }
+  const bytes = new Uint32Array(1);
+  window.crypto?.getRandomValues?.(bytes);
+  return ((bytes[0] || Math.floor(Math.random() * 0xffffffff)) ^ Date.now()) >>> 0;
+}
+
+const state = createGame(initialGameSeed());
 let persistentLearning = loadPersistentLearning();
 let persistentLearningAppliedLessons = applyPersistentLearningToGame(state, persistentLearning);
 let persistedVictoryRecordId: string | undefined;
@@ -335,9 +538,16 @@ type HoverTarget =
 type LabelTier = "overview" | "tactical" | "detail";
 type VisualTextureAtlas = {
   resources: Record<ResourceType, Texture>;
-  buildings: Record<BuildingType, Texture>;
-  units: Record<UnitType, Texture>;
+  buildings: Record<BuildingType, Record<BuildingVisualState, Texture>>;
+  units: Record<UnitType, Record<UnitVisualState, Texture>>;
+  diplomacy: Record<DiplomacyTextureType, Texture>;
 };
+type BuildingVisualState = "normal" | "damaged" | "critical" | "repairing" | "gate_open" | "gate_closed" | "gate_locked";
+const buildingVisualStates: BuildingVisualState[] = ["normal", "damaged", "critical", "repairing", "gate_open", "gate_closed", "gate_locked"];
+type UnitVisualState = "idle" | "move" | "gather" | "deliver" | "repair" | "attack" | "scout";
+const unitVisualStates: UnitVisualState[] = ["idle", "move", "gather", "deliver", "repair", "attack", "scout"];
+type DiplomacyTextureType = "packet_outbound" | "packet_returning" | "packet_target";
+const diplomacyTextureTypes: DiplomacyTextureType[] = ["packet_outbound", "packet_returning", "packet_target"];
 type DurabilityCondition = "intact" | "worn" | "damaged" | "critical" | "destroyed";
 type RepairState = "none" | "repairing" | "recently_repaired";
 type CombatStatSnapshot = {
@@ -714,19 +924,53 @@ const nextLlmDecisionTick: Record<TribeId, number> = {
 
 const app = new Application();
 const world = new Container();
-const terrainLayer = new Graphics();
+const terrainLayer = new Container();
+const ambientTerrainGraphics = new Graphics();
 const resourceSpriteLayer = new Container();
-const routeLayer = new Graphics();
+const routeLayer = new Container();
+const routeStaticGraphics = new Graphics();
+const routePulseGraphics = new Graphics();
+const packetSpriteLayer = new Container();
 const dynamicLayer = new Container();
 const overlayGraphics = new Graphics();
+const buildingUnderlayGraphics = new Graphics();
+const buildingSpriteLayer = new Container();
 const buildingGraphics = new Graphics();
+const unitSpriteLayer = new Container();
 const dynamicGraphics = new Graphics();
+const unitOverlayGraphics = new Graphics();
 const labelBackdropGraphics = new Graphics();
 const dynamicLabelLayer = new Container();
 const fogLayer = new Graphics();
-dynamicLayer.addChild(overlayGraphics, buildingGraphics, dynamicGraphics, labelBackdropGraphics, dynamicLabelLayer);
-world.addChild(terrainLayer, resourceSpriteLayer, routeLayer, dynamicLayer, fogLayer);
+routeLayer.addChild(routeStaticGraphics, routePulseGraphics, packetSpriteLayer);
+dynamicLayer.addChild(
+  overlayGraphics,
+  buildingUnderlayGraphics,
+  buildingSpriteLayer,
+  buildingGraphics,
+  dynamicGraphics,
+  unitSpriteLayer,
+  unitOverlayGraphics,
+  labelBackdropGraphics,
+  dynamicLabelLayer
+);
+world.addChild(terrainLayer, ambientTerrainGraphics, resourceSpriteLayer, routeLayer, dynamicLayer, fogLayer);
 let visualTextures: VisualTextureAtlas | undefined;
+const resourceSpritePool: Sprite[] = [];
+let activeResourceSpriteCount = 0;
+const buildingSpritePool: Sprite[] = [];
+let activeBuildingSpriteCount = 0;
+const unitSpritePool: Sprite[] = [];
+let activeUnitSpriteCount = 0;
+const packetSpritePool: Sprite[] = [];
+let activePacketSpriteCount = 0;
+const mapTextPool: Text[] = [];
+let activeMapTextCount = 0;
+let lastRouteStaticSignature = "";
+let activeRouteVisualCount = 0;
+let activeAmbientTerrainCueCount = 0;
+let activeFogTileCount = 0;
+let activeFogEdgeCueCount = 0;
 
 let accumulated = 0;
 let renderAlpha = 1;
@@ -763,6 +1007,7 @@ async function bootstrap(): Promise<void> {
     background: "#11100e",
     antialias: true,
     autoDensity: true,
+    preserveDrawingBuffer: new URLSearchParams(window.location.search).has("qaCanvasReadback"),
     resolution: window.devicePixelRatio || 1
   });
   viewport.append(app.canvas);
@@ -770,7 +1015,7 @@ async function bootstrap(): Promise<void> {
   visualTextures = createVisualTextureAtlas();
   app.ticker.maxFPS = 60;
   app.ticker.minFPS = minimumSmoothFps;
-  centerCamera({ x: 66, y: 66 });
+  centerCamera({ x: MAP_SIZE / 2, y: MAP_SIZE / 2 });
   resetVisualFrames(state);
 
   refreshTerrainLayer();
@@ -830,7 +1075,8 @@ function render(options: RenderOptions = {}): void {
   const updateLabels = !options.frame || options.forceLabels === true || now - lastLabelRenderMs >= frameLabelIntervalMs;
   const updateHudNow = options.forceHud === true || !options.frame || now - lastHudRenderMs >= frameHudIntervalMs;
   const updateTooltipNow = options.forceTooltip === true || !options.frame || now - lastTooltipRenderMs >= frameTooltipIntervalMs;
-  drawRoutes(state, routeLayer);
+  drawAmbientTerrain(state, ambientTerrainGraphics);
+  drawRoutes(state);
   drawDynamic(state, dynamicLayer, { updateLabels });
   if (options.forceFog || !options.frame || fogDirty) {
     drawFog(state, fogLayer);
@@ -849,9 +1095,16 @@ function render(options: RenderOptions = {}): void {
 }
 
 function refreshTerrainLayer(): void {
-  terrainLayer.cacheAsTexture(false);
-  drawTerrain(state, terrainLayer);
-  terrainLayer.cacheAsTexture(true);
+  terrainLayer.removeChildren();
+  const chunkTiles = 32;
+  for (let y = 0; y < MAP_SIZE; y += chunkTiles) {
+    for (let x = 0; x < MAP_SIZE; x += chunkTiles) {
+      const chunk = new Graphics();
+      drawTerrainChunk(state, chunk, x, Math.min(MAP_SIZE, x + chunkTiles), y, Math.min(MAP_SIZE, y + chunkTiles));
+      chunk.cacheAsTexture(true);
+      terrainLayer.addChild(chunk);
+    }
+  }
 }
 
 function advanceSimulation(seconds: number, options: { render?: boolean; visual?: boolean; scheduleAi?: boolean } = {}): void {
@@ -953,6 +1206,7 @@ function installTestHooks(): void {
   window.force_live_authored_bug_report_for_test = forceLiveAuthoredBugReportForTest;
   window.refresh_ai_report_review_for_test = refreshAiReportReviewForTest;
   window.force_ai_info_request_for_test = forceAiInfoRequestForTest;
+  window.force_diplomacy_for_test = forceDiplomacyForTest;
   window.hold_llm_followup_strategy_for_test = holdLlmFollowupStrategyForTest;
   window.force_survival_review_for_test = forceSurvivalReviewForTest;
   window.force_gold_timer_end_for_test = forceSurvivalReviewForTest;
@@ -960,11 +1214,21 @@ function installTestHooks(): void {
   window.force_resource_boost_for_test = forceResourceBoostForTest;
   window.force_development_for_test = forceDevelopmentForTest;
   window.force_gate_state_for_test = forceGateStateForTest;
+  window.force_gate_operation_for_test = forceGateOperationForTest;
+  window.force_gate_ransom_for_test = forceGateRansomForTest;
+  window.force_gate_access_sabotage_for_test = forceGateAccessSabotageForTest;
+  window.force_perimeter_for_test = forcePerimeterForTest;
   window.force_damage_building_for_test = forceDamageBuildingForTest;
   window.force_siege_for_test = forceSiegeForTest;
   window.force_siege_engine_for_test = forceSiegeEngineForTest;
+  window.force_artillery_for_test = forceArtilleryForTest;
+  window.force_retreat_for_test = forceRetreatForTest;
+  window.force_coordinated_feint_for_test = forceCoordinatedFeintForTest;
   window.force_resource_raid_for_test = forceResourceRaidForTest;
+  window.force_resource_depletion_for_test = forceResourceDepletionForTest;
+  window.force_civilization_merger_for_test = forceCivilizationMergerForTest;
   window.force_repair_for_test = forceRepairForTest;
+  window.force_repair_under_fire_for_test = forceRepairUnderFireForTest;
   window.force_visual_motion_for_test = forceVisualMotionForTest;
 }
 
@@ -1375,10 +1639,10 @@ async function forceLiveAuthoredBugReportForTest(
       orders: []
     };
   }
-  if (state.tribes[targetTribeId].eliminated) {
+  if (!isTribeActive(state, targetTribeId)) {
     return {
       ok: false,
-      reason: `${state.tribes[targetTribeId].name} is eliminated and cannot author a report.`,
+      reason: `${state.tribes[targetTribeId].name} is not an active separate civilization and cannot author a report.`,
       issueCount: aiBugReports.length,
       accepted: [],
       rejected: [],
@@ -1675,21 +1939,34 @@ function formatRepairState(repairState: RepairState): string {
 
 function buildDevelopmentCatalogTelemetry() {
   const categoryCounts = new Map<string, number>();
+  const phaseCounts = new Map<string, number>();
   for (const developmentId of developmentIds) {
     const development = getDevelopment(developmentId);
     const category = development.category ?? "uncategorized";
+    const phase = development.phase ?? "unknown";
     categoryCounts.set(category, (categoryCounts.get(category) ?? 0) + 1);
+    phaseCounts.set(phase, (phaseCounts.get(phase) ?? 0) + 1);
   }
   return {
     total: developmentIds.length,
     categoryCounts: Object.fromEntries(categoryCounts),
+    phaseCounts: Object.fromEntries(phaseCounts),
+    filters: {
+      textFields: ["id", "name", "aliases", "tradeoffs", "synergies", "socialCosts"],
+      categories: Array.from(categoryCounts.keys()).sort(),
+      phases: Array.from(phaseCounts.keys()).sort()
+    },
     sample: developmentIds.slice(0, 16).map((id) => {
       const development = getDevelopment(id);
       return {
         id,
         name: development.name,
         category: development.category ?? "uncategorized",
-        phase: development.phase ?? "unknown"
+        phase: development.phase ?? "unknown",
+        aliases: development.aliases.slice(0, 5),
+        tradeoffs: development.tradeoffs.slice(0, 2),
+        synergies: development.synergies.slice(0, 2),
+        socialCosts: development.socialCosts.slice(0, 2)
       };
     }),
     sampleCount: Math.min(16, developmentIds.length),
@@ -1713,10 +1990,49 @@ function buildDevelopmentTelemetry(tribeId: TribeId) {
         id,
         name: development.name,
         category: development.category ?? "uncategorized",
-        phase: development.phase ?? "unknown"
+        phase: development.phase ?? "unknown",
+        aliases: development.aliases.slice(0, 5),
+        tradeoffs: development.tradeoffs.slice(0, 2),
+        synergies: development.synergies.slice(0, 2),
+        socialCosts: development.socialCosts.slice(0, 2)
       };
     }),
     availableOmittedCount: Math.max(0, available.length - 16)
+  };
+}
+
+function buildPopulationOutlook(game: GameState, tribeId: TribeId, score?: VictoryScoreEntry) {
+  const tribe = game.tribes[tribeId];
+  const population = Object.values(game.units).filter((unit) => unit.tribeId === tribeId && unit.hp > 0).length;
+  const houseCount = Object.values(game.buildings).filter((building) => building.tribeId === tribeId && building.type === "house" && building.hp > 0).length;
+  const populationCap = getPopulationCap(game, tribeId);
+  const baseCapacity = tribe.populationCap;
+  const housingCapacity = houseCount * 8;
+  const developmentCapacity = Math.max(0, populationCap - baseCapacity - housingCapacity);
+  const nextGrowthFoodCost = 38 + Math.max(0, Math.floor(population * 0.6));
+  const happiness = Math.round(tribe.happiness);
+  const safety = score?.safety ?? 0;
+  const blockers: string[] = [];
+  if (tribe.eliminated) blockers.push("eliminated");
+  if (tribe.mergedIntoTribeId) blockers.push(`merged_into_${tribe.mergedIntoTribeId}`);
+  if (population >= populationCap) blockers.push("capacity");
+  if (tribe.resources.food < nextGrowthFoodCost) blockers.push("food");
+  if (happiness < 56) blockers.push("happiness");
+  if (safety < 38) blockers.push("safety");
+  return {
+    population,
+    populationCap,
+    baseCapacity,
+    houseCount,
+    housingCapacity,
+    developmentCapacity,
+    nextGrowthFoodCost,
+    availableFood: Math.round(tribe.resources.food),
+    happiness,
+    safety,
+    growthEligible: blockers.length === 0,
+    blockers,
+    rule: "growth is limited by capacity, food, happiness, and safety; there is no hidden AI-only population cap"
   };
 }
 
@@ -1724,6 +2040,9 @@ function renderGameToText(): string {
   const livingUnits = Object.values(state.units).filter((unit) => unit.hp > 0);
   const visibleUnits = observerMode ? livingUnits : getVisibleUnits(state, playerTribe);
   const visibleBuildings = observerMode ? Object.values(state.buildings) : getVisibleBuildings(state, playerTribe);
+  const visibleProjectiles = observerMode
+    ? Object.values(state.projectiles)
+    : Object.values(state.projectiles).filter((projectile) => state.visibility[playerTribe]?.[tileIndex(Math.round(projectile.x), Math.round(projectile.y))] === 2);
   const leader = tribeIds.slice().sort((a, b) => computeWealth(state, b) - computeWealth(state, a))[0];
   const victory = getVictoryPressure(state);
   const aiStatus = compactAiStatus(state);
@@ -1731,6 +2050,7 @@ function renderGameToText(): string {
   const payload = {
     coordinateSystem: "tile coordinates, origin top-left, x increases right, y increases down",
     mode: observerMode ? "observer" : "player",
+    seed: state.seed,
     tick: state.tick,
     paused,
     speed: speedOptions[speedIndex],
@@ -1755,7 +2075,7 @@ function renderGameToText(): string {
       identitySetupComplete,
       openingIdentitySetupPending: openingIdentitySetupPending(),
       identityProgress: {
-        chosen: tribeIds.filter((tribeId) => state.tribes[tribeId].identityChosen || state.tribes[tribeId].eliminated).length,
+        chosen: tribeIds.filter((tribeId) => state.tribes[tribeId].identityChosen || !isTribeActive(state, tribeId)).length,
         total: tribeIds.length
       },
       schedulingStarted: llmSchedulingStarted,
@@ -1772,7 +2092,7 @@ function renderGameToText(): string {
       identityBootstrapModel: identityBootstrapModelForTribe(playerTribe) || null,
       strategyBootstrapModel: strategyBootstrapModelForTribe(playerTribe) || null,
       firstDoctrineProgress: {
-        written: tribeIds.filter((tribeId) => state.tribes[tribeId].eliminated || hasDoctrineDecision(tribeId)).length,
+        written: tribeIds.filter((tribeId) => !isTribeActive(state, tribeId) || hasDoctrineDecision(tribeId)).length,
         total: tribeIds.length
       },
       modelAssignments: tribeIds.reduce<Record<string, string>>((assignments, tribeId) => {
@@ -1806,6 +2126,14 @@ function renderGameToText(): string {
       selected: selectedBuildingId === flash.buildingId,
       visible: visibleBuildings.some((building) => building.id === flash.buildingId)
     })),
+    recentFortificationPlans: state.fortificationPlans.slice(-20),
+    recentGateOperations: state.gateOperations.slice(-20),
+    recentGateAccessTreaties: state.gateAccessTreaties.slice(-20),
+    recentGateTreatyIncidents: state.gateTreatyIncidents.slice(-20),
+    recentGateSabotageHistory: state.gateSabotageHistory.slice(-20),
+    recentSiegePlans: state.siegePlans.slice(-20),
+    recentResourceDepletions: getRecentResourceDepletions(state).slice(-20),
+    recentCivilizationMergers: state.civilizationMergers.slice(-20),
     camera: {
       x: Number(camera.x.toFixed(2)),
       y: Number(camera.y.toFixed(2)),
@@ -1816,6 +2144,8 @@ function renderGameToText(): string {
     tribes: tribeIds.map((tribeId) => {
       const units = livingUnits.filter((unit) => unit.tribeId === tribeId);
       const iterationInbox = buildAiIterationInbox(tribeId);
+      const score = victory.scoreByTribe.find((entry) => entry.tribeId === tribeId);
+      const populationOutlook = buildPopulationOutlook(state, tribeId, score);
       return {
         id: tribeId,
         defaultName: state.tribes[tribeId].defaultName,
@@ -1828,9 +2158,17 @@ function renderGameToText(): string {
         happiness: Math.round(state.tribes[tribeId].happiness),
         eliminated: state.tribes[tribeId].eliminated,
         eliminatedYear: state.tribes[tribeId].eliminatedYear ?? null,
-        units: units.length,
-        military: units.filter((unit) => unit.type === "militia" || unit.type === "archer" || unit.type === "siege_engine").length,
+        activeCivilization: isTribeActive(state, tribeId),
+        mergedIntoTribeId: state.tribes[tribeId].mergedIntoTribeId ?? null,
+        mergedLeaderTribeId: state.tribes[tribeId].mergedLeaderTribeId ?? null,
+        mergedYear: state.tribes[tribeId].mergedYear ?? null,
+        mergedTerms: state.tribes[tribeId].mergedTerms ?? null,
+        units: populationOutlook.population,
+        populationCap: populationOutlook.populationCap,
+        populationOutlook,
+        military: units.filter((unit) => isMilitaryUnitType(unit.type)).length,
         messengers: units.filter((unit) => unit.type === "messenger").length,
+        houses: populationOutlook.houseCount,
         developments: state.tribes[tribeId].developments.map((id) => ({
           id,
           name: getDevelopment(id).name
@@ -1890,6 +2228,25 @@ function renderGameToText(): string {
         screenY: Number((camera.y + (visual.y * TILE + TILE / 2) * camera.scale).toFixed(2))
       };
     }),
+    visibleProjectiles: visibleProjectiles.slice(0, 40).map((projectile) => ({
+      id: projectile.id,
+      projectileType: projectile.projectileType,
+      tribeId: projectile.tribeId,
+      originUnitId: projectile.originUnitId,
+      targetBuildingId: projectile.targetBuildingId,
+      x: Number(projectile.x.toFixed(2)),
+      y: Number(projectile.y.toFixed(2)),
+      targetX: projectile.targetX,
+      targetY: projectile.targetY,
+      hp: projectile.hp,
+      maxHp: projectile.maxHp,
+      armor: projectile.armor,
+      attack: projectile.attack,
+      range: projectile.range,
+      impactTick: projectile.impactTick,
+      screenX: Number((camera.x + (projectile.x * TILE + TILE / 2) * camera.scale).toFixed(2)),
+      screenY: Number((camera.y + (projectile.y * TILE + TILE / 2) * camera.scale).toFixed(2))
+    })),
     visibleBuildings: visibleBuildings.slice(0, 80).map((building) => {
       const durability = buildingDurabilitySnapshot(state, building);
       return {
@@ -1910,6 +2267,9 @@ function renderGameToText(): string {
         combatStats: durability,
         gateState: building.type === "gate" ? building.gateState ?? "open" : null,
         gateAccessPolicy: building.type === "gate" ? building.gateAccessPolicy ?? "owner_allies" : null,
+        gateOperation: building.type === "gate" ? building.gateOperation ?? null : null,
+        gateAccessTreaties: building.type === "gate" ? getActiveGateAccessTreaties(state, building.id) : [],
+        gateSabotage: building.type === "gate" ? building.gateSabotage ?? null : null,
         gatePassableBy: building.type === "gate" ? tribeIds.filter((tribeId) => !isBuildingMovementBlockingForDisplay(building, tribeId)) : [],
         blocksMovement: durability.blocksMovement,
         breachEstimateTicks: building.tribeId !== playerTribe ? estimateBreachTicks(state, playerTribe, building.id) ?? null : null,
@@ -1933,6 +2293,7 @@ function renderGameToText(): string {
       y: observation.y,
       hp: observation.hp
     })),
+    resourceLayoutFingerprint: buildResourceLayoutFingerprint(state),
     resourceTiles: resourceTypes.map((type) => summarizeResourceTiles(state, type)),
     contestedResourceSites: summarizeContestedResourceSites(state),
     resourceControl: tribeIds.map((tribeId) => getResourceControlSummary(state, tribeId)),
@@ -1951,6 +2312,7 @@ function renderGameToText(): string {
           messages: packet.messageIds.length,
           carrierUnitId: packet.carrierUnitId ?? null,
           overdueAnnounced: packet.overdueAnnounced,
+          routeMemory: packet.routeMemory.slice(-6),
           hp: durability.hp,
           maxHp: durability.maxHp,
           healthPct: durability.healthPct,
@@ -2103,6 +2465,37 @@ function forceDevelopmentForTest(
     : { ok: false, developments: [...tribe.developments], reason: result.reason };
 }
 
+function forceDiplomacyForTest(
+  recipientTribeId: TribeId = "red",
+  intent: "peace" | "warning" = "peace"
+): { ok: boolean; packetId?: string; packetState?: Packet["state"]; messageIds?: string[]; reason?: string } {
+  let result = sendPlayerMessage(state, recipientTribeId, intent);
+  if (!result.ok && result.reason.includes("No idle messenger")) {
+    state.tribes.blue.resources.food = Math.max(state.tribes.blue.resources.food, 80);
+    state.tribes.blue.resources.gold = Math.max(state.tribes.blue.resources.gold, 40);
+    const recruited = issueSovereignOrder(state, "blue", {
+      type: "RECRUIT",
+      unitType: "messenger",
+      priority: 1,
+      reason: "Browser smoke diplomacy hook needs a fresh courier."
+    });
+    if (!recruited.ok) {
+      render();
+      return { ok: false, reason: `No idle messenger and recruit failed: ${recruited.reason}` };
+    }
+    result = sendPlayerMessage(state, recipientTribeId, intent);
+  }
+  render();
+  if (!result.ok) return { ok: false, reason: result.reason };
+  const packet = state.packets[result.packetId];
+  return {
+    ok: true,
+    packetId: result.packetId,
+    packetState: packet?.state,
+    messageIds: packet?.messageIds ? [...packet.messageIds] : []
+  };
+}
+
 function forceGateStateForTest(
   tribeId: TribeId = playerTribe,
   gateState: GateState = "locked",
@@ -2120,6 +2513,523 @@ function forceGateStateForTest(
   return result.ok
     ? { ok: true, buildingId: result.buildingId, gateState, gateAccessPolicy: gate?.type === "gate" ? gate.gateAccessPolicy ?? "owner_allies" : undefined }
     : { ok: false, reason: result.reason };
+}
+
+function forceGateOperationForTest(
+  tribeId: TribeId = playerTribe,
+  buildingId?: string,
+  gateOperationIntent = "controlled passage toll",
+  gateTerms = "Admit named envoys only after a gold toll; detain suspicious messengers.",
+  gateState: GateState = "open",
+  gateAccessPolicy: GateAccessPolicy = "all",
+  gateEntryAction: GatePassageAction = "delay",
+  gateTollMode: GateTollMode = "optional",
+  gateUnpaidAction: GatePassageAction = "refuse",
+  gatePublicNotice = "Gate is open under posted passage rules."
+): {
+  ok: boolean;
+  buildingId?: string;
+  gateOperationIntent?: string;
+  gateTerms?: string;
+  gateEntryAction?: GatePassageAction;
+  gateTollMode?: GateTollMode;
+  gateUnpaidAction?: GatePassageAction;
+  gatePublicNotice?: string;
+  gateOperationCount?: number;
+  reason?: string;
+} {
+  if (!validTribeId(tribeId)) return { ok: false, reason: "unknown tribe" };
+  const result = issueSovereignOrder(state, tribeId, {
+    type: "GATE_OPERATION",
+    priority: 1,
+    buildingId,
+    gateState,
+    gateAccessPolicy,
+    gateOperationIntent,
+    gateTerms,
+    gatePublicNotice,
+    gateEntryAction,
+    gateTollMode,
+    gateUnpaidAction,
+    gateTollGold: 3,
+    gateOperationDurationTicks: TICK_RATE * 60,
+    reason: "Browser smoke gate-operation test."
+  });
+  render();
+  if (!result.ok) return { ok: false, reason: result.reason, gateOperationCount: state.gateOperations.length };
+  const latest = state.gateOperations.at(-1);
+  return {
+    ok: true,
+    buildingId: latest?.buildingId,
+    gateOperationIntent: latest?.gateOperationIntent,
+    gateTerms: latest?.gateTerms,
+    gateEntryAction: latest?.entryAction,
+    gateTollMode: latest?.tollMode,
+    gateUnpaidAction: latest?.unpaidAction,
+    gatePublicNotice: latest?.gatePublicNotice,
+    gateOperationCount: state.gateOperations.length
+  };
+}
+
+function forceGateRansomForTest(): {
+  ok: boolean;
+  buildingId?: string;
+  packetId?: string;
+  packetState?: Packet["state"];
+  gateDetainedPacketAction?: GateDetainedPacketAction;
+  releaseMessage?: string;
+  messageCount?: number;
+  blueGoldBefore?: number;
+  blueGoldAfter?: number;
+  redGoldBefore?: number;
+  redGoldAfter?: number;
+  eventTypes?: string[];
+  reason?: string;
+} {
+  const blue = state.tribes.blue;
+  const red = state.tribes.red;
+  for (const type of resourceTypes) {
+    blue.resources[type] = Math.max(blue.resources[type], 1000);
+    red.resources[type] = Math.max(red.resources[type], type === "gold" ? 40 : 300);
+  }
+  for (const developmentId of ["masonry", "ironworking"] as const) {
+    const result = chooseDevelopment(state, "blue", developmentId);
+    if (!result.ok && !blue.developments.includes(developmentId)) {
+      render();
+      return { ok: false, reason: result.reason };
+    }
+  }
+
+  let gate = Object.values(state.buildings)
+    .filter((building) => building.tribeId === "blue" && building.type === "gate" && building.hp > 0)
+    .sort((left, right) => left.id.localeCompare(right.id))[0];
+  if (!gate) {
+    const built = buildStructure(state, "blue", "gate", getTownHall(state, "blue"));
+    if (!built.ok) {
+      render();
+      return { ok: false, reason: built.reason };
+    }
+    gate = state.buildings[built.buildingId];
+  }
+
+  const detain = issueSovereignOrder(state, "blue", {
+    type: "GATE_OPERATION",
+    priority: 1,
+    buildingId: gate.id,
+    recipientTribeId: "red",
+    gateState: "open",
+    gateAccessPolicy: "all",
+    gateOperationIntent: "detain Red courier for ransom leverage",
+    gateTerms: "Hold the courier until Red pays for safe return.",
+    gateEntryAction: "detain",
+    reason: "Browser smoke prepares an explicit detained-packet ransom."
+  });
+  if (!detain.ok) {
+    render();
+    return { ok: false, buildingId: gate.id, reason: detain.reason };
+  }
+
+  const redIdleMessenger = Object.values(state.units).find((unit) => unit.tribeId === "red" && unit.type === "messenger" && unit.hp > 0 && unit.task.kind === "idle");
+  if (!redIdleMessenger) {
+    render();
+    return { ok: false, buildingId: gate.id, reason: "red has no idle messenger" };
+  }
+
+  const existingPacketIds = new Set(Object.keys(state.packets));
+  const sent = issueSovereignOrder(state, "red", {
+    type: "SEND_MESSENGER",
+    priority: 1,
+    recipientTribeId: "blue",
+    messageType: "LETTER",
+    diplomacyIntent: "NONE",
+    subject: "Gate audience request",
+    body: "I request safe passage through your gate to speak about the road.",
+    reason: "Browser smoke creates a courier that can be detained and ransomed."
+  });
+  if (!sent.ok) {
+    render();
+    return { ok: false, buildingId: gate.id, reason: sent.reason };
+  }
+  const packet = Object.values(state.packets).find((candidate) => !existingPacketIds.has(candidate.id) && candidate.originTribeId === "red" && candidate.recipientTribeId === "blue");
+  if (!packet) {
+    render();
+    return { ok: false, buildingId: gate.id, reason: "could not find newly sent packet" };
+  }
+  const messenger = packet.carrierUnitId ? state.units[packet.carrierUnitId] : undefined;
+  if (!messenger) {
+    render();
+    return { ok: false, buildingId: gate.id, packetId: packet.id, reason: "new packet has no carrier" };
+  }
+
+  messenger.x = packet.destination.x;
+  messenger.y = packet.destination.y;
+  advanceGameTicks(state, 1);
+  if (state.packets[packet.id].state !== "DETAINED") {
+    render();
+    return { ok: false, buildingId: gate.id, packetId: packet.id, packetState: state.packets[packet.id].state, reason: "packet was not detained" };
+  }
+
+  const blueGoldBefore = blue.resources.gold;
+  const redGoldBefore = red.resources.gold;
+  const ransom = issueSovereignOrder(state, "blue", {
+    type: "GATE_OPERATION",
+    priority: 1,
+    buildingId: gate.id,
+    recipientTribeId: "red",
+    gateState: "open",
+    gateAccessPolicy: "all",
+    gateOperationIntent: "release Red courier after ransom",
+    gateTerms: "Red pays gold and receives a warning through the same courier.",
+    gateDetainedPacketAction: "ransom",
+    gateDetainedPacketId: packet.id,
+    gateRansomGold: 10,
+    gateReleaseSubject: "Ransom release",
+    gateReleaseMessage: "Your courier returns because the ransom was paid; I may still close the road if Red lies about wealth.",
+    reason: "Browser smoke executes explicit detained-packet ransom release."
+  });
+  selectAndShowBuilding(gate);
+  render();
+  if (!ransom.ok) {
+    return { ok: false, buildingId: gate.id, packetId: packet.id, packetState: state.packets[packet.id].state, reason: ransom.reason };
+  }
+  const releasedPacket = state.packets[packet.id];
+  const latestOperation = state.gateOperations.at(-1);
+  return {
+    ok: true,
+    buildingId: gate.id,
+    packetId: packet.id,
+    packetState: releasedPacket.state,
+    gateDetainedPacketAction: latestOperation?.detainedPacketAction,
+    releaseMessage: releasedPacket.messageIds.length > 1 ? state.messages[releasedPacket.messageIds[1]]?.body : undefined,
+    messageCount: releasedPacket.messageIds.length,
+    blueGoldBefore,
+    blueGoldAfter: blue.resources.gold,
+    redGoldBefore,
+    redGoldAfter: red.resources.gold,
+    eventTypes: state.events.slice(-12).map((event) => event.type)
+  };
+}
+
+function forceGateAccessSabotageForTest(): {
+  ok: boolean;
+  buildingId?: string;
+  grantTreatyId?: string;
+  revokeTreatyId?: string;
+  redPassableBefore?: boolean;
+  redPassableAfterGrant?: boolean;
+  redPassableAfterRevoke?: boolean;
+  redPassableAfterSabotage?: boolean;
+  redPassableAfterSabotageExpires?: boolean;
+  treatyPacketId?: string;
+  treatyPacketState?: Packet["state"];
+  treatyPacketGateIds?: string[];
+  treatyPacketRouteMemory?: string[];
+  treatyIncidentId?: string;
+  treatyIncidentAction?: GatePassageAction;
+  treatyIncidentSummary?: string;
+  treatyIncidentParticipants?: TribeId[];
+  treatyIncidentWitnesses?: TribeId[];
+  sabotageAction?: GateSabotageAction;
+  sabotageHistoryCount?: number;
+  damageBefore?: number;
+  damageAfter?: number;
+  eventTypes?: string[];
+  reason?: string;
+} {
+  const blue = state.tribes.blue;
+  for (const type of resourceTypes) blue.resources[type] = Math.max(blue.resources[type], 1200);
+  const red = state.tribes.red;
+  for (const type of resourceTypes) red.resources[type] = Math.max(red.resources[type], 1200);
+  for (const developmentId of ["masonry", "ironworking"] as const) {
+    const result = chooseDevelopment(state, "blue", developmentId);
+    if (!result.ok && !blue.developments.includes(developmentId)) {
+      render();
+      return { ok: false, reason: result.reason };
+    }
+  }
+
+  const townHall = getTownHall(state, "blue");
+  let gate = Object.values(state.buildings)
+    .filter((building) => building.tribeId === "blue" && building.type === "gate" && building.hp > 0)
+    .sort((left, right) => Math.hypot(left.x - townHall.x, left.y - townHall.y) - Math.hypot(right.x - townHall.x, right.y - townHall.y) || left.id.localeCompare(right.id))[0];
+  if (!gate) {
+    const built = buildStructure(state, "blue", "gate", getTownHall(state, "blue"));
+    if (!built.ok) {
+      render();
+      return { ok: false, reason: built.reason };
+    }
+    gate = state.buildings[built.buildingId];
+  }
+  const greenWitness = Object.values(state.units).find((unit) => unit.tribeId === "green" && unit.type === "sentinel" && unit.hp > 0);
+  if (!greenWitness) {
+    render();
+    return { ok: false, buildingId: gate.id, reason: "green has no sentinel witness" };
+  }
+  greenWitness.x = gate.x + 2;
+  greenWitness.y = gate.y;
+  delete gate.gateSabotage;
+  const reset = setGateState(state, "blue", "open", gate.id, "owner_only");
+  if (!reset.ok) {
+    render();
+    return { ok: false, buildingId: gate.id, reason: reset.reason };
+  }
+  const redPassableBefore = isTileWalkable(state, gate.x, gate.y, "red");
+  const grant = issueSovereignOrder(state, "blue", {
+    type: "GATE_OPERATION",
+    priority: 1,
+    buildingId: gate.id,
+    recipientTribeId: "red",
+    gateOperationIntent: "grant Red controlled treaty passage",
+    gateTerms: "Red may cross this gate while the treaty writ is active.",
+    gateAccessTreatyAction: "grant",
+    gateAccessTreatyName: "Smoke road writ",
+    gateAccessTreatyTerms: "Red may pass this gate only under this writ.",
+    gateAccessTreatyDurationTicks: TICK_RATE * 10,
+    reason: "Browser smoke explicit access treaty grant."
+  });
+  if (!grant.ok) {
+    render();
+    return { ok: false, buildingId: gate.id, reason: grant.reason };
+  }
+  const grantTreatyId = state.gateAccessTreaties.at(-1)?.id;
+  const redPassableAfterGrant = isTileWalkable(state, gate.x, gate.y, "red");
+  let idleRedMessenger = Object.values(state.units).find((unit) => unit.tribeId === "red" && unit.type === "messenger" && unit.hp > 0 && unit.task.kind === "idle");
+  if (!idleRedMessenger) {
+    const trained = issueSovereignOrder(state, "red", {
+      type: "RECRUIT",
+      priority: 1,
+      unitType: "messenger",
+      reason: "Browser smoke needs a fresh courier for safe-passage route proof."
+    });
+    if (!trained.ok) {
+      render();
+      return { ok: false, buildingId: gate.id, grantTreatyId, reason: trained.reason };
+    }
+    idleRedMessenger = Object.values(state.units).find((unit) => unit.tribeId === "red" && unit.type === "messenger" && unit.hp > 0 && unit.task.kind === "idle");
+  }
+  const existingPacketIds = new Set(Object.keys(state.packets));
+  const treatyCourier = issueSovereignOrder(state, "red", {
+    type: "SEND_MESSENGER",
+    priority: 1,
+    recipientTribeId: "blue",
+    messageType: "LETTER",
+    diplomacyIntent: "NONE",
+    subject: "Safe-passage route proof",
+    body: "Red courier travels under the Smoke road writ.",
+    reason: "Browser smoke proves named gate treaty route evidence."
+  });
+  if (!treatyCourier.ok) {
+    render();
+    return { ok: false, buildingId: gate.id, grantTreatyId, reason: treatyCourier.reason };
+  }
+  const treatyPacket = Object.values(state.packets).find(
+    (packet) => !existingPacketIds.has(packet.id) && packet.originTribeId === "red" && packet.recipientTribeId === "blue"
+  );
+  if (!treatyPacket) {
+    render();
+    return { ok: false, buildingId: gate.id, grantTreatyId, reason: "could not find treaty courier packet" };
+  }
+  const treatyPacketGateIds = treatyPacket.outboundGateBuildingIds ?? [];
+  const breachOperation = issueSovereignOrder(state, "blue", {
+    type: "GATE_OPERATION",
+    priority: 1,
+    buildingId: gate.id,
+    recipientTribeId: "red",
+    gateOperationIntent: "detain Red courier despite the active Smoke road writ",
+    gateTerms: "Hold Red's courier as leverage even though the writ still exists.",
+    gateEntryAction: "detain",
+    reason: "Browser smoke records factual treaty incident evidence."
+  });
+  if (!breachOperation.ok) {
+    render();
+    return { ok: false, buildingId: gate.id, grantTreatyId, treatyPacketId: treatyPacket.id, reason: breachOperation.reason };
+  }
+  const treatyCarrier = treatyPacket.carrierUnitId ? state.units[treatyPacket.carrierUnitId] : undefined;
+  if (!treatyCarrier) {
+    render();
+    return { ok: false, buildingId: gate.id, grantTreatyId, treatyPacketId: treatyPacket.id, reason: "treaty courier has no carrier" };
+  }
+  treatyCarrier.x = treatyPacket.destination.x;
+  treatyCarrier.y = treatyPacket.destination.y;
+  advanceGameTicks(state, 1);
+  const treatyIncident = state.gateTreatyIncidents.at(-1);
+  const treatyPacketRouteMemory = treatyPacket.routeMemory.slice(-6);
+  const revoke = issueSovereignOrder(state, "blue", {
+    type: "GATE_OPERATION",
+    priority: 1,
+    buildingId: gate.id,
+    recipientTribeId: "red",
+    gateOperationIntent: "revoke Red controlled treaty passage",
+    gateAccessTreatyAction: "revoke",
+    reason: "Browser smoke explicit access treaty revoke."
+  });
+  if (!revoke.ok) {
+    render();
+    return { ok: false, buildingId: gate.id, grantTreatyId, reason: revoke.reason };
+  }
+  const revokeTreatyId = state.gateAccessTreaties.at(-1)?.id;
+  const redPassableAfterRevoke = isTileWalkable(state, gate.x, gate.y, "red");
+
+  const redSaboteur = Object.values(state.units).find((unit) => unit.tribeId === "red" && unit.hp > 0 && unit.type === "militia");
+  if (!redSaboteur) {
+    render();
+    return { ok: false, buildingId: gate.id, reason: "red has no militia saboteur" };
+  }
+  redSaboteur.x = gate.x + 1;
+  redSaboteur.y = gate.y;
+  const locked = setGateState(state, "blue", "locked", gate.id, "owner_only");
+  if (!locked.ok) {
+    render();
+    return { ok: false, buildingId: gate.id, reason: locked.reason };
+  }
+  const sabotage = issueSovereignOrder(state, "red", {
+    type: "GATE_OPERATION",
+    priority: 1,
+    targetBuildingId: gate.id,
+    gateOperationIntent: "force open Blue's gate from beside the hinges",
+    gateSabotageAction: "force_open",
+    gateSabotageDurationTicks: 3,
+    reason: "Browser smoke adjacent foreign-gate sabotage."
+  });
+  if (!sabotage.ok) {
+    render();
+    return { ok: false, buildingId: gate.id, grantTreatyId, revokeTreatyId, reason: sabotage.reason };
+  }
+  const redPassableAfterSabotage = isTileWalkable(state, gate.x, gate.y, "red");
+  const sabotageAction = state.buildings[gate.id]?.gateSabotage?.action as GateSabotageAction | undefined;
+  advanceGameTicks(state, 4);
+  const redPassableAfterSabotageExpires = isTileWalkable(state, gate.x, gate.y, "red");
+  const damageBefore = gate.hp;
+  const damaged = issueSovereignOrder(state, "red", {
+    type: "GATE_OPERATION",
+    priority: 1,
+    targetBuildingId: gate.id,
+    gateOperationIntent: "damage Blue's gate mechanism",
+    gateSabotageAction: "damage",
+    gateSabotageDamage: 20,
+    reason: "Browser smoke explicit sabotage damage."
+  });
+  selectAndShowBuilding(gate);
+  render();
+  if (!damaged.ok) {
+    return { ok: false, buildingId: gate.id, grantTreatyId, revokeTreatyId, sabotageAction, reason: damaged.reason };
+  }
+  return {
+    ok: true,
+    buildingId: gate.id,
+    grantTreatyId,
+    revokeTreatyId,
+    treatyPacketId: treatyPacket.id,
+    treatyPacketState: treatyPacket.state,
+    treatyPacketGateIds,
+    treatyPacketRouteMemory,
+    treatyIncidentId: treatyIncident?.id,
+    treatyIncidentAction: treatyIncident?.action,
+    treatyIncidentSummary: treatyIncident?.summary,
+    treatyIncidentParticipants: treatyIncident?.participantTribeIds,
+    treatyIncidentWitnesses: treatyIncident?.witnessTribeIds,
+    redPassableBefore,
+    redPassableAfterGrant,
+    redPassableAfterRevoke,
+    redPassableAfterSabotage,
+    redPassableAfterSabotageExpires,
+    sabotageAction,
+    sabotageHistoryCount: state.gateSabotageHistory.length,
+    damageBefore,
+    damageAfter: gate.hp,
+    eventTypes: state.events.slice(-18).map((event) => event.type)
+  };
+}
+
+function forcePerimeterForTest(): {
+  ok: boolean;
+  buildingIds?: string[];
+  wallCount?: number;
+  gateCount?: number;
+  planCount?: number;
+  groupId?: string;
+  pattern?: PerimeterPattern;
+  direction?: PerimeterDirection;
+  length?: number;
+  gateIndex?: number;
+  wallBlocks?: boolean;
+  gatePassable?: boolean;
+  placementPreview?: unknown;
+  recentEvents?: string[];
+  reason?: string;
+} {
+  const tribe = state.tribes[playerTribe];
+  for (const type of resourceTypes) tribe.resources[type] = Math.max(tribe.resources[type], 1200);
+  for (const developmentId of ["masonry", "ironworking"] as const) {
+    const result = chooseDevelopment(state, playerTribe, developmentId);
+    if (!result.ok && !tribe.developments.includes(developmentId)) {
+      render();
+      return { ok: false, reason: result.reason };
+    }
+  }
+
+  const townHall = getTownHall(state, playerTribe);
+  const target = {
+    x: clamp(townHall.x + 17, 4, MAP_SIZE - 5),
+    y: clamp(townHall.y + 8, 4, MAP_SIZE - 5)
+  };
+  for (let y = target.y - 1; y <= target.y + 1; y += 1) {
+    for (let x = target.x - 3; x <= target.x + 3; x += 1) {
+      const tile = state.map[tileIndex(x, y)];
+      tile.terrain = "grass";
+      delete tile.resource;
+    }
+  }
+
+  const beforeIds = new Set(Object.keys(state.buildings));
+  const result = issueSovereignOrder(state, playerTribe, {
+    type: "BUILD",
+    priority: 1,
+    buildingType: "wall",
+    targetX: target.x,
+    targetY: target.y,
+    perimeterPattern: "gate_line",
+    perimeterDirection: "east_west",
+    perimeterLength: 5,
+    perimeterGateIndex: 3,
+    fortificationIntent: "browser smoke customs wall",
+    perimeterShape: "straight five-tile line with central gate",
+    perimeterStrategy: "Hold a visible border while preserving one gate-controlled passage.",
+    reason: "Browser smoke perimeter test."
+  });
+  if (!result.ok) {
+    render();
+    return { ok: false, reason: result.reason };
+  }
+
+  const built = Object.values(state.buildings).filter((building) => !beforeIds.has(building.id));
+  const walls = built.filter((building) => building.type === "wall");
+  const gates = built.filter((building) => building.type === "gate");
+  const latestPlan = state.fortificationPlans.at(-1);
+  const groupId = latestPlan?.perimeterGroupId;
+  const perimeterPlans = groupId ? state.fortificationPlans.filter((plan) => plan.perimeterGroupId === groupId) : [];
+  const selected = gates[0] ?? built[0];
+  if (selected) selectAndShowBuilding(selected);
+  else render({ forceHud: true, forceLabels: true, forceFog: true });
+
+  const wallBlocks = walls.length > 0 && walls.every((wall) => !isTileWalkable(state, wall.x, wall.y, playerTribe));
+  const gatePassable = gates.length > 0 && gates.every((gate) => isTileWalkable(state, gate.x, gate.y, playerTribe));
+  return {
+    ok: built.length === 5 && walls.length === 4 && gates.length === 1 && perimeterPlans.length === 5 && wallBlocks && gatePassable,
+    buildingIds: built.map((building) => building.id),
+    wallCount: walls.length,
+    gateCount: gates.length,
+    planCount: perimeterPlans.length,
+    groupId,
+    pattern: latestPlan?.perimeterPattern,
+    direction: latestPlan?.perimeterDirection,
+    length: latestPlan?.perimeterLength,
+    gateIndex: latestPlan?.perimeterGateIndex,
+    wallBlocks,
+    gatePassable,
+    placementPreview: latestPlan?.placementPreview,
+    recentEvents: state.events.slice(-10).map((event) => `${event.type}:${event.body}`)
+  };
 }
 
 function findFortificationForDamageTest(): Building | undefined {
@@ -2268,7 +3178,7 @@ function forceSiegeForTest(buildingType: "wall" | "gate" | "turret" = "wall"): {
     beforeWalkable,
     afterWalkable,
     attackerTasks,
-    recentEvents: state.events.slice(-8).map((event) => `${event.type}:${event.body}`)
+    recentEvents: state.events.slice(-24).map((event) => `${event.type}:${event.body}`)
   };
 }
 
@@ -2344,8 +3254,446 @@ function forceSiegeEngineForTest(): {
     breachEstimateBefore,
     destroyed: !remaining,
     attackerTasks,
-    recentEvents: state.events.slice(-8).map((event) => `${event.type}:${event.body}`)
+    recentEvents: state.events.slice(-24).map((event) => `${event.type}:${event.body}`)
   };
+}
+
+function forceArtilleryForTest(): {
+  ok: boolean;
+  unitId?: string;
+  unitType?: UnitType;
+  targetBuildingId?: string;
+  projectileSeen?: boolean;
+  impactSeen?: boolean;
+  destroyed?: boolean;
+  projectileSnapshots?: Array<{ id: string; x: number; y: number; targetBuildingId: string; impactTick: number }>;
+  recentEvents?: string[];
+  reason?: string;
+} {
+  const tribe = state.tribes[playerTribe];
+  for (const type of resourceTypes) tribe.resources[type] = Math.max(tribe.resources[type], 1200);
+  for (const developmentId of ["ironworking", "public_works", "ballistics", "siege_engineering"] as const) {
+    const result = chooseDevelopment(state, playerTribe, developmentId);
+    if (!result.ok && !tribe.developments.includes(developmentId)) return { ok: false, reason: result.reason };
+  }
+  const trained = trainUnit(state, playerTribe, "catapult");
+  if (!trained.ok) return { ok: false, reason: trained.reason };
+  const catapult = state.units[trained.unitId];
+  const targetBuildingId = "test_artillery_wall";
+  const stats = getBuildingTypeCombatStats("wall");
+  state.buildings[targetBuildingId] = {
+    id: targetBuildingId,
+    type: "wall",
+    tribeId: "red",
+    x: 52,
+    y: 50,
+    hp: 70,
+    maxHp: stats.maxHp,
+    armor: stats.armor,
+    attack: stats.attack,
+    range: stats.range,
+    attackCooldown: 0
+  };
+  for (const pos of [
+    { x: 45, y: 50 },
+    { x: 46, y: 50 },
+    { x: 47, y: 50 },
+    { x: 52, y: 50 }
+  ]) {
+    state.map[tileIndex(pos.x, pos.y)].terrain = "grass";
+    delete state.map[tileIndex(pos.x, pos.y)].resource;
+  }
+  catapult.x = 45;
+  catapult.y = 50;
+  catapult.attackCooldown = 0;
+  catapult.task = { kind: "idle" };
+  const result = issueSovereignOrder(state, playerTribe, {
+    type: "ATTACK",
+    priority: 1,
+    targetBuildingId,
+    siegeIntent: "bombard the hostile wall from range",
+    assaultPlan: "Keep the catapult outside the wall and let projectile impacts open the breach.",
+    retreatCondition: "Withdraw the machine if defenders close the distance.",
+    reason: "Browser smoke artillery test: use a trained catapult to fire projectiles at a hostile wall."
+  });
+  if (!result.ok) {
+    render();
+    return { ok: false, unitId: catapult.id, unitType: catapult.type, targetBuildingId, reason: result.reason };
+  }
+  advanceSimulationTicks(1, { scheduleAi: false, render: false });
+  const projectileSnapshots = Object.values(state.projectiles).map((projectile) => ({
+    id: projectile.id,
+    x: Number(projectile.x.toFixed(2)),
+    y: Number(projectile.y.toFixed(2)),
+    targetBuildingId: projectile.targetBuildingId,
+    impactTick: projectile.impactTick
+  }));
+  const projectileSeen = projectileSnapshots.length > 0;
+  advanceSimulationTicks(120, { scheduleAi: false, render: false });
+  render({ forceHud: true, forceLabels: true, forceFog: true });
+  const recentEvents = state.events.slice(-16).map((event) => `${event.type}:${event.body}`);
+  const impactSeen = recentEvents.some((event) => event.includes("SIEGE_PROJECTILE_IMPACT") && event.includes(targetBuildingId));
+  const remaining = state.buildings[targetBuildingId];
+  return {
+    ok: projectileSeen && impactSeen && !remaining,
+    unitId: catapult.id,
+    unitType: catapult.type,
+    targetBuildingId,
+    projectileSeen,
+    impactSeen,
+    destroyed: !remaining,
+    projectileSnapshots,
+    recentEvents
+  };
+}
+
+function forceRetreatForTest(): {
+  ok: boolean;
+  targetBuildingId?: string;
+  retreatTarget?: Position;
+  retreatedUnits?: string[];
+  attackTasksBefore?: string[];
+  moveTasksAfter?: string[];
+  siegePlan?: unknown;
+  recentEvents?: string[];
+  reason?: string;
+} {
+  const tribe = state.tribes[playerTribe];
+  for (const type of resourceTypes) tribe.resources[type] = Math.max(tribe.resources[type], 600);
+  const targetBuildingId = "test_retreat_wall";
+  const stats = getBuildingTypeCombatStats("wall");
+  state.buildings[targetBuildingId] = {
+    id: targetBuildingId,
+    type: "wall",
+    tribeId: "red",
+    x: 54,
+    y: 54,
+    hp: stats.maxHp,
+    maxHp: stats.maxHp,
+    armor: stats.armor,
+    attack: stats.attack,
+    range: stats.range,
+    attackCooldown: 0
+  };
+  for (const pos of [
+    { x: 48, y: 53 },
+    { x: 48, y: 54 },
+    { x: 48, y: 55 },
+    { x: 49, y: 54 },
+    { x: 54, y: 54 }
+  ]) {
+    state.map[tileIndex(pos.x, pos.y)].terrain = "grass";
+    delete state.map[tileIndex(pos.x, pos.y)].resource;
+  }
+  if (!Object.values(state.units).some((unit) => unit.tribeId === playerTribe && unit.hp > 0 && isSiegeCapableUnitTypeForSmoke(unit.type))) {
+    const trained = trainUnit(state, playerTribe, "militia");
+    if (!trained.ok) return { ok: false, targetBuildingId, reason: trained.reason };
+  }
+  const attackers = Object.values(state.units)
+    .filter((unit) => unit.tribeId === playerTribe && unit.hp > 0 && isSiegeCapableUnitTypeForSmoke(unit.type))
+    .sort((left, right) => siegeSmokePriority(right.type) - siegeSmokePriority(left.type) || left.id.localeCompare(right.id))
+    .slice(0, 5);
+  if (attackers.length === 0) return { ok: false, targetBuildingId, reason: "no field attackers available" };
+  for (const [index, attacker] of attackers.entries()) {
+    attacker.x = 48;
+    attacker.y = 53 + index;
+    attacker.hp = Math.max(1, Math.floor(attacker.maxHp * 0.35));
+    attacker.task = { kind: "idle" };
+  }
+  const retreatTarget = { x: 42, y: 52 };
+  const result = issueSovereignOrder(state, playerTribe, {
+    type: "ATTACK",
+    priority: 1,
+    targetBuildingId,
+    siegeIntent: "test a controlled withdrawal instead of sacrificing damaged attackers",
+    assaultPlan: "Probe the wall and pull back wounded units to the west rally point.",
+    retreatCondition: "Any unit below half health should withdraw rather than continue the breach.",
+    retreatHealthPct: 50,
+    retreatX: retreatTarget.x,
+    retreatY: retreatTarget.y,
+    reason: "Browser smoke retreat-trigger test."
+  });
+  if (!result.ok) {
+    render();
+    return { ok: false, targetBuildingId, retreatTarget, reason: result.reason };
+  }
+  const attackTasksBefore = attackers.map((unit) => describeUnitTask(state, unit));
+  const siegePlan = state.siegePlans.at(-1);
+  advanceSimulationTicks(1, { scheduleAi: false, render: false });
+  render({ forceHud: true, forceLabels: true, forceFog: true });
+  const moveTasksAfter = attackers.map((unit) => describeUnitTask(state, unit));
+  const retreatedUnits = attackers
+    .filter((unit) => unit.task.kind === "move" && unit.task.target.x === retreatTarget.x && unit.task.target.y === retreatTarget.y)
+    .map((unit) => unit.id);
+  return {
+    ok: retreatedUnits.length > 0 && retreatedUnits.length === attackers.length,
+    targetBuildingId,
+    retreatTarget,
+    retreatedUnits,
+    attackTasksBefore,
+    moveTasksAfter,
+    siegePlan,
+    recentEvents: state.events.slice(-10).map((event) => `${event.type}:${event.body}`)
+  };
+}
+
+function forceCoordinatedFeintForTest(): {
+  ok: boolean;
+  coordinated?: {
+    ok: boolean;
+    targetBuildingId: string;
+    assemblyTarget: Position;
+    assembleTasksBefore: string[];
+    attackTasksAfter: string[];
+    siegePlan?: unknown;
+    recentEvents: string[];
+  };
+  wave?: {
+    ok: boolean;
+    targetBuildingId: string;
+    holdTarget: Position;
+    waitingTasksBefore: string[];
+    releaseTasksAfter: string[];
+    siegePlan?: unknown;
+    recentEvents: string[];
+  };
+  feint?: {
+    ok: boolean;
+    targetBuildingId: string;
+    retreatTarget: Position;
+    attackTasksBefore: string[];
+    moveTasksAfter: string[];
+    siegePlan?: unknown;
+    recentEvents: string[];
+  };
+  reason?: string;
+} {
+  const tribe = state.tribes[playerTribe];
+  for (const type of resourceTypes) tribe.resources[type] = Math.max(tribe.resources[type], 800);
+  const attackers = Object.values(state.units)
+    .filter((unit) => unit.tribeId === playerTribe && unit.hp > 0 && isSiegeCapableUnitTypeForSmoke(unit.type))
+    .sort((left, right) => siegeSmokePriority(right.type) - siegeSmokePriority(left.type) || left.id.localeCompare(right.id))
+    .slice(0, 5);
+  if (attackers.length === 0) {
+    const trained = trainUnit(state, playerTribe, "militia");
+    if (!trained.ok) return { ok: false, reason: trained.reason };
+    const militia = state.units[trained.unitId];
+    if (militia) attackers.push(militia);
+  }
+  if (attackers.length === 0) return { ok: false, reason: "no siege-capable attackers available" };
+
+  const coordinatedTargetId = "test_coordinated_wall";
+  const coordinatedStats = getBuildingTypeCombatStats("wall");
+  state.buildings[coordinatedTargetId] = {
+    id: coordinatedTargetId,
+    type: "wall",
+    tribeId: "red",
+    x: 55,
+    y: 56,
+    hp: coordinatedStats.maxHp,
+    maxHp: coordinatedStats.maxHp,
+    armor: coordinatedStats.armor,
+    attack: coordinatedStats.attack,
+    range: coordinatedStats.range,
+    attackCooldown: 0
+  };
+  const assemblyTarget = { x: 48, y: 56 };
+  for (const pos of [
+    assemblyTarget,
+    { x: 49, y: 56 },
+    { x: 54, y: 56 },
+    { x: 55, y: 56 }
+  ]) {
+    state.map[tileIndex(pos.x, pos.y)].terrain = "grass";
+    delete state.map[tileIndex(pos.x, pos.y)].resource;
+  }
+  for (const [index, attacker] of attackers.entries()) {
+    attacker.x = 45;
+    attacker.y = 54 + index;
+    attacker.hp = attacker.maxHp;
+    attacker.task = { kind: "idle" };
+  }
+  const coordinatedOrder = issueSovereignOrder(state, playerTribe, {
+    type: "ATTACK",
+    priority: 1,
+    targetBuildingId: coordinatedTargetId,
+    siegeIntent: "browser smoke coordinated rally before breach",
+    assaultPlan: "Assemble every assigned unit at the rally tile before the assault starts.",
+    assaultMode: "coordinated",
+    assemblyX: assemblyTarget.x,
+    assemblyY: assemblyTarget.y,
+    assaultDelayTicks: TICK_RATE * 5,
+    reason: "Browser smoke coordinated-assault test."
+  });
+  if (!coordinatedOrder.ok) return { ok: false, reason: coordinatedOrder.reason };
+  const coordinatedPlan = state.siegePlans.at(-1);
+  const coordinatedAssigned = Object.values(state.units).filter(
+    (unit) => unit.task.kind === "attackBuilding" && unit.task.siegePlanId === coordinatedPlan?.id
+  );
+  const assembleTasksBefore = coordinatedAssigned.map((unit) => describeUnitTask(state, unit));
+  for (const unit of coordinatedAssigned) {
+    unit.x = assemblyTarget.x;
+    unit.y = assemblyTarget.y;
+  }
+  advanceSimulationTicks(1, { scheduleAi: false, render: false });
+  const attackTasksAfter = coordinatedAssigned.map((unit) => describeUnitTask(state, unit));
+  const coordinatedEvents = state.events.slice(-14).map((event) => `${event.type}:${event.body}`);
+  const coordinated = {
+    ok:
+      coordinatedAssigned.length > 0 &&
+      coordinatedAssigned.every((unit) => unit.task.kind === "attackBuilding" && unit.task.assaultPhase === "attacking") &&
+      coordinatedPlan?.assaultStartedTick !== undefined &&
+      coordinatedEvents.some((event) => event.includes("COORDINATED_ASSAULT_STARTED") && event.includes(coordinatedTargetId)),
+    targetBuildingId: coordinatedTargetId,
+    assemblyTarget,
+    assembleTasksBefore,
+    attackTasksAfter,
+    siegePlan: coordinatedPlan,
+    recentEvents: coordinatedEvents
+  };
+
+  const feintTargetId = "test_feint_wall";
+  const feintStats = getBuildingTypeCombatStats("wall");
+  state.buildings[feintTargetId] = {
+    id: feintTargetId,
+    type: "wall",
+    tribeId: "red",
+    x: 56,
+    y: 60,
+    hp: feintStats.maxHp,
+    maxHp: feintStats.maxHp,
+    armor: feintStats.armor,
+    attack: feintStats.attack,
+    range: feintStats.range,
+    attackCooldown: 0
+  };
+  const retreatTarget = { x: 44, y: 60 };
+  for (const pos of [
+    { x: 50, y: 60 },
+    { x: 55, y: 60 },
+    { x: 56, y: 60 },
+    retreatTarget
+  ]) {
+    state.map[tileIndex(pos.x, pos.y)].terrain = "grass";
+    delete state.map[tileIndex(pos.x, pos.y)].resource;
+  }
+  for (const [index, attacker] of attackers.entries()) {
+    attacker.x = 50;
+    attacker.y = 59 + index;
+    attacker.hp = attacker.maxHp;
+    attacker.task = { kind: "idle" };
+  }
+  const feintOrder = issueSovereignOrder(state, playerTribe, {
+    type: "ATTACK",
+    priority: 1,
+    targetBuildingId: feintTargetId,
+    siegeIntent: "browser smoke feint withdrawal",
+    assaultPlan: "Pressure the wall briefly and then pull every assigned unit back.",
+    assaultMode: "feint",
+    feintDurationTicks: 2,
+    retreatX: retreatTarget.x,
+    retreatY: retreatTarget.y,
+    reason: "Browser smoke feint/probe test."
+  });
+  if (!feintOrder.ok) return { ok: false, coordinated, reason: feintOrder.reason };
+  const feintPlan = state.siegePlans.at(-1);
+  const feintAssigned = Object.values(state.units).filter((unit) => unit.task.kind === "attackBuilding" && unit.task.siegePlanId === feintPlan?.id);
+  const attackTasksBefore = feintAssigned.map((unit) => describeUnitTask(state, unit));
+  advanceSimulationTicks(3, { scheduleAi: false, render: false });
+  render({ forceHud: true, forceLabels: true, forceFog: true });
+  const moveTasksAfter = feintAssigned.map((unit) => describeUnitTask(state, unit));
+  const feintEvents = state.events.slice(-14).map((event) => `${event.type}:${event.body}`);
+  const feint = {
+    ok:
+      feintAssigned.length > 0 &&
+      feintAssigned.every((unit) => unit.task.kind === "move" && unit.task.target.x === retreatTarget.x && unit.task.target.y === retreatTarget.y) &&
+      feintEvents.some((event) => event.includes("SIEGE_FEINT_WITHDRAWAL") && event.includes(`${retreatTarget.x},${retreatTarget.y}`)),
+    targetBuildingId: feintTargetId,
+    retreatTarget,
+    attackTasksBefore,
+    moveTasksAfter,
+    siegePlan: feintPlan,
+    recentEvents: feintEvents
+  };
+  const waveTargetId = "test_wave_wall";
+  const waveStats = getBuildingTypeCombatStats("wall");
+  state.buildings[waveTargetId] = {
+    id: waveTargetId,
+    type: "wall",
+    tribeId: "red",
+    x: 58,
+    y: 58,
+    hp: waveStats.maxHp,
+    maxHp: waveStats.maxHp,
+    armor: waveStats.armor,
+    attack: waveStats.attack,
+    range: waveStats.range,
+    attackCooldown: 0
+  };
+  const holdTarget = { x: 50, y: 58 };
+  for (const pos of [
+    holdTarget,
+    { x: 57, y: 58 },
+    { x: 58, y: 58 }
+  ]) {
+    state.map[tileIndex(pos.x, pos.y)].terrain = "grass";
+    delete state.map[tileIndex(pos.x, pos.y)].resource;
+  }
+  for (const [index, attacker] of attackers.entries()) {
+    attacker.x = 48;
+    attacker.y = 58 + index;
+    attacker.hp = attacker.maxHp;
+    attacker.task = { kind: "idle" };
+  }
+  const waveOrder = issueSovereignOrder(state, playerTribe, {
+    type: "ATTACK",
+    priority: 1,
+    targetBuildingId: waveTargetId,
+    siegeIntent: "browser smoke staggered wave release",
+    assaultPlan: "Hold the reserve wave, then release it after a short interval.",
+    assaultMode: "direct",
+    assemblyX: holdTarget.x,
+    assemblyY: holdTarget.y,
+    assaultWaveSize: 1,
+    assaultWaveIntervalTicks: 3,
+    reason: "Browser smoke siege-wave test."
+  });
+  if (!waveOrder.ok) return { ok: false, coordinated, feint, reason: waveOrder.reason };
+  const wavePlan = state.siegePlans.at(-1);
+  const waveAssigned = Object.values(state.units).filter((unit) => unit.task.kind === "attackBuilding" && unit.task.siegePlanId === wavePlan?.id);
+  const waitingTasksBefore = waveAssigned.map((unit) => describeUnitTask(state, unit));
+  advanceSimulationTicks(4, { scheduleAi: false, render: false });
+  render({ forceHud: true, forceLabels: true, forceFog: true });
+  const releaseTasksAfter = waveAssigned.map((unit) => describeUnitTask(state, unit));
+  const waveEvents = state.events.slice(-16).map((event) => `${event.type}:${event.body}`);
+  const wave = {
+    ok:
+      waveAssigned.length >= 2 &&
+      waitingTasksBefore.some((task) => task.includes("Holding wave 2")) &&
+      releaseTasksAfter.some((task) => task.includes("Attacking wall test_wave_wall")) &&
+      wavePlan?.releasedWaveIndexes?.includes(1) === true &&
+      waveEvents.some((event) => event.includes("SIEGE_WAVE_RELEASED") && event.includes("Wave 2")),
+    targetBuildingId: waveTargetId,
+    holdTarget,
+    waitingTasksBefore,
+    releaseTasksAfter,
+    siegePlan: wavePlan,
+    recentEvents: waveEvents
+  };
+  return { ok: coordinated.ok && feint.ok && wave.ok, coordinated, feint, wave };
+}
+
+function isSiegeCapableUnitTypeForSmoke(type: UnitType): boolean {
+  return type === "militia" || type === "archer" || type === "siege_engine" || type === "battering_ram" || type === "catapult";
+}
+
+function siegeSmokePriority(type: UnitType): number {
+  if (type === "catapult") return 6;
+  if (type === "battering_ram") return 5;
+  if (type === "siege_engine") return 4;
+  if (type === "archer") return 2;
+  if (type === "militia") return 1;
+  return 0;
 }
 
 function forceResourceRaidForTest(): {
@@ -2424,7 +3772,159 @@ function forceResourceRaidForTest(): {
     resourceControlAfter,
     resourceDenials: state.resourceDenials.slice(-5),
     attackerTasks,
-    recentEvents: state.events.slice(-8).map((event) => `${event.type}:${event.body}`)
+    recentEvents: state.events.slice(-24).map((event) => `${event.type}:${event.body}`)
+  };
+}
+
+function forceResourceDepletionForTest(): {
+  ok: boolean;
+  target?: { x: number; y: number; type: ResourceType };
+  beforeAmount?: number;
+  afterAmount?: number | null;
+  stockpileBefore?: number;
+  stockpileAfter?: number;
+  depleted?: boolean;
+  resourceDepletions?: unknown[];
+  recentEvents?: string[];
+  workerTask?: string;
+  reason?: string;
+} {
+  const townHall = getTownHall(state, playerTribe);
+  const target = { x: townHall.x + 2, y: townHall.y };
+  const targetIndex = tileIndex(target.x, target.y);
+  for (let y = 0; y < MAP_SIZE; y += 1) {
+    for (let x = 0; x < MAP_SIZE; x += 1) {
+      const tile = state.map[tileIndex(x, y)];
+      if (tile.resource?.type === "clay") delete tile.resource;
+    }
+  }
+  state.map[targetIndex] = { terrain: "grass", resource: createResourceDeposit("clay", 3) };
+  const worker = Object.values(state.units).find((unit) => unit.tribeId === playerTribe && unit.type === "peon" && unit.hp > 0);
+  if (!worker) return { ok: false, target: { ...target, type: "clay" }, reason: "no peon available" };
+  worker.x = target.x;
+  worker.y = target.y;
+  worker.task = { kind: "idle" };
+  const beforeAmount = state.map[targetIndex].resource?.amount ?? 0;
+  const stockpileBefore = state.tribes[playerTribe].resources.clay;
+  const assigned = assignGathering(state, worker.id, "clay");
+  if (!assigned.ok) {
+    render();
+    return { ok: false, target: { ...target, type: "clay" }, beforeAmount, stockpileBefore, reason: assigned.reason };
+  }
+  advanceSimulationTicks(80, { scheduleAi: false, render: false });
+  render({ forceHud: true, forceLabels: true, forceFog: true });
+  const remaining = state.map[targetIndex].resource;
+  const recentDepletions = getRecentResourceDepletions(state).slice(-5);
+  const depletion = recentDepletions.find((record) => record.type === "clay" && record.x === target.x && record.y === target.y);
+  const stockpileAfter = state.tribes[playerTribe].resources.clay;
+  return {
+    ok: !remaining && Boolean(depletion) && stockpileAfter >= stockpileBefore + beforeAmount,
+    target: { ...target, type: "clay" },
+    beforeAmount,
+    afterAmount: remaining ? Math.round(remaining.amount) : null,
+    stockpileBefore,
+    stockpileAfter,
+    depleted: !remaining,
+    resourceDepletions: recentDepletions,
+    recentEvents: state.events.slice(-24).map((event) => `${event.type}:${event.body}`),
+    workerTask: describeUnitTask(state, worker)
+  };
+}
+
+function forceCivilizationMergerForTest(): {
+  ok: boolean;
+  packetId?: string;
+  messageId?: string;
+  mergerRecordId?: string;
+  leaderTribeId?: TribeId;
+  mergedTribeId?: TribeId;
+  mergedIntoTribeId?: TribeId | null;
+  leaderPopulation?: number;
+  mergedPopulation?: number;
+  leaderResources?: Partial<Record<ResourceType, number>>;
+  recentMergers?: unknown[];
+  reason?: string;
+} {
+  const leaderTribeId: TribeId = "blue";
+  const mergedTribeId: TribeId = "green";
+  if (!isTribeActive(state, leaderTribeId) || !isTribeActive(state, mergedTribeId)) {
+    return { ok: false, leaderTribeId, mergedTribeId, reason: "test tribes are not active separate civilizations" };
+  }
+  if (!Object.values(state.units).some((unit) => unit.tribeId === leaderTribeId && unit.type === "messenger" && unit.hp > 0 && unit.task.kind === "idle")) {
+    state.tribes[leaderTribeId].resources.food = Math.max(state.tribes[leaderTribeId].resources.food, 80);
+    state.tribes[leaderTribeId].resources.gold = Math.max(state.tribes[leaderTribeId].resources.gold, 40);
+    state.tribes[leaderTribeId].populationCap = Math.max(state.tribes[leaderTribeId].populationCap, getPopulationCap(state, leaderTribeId) + 2);
+    const trained = issueSovereignOrder(state, leaderTribeId, {
+      type: "RECRUIT",
+      priority: 1,
+      unitType: "messenger",
+      reason: "Browser smoke needs a real courier for a negotiated merger packet."
+    });
+    if (!trained.ok) {
+      const courier = Object.values(state.units).find((unit) => unit.tribeId === leaderTribeId && unit.type === "messenger" && unit.hp > 0);
+      if (!courier) return { ok: false, leaderTribeId, mergedTribeId, reason: trained.reason };
+      courier.carriedPacketId = undefined;
+      courier.task = { kind: "idle" };
+    }
+  }
+  const beforePacketIds = new Set(Object.keys(state.packets));
+  const terms = "Green keeps its homes and workers; Blue holds the single crown and takes survival responsibility for both peoples.";
+  const order = issueSovereignOrder(state, leaderTribeId, {
+    type: "SEND_MESSENGER",
+    priority: 1,
+    recipientTribeId: mergedTribeId,
+    messageType: "MERGER_PROPOSAL",
+    diplomacyIntent: "MERGER_OFFER",
+    mergerLeaderTribeId: leaderTribeId,
+    mergerTerms: terms,
+    subject: "One crown survival compact",
+    body: `Blue proposes one shared civilization under Blue leadership. Terms: ${terms}`,
+    reason: "Browser smoke should prove merger requires an authored proposal and authored acceptance."
+  });
+  if (!order.ok) {
+    render();
+    return { ok: false, leaderTribeId, mergedTribeId, reason: order.reason };
+  }
+  const packet = Object.values(state.packets).find((candidate) => !beforePacketIds.has(candidate.id));
+  if (!packet) {
+    render();
+    return { ok: false, leaderTribeId, mergedTribeId, reason: "proposal did not create a packet" };
+  }
+  let guard = 0;
+  while (state.packets[packet.id]?.state !== "AWAITING_REPLY" && guard < 80) {
+    advanceSimulationTicks(20, { scheduleAi: false, render: false });
+    guard += 1;
+  }
+  const awaitingPacket = state.packets[packet.id];
+  if (!awaitingPacket || awaitingPacket.state !== "AWAITING_REPLY") {
+    render({ forceHud: true, forceLabels: true, forceFog: true });
+    return { ok: false, packetId: packet.id, leaderTribeId, mergedTribeId, reason: `packet did not reach reply state: ${awaitingPacket?.state ?? "missing"}` };
+  }
+  const result = attachReplyToPacket(state, awaitingPacket.id, {
+    subject: "Re: One crown survival compact",
+    body: `Green accepts a merger under Blue as sole leader. Terms accepted: ${terms}`,
+    diplomacyIntent: "MERGER_ACCEPT",
+    mergerLeaderTribeId: leaderTribeId,
+    mergerTerms: terms
+  });
+  render({ forceHud: true, forceLabels: true, forceFog: true });
+  if (!result.ok) {
+    return { ok: false, packetId: awaitingPacket.id, leaderTribeId, mergedTribeId, reason: result.reason };
+  }
+  const leaderPopulation = Object.values(state.units).filter((unit) => unit.tribeId === leaderTribeId && unit.hp > 0).length;
+  const mergedPopulation = Object.values(state.units).filter((unit) => unit.tribeId === mergedTribeId && unit.hp > 0).length;
+  return {
+    ok: Boolean(result.mergerExecuted && result.mergerRecordId && state.tribes[mergedTribeId].mergedIntoTribeId === leaderTribeId && mergedPopulation === 0),
+    packetId: awaitingPacket.id,
+    messageId: result.messageId,
+    mergerRecordId: result.mergerRecordId,
+    leaderTribeId,
+    mergedTribeId,
+    mergedIntoTribeId: state.tribes[mergedTribeId].mergedIntoTribeId ?? null,
+    leaderPopulation,
+    mergedPopulation,
+    leaderResources: Object.fromEntries(resourceTypes.map((type) => [type, Math.round(state.tribes[leaderTribeId].resources[type])])) as Partial<Record<ResourceType, number>>,
+    recentMergers: state.civilizationMergers.slice(-5)
   };
 }
 
@@ -2506,7 +4006,102 @@ function forceRepairForTest(): {
     repairQueuedSnapshot,
     repairedSnapshot,
     repairerTasks,
-    recentEvents: state.events.slice(-8).map((event) => `${event.type}:${event.body}`)
+    recentEvents: state.events.slice(-24).map((event) => `${event.type}:${event.body}`)
+  };
+}
+
+function forceRepairUnderFireForTest(): {
+  ok: boolean;
+  targetBuildingId?: string;
+  beforeHp?: number;
+  afterHp?: number | null;
+  interrupted?: boolean;
+  completed?: boolean;
+  repairerTasks?: string[];
+  interruptedEvents?: string[];
+  selectedPanel?: string;
+  reason?: string;
+} {
+  const tribe = state.tribes[playerTribe];
+  for (const type of resourceTypes) tribe.resources[type] = Math.max(tribe.resources[type], 700);
+  if (!tribe.developments.includes("masonry")) tribe.developments.push("masonry");
+  const stats = getBuildingTypeCombatStats("wall");
+  const targetBuildingId = "test_repair_fire_wall";
+  state.buildings[targetBuildingId] = {
+    id: targetBuildingId,
+    type: "wall",
+    tribeId: playerTribe,
+    x: 39,
+    y: 30,
+    hp: stats.maxHp - 90,
+    maxHp: stats.maxHp,
+    armor: stats.armor,
+    attack: stats.attack,
+    range: stats.range,
+    attackCooldown: 0
+  };
+  for (const pos of [
+    { x: 38, y: 30 },
+    { x: 38, y: 31 },
+    { x: 39, y: 30 },
+    { x: 40, y: 30 }
+  ]) {
+    state.map[tileIndex(pos.x, pos.y)].terrain = "grass";
+    delete state.map[tileIndex(pos.x, pos.y)].resource;
+  }
+  const repairers = Object.values(state.units)
+    .filter((unit) => unit.tribeId === playerTribe && unit.type === "peon" && unit.hp > 0)
+    .slice(0, 2);
+  if (repairers.length === 0) return { ok: false, targetBuildingId, reason: "no blue peon available" };
+  for (const [index, peon] of repairers.entries()) {
+    peon.x = 38;
+    peon.y = 30 + index;
+    peon.task = { kind: "idle" };
+  }
+  const hostile = Object.values(state.units).find((unit) => unit.tribeId === "red" && unit.type === "militia" && unit.hp > 0);
+  if (!hostile) return { ok: false, targetBuildingId, reason: "no red militia available" };
+  hostile.x = 40;
+  hostile.y = 30;
+  hostile.task = { kind: "idle" };
+  hostile.attackCooldown = 0;
+  state.wars[playerTribe].red = true;
+  state.wars.red[playerTribe] = true;
+  const building = state.buildings[targetBuildingId];
+  const beforeHp = Math.ceil(building.hp);
+  const result = issueSovereignOrder(state, playerTribe, {
+    type: "REPAIR",
+    priority: 1,
+    targetBuildingId,
+    siegeIntent: "repair while the breach is under direct hostile pressure",
+    repairPlan: "Send workers, but recognize that hostile militia must be cleared before safe repairs resume.",
+    reason: "Browser smoke repair-under-fire test."
+  });
+  if (!result.ok) {
+    render();
+    return { ok: false, targetBuildingId, beforeHp, reason: result.reason };
+  }
+  const repairerTasks = repairers.map((unit) => describeUnitTask(state, unit));
+  advanceSimulationTicks(6, { scheduleAi: false, render: false });
+  const after = state.buildings[targetBuildingId];
+  if (after) selectAndShowBuilding(after);
+  else render({ forceHud: true, forceLabels: true, forceFog: true });
+  const interruptedEvents = state.events
+    .slice(-16)
+    .filter((event) => event.type === "REPAIR_UNDER_FIRE_INTERRUPTED")
+    .map((event) => `${event.type}:${event.body}`);
+  const selectedPanel = document.querySelector("#selectedPanel")?.textContent ?? "";
+  const completed = Boolean(after && after.hp >= after.maxHp);
+  const interrupted = repairers.some((unit) => unit.task.kind === "repair" && unit.task.lastInterruptedTick !== undefined) || interruptedEvents.length > 0;
+  return {
+    ok: Boolean(after && interrupted && after.hp <= beforeHp && !completed),
+    targetBuildingId,
+    beforeHp,
+    afterHp: after ? Math.ceil(after.hp) : null,
+    interrupted,
+    completed,
+    repairerTasks,
+    interruptedEvents,
+    selectedPanel
   };
 }
 
@@ -2541,15 +4136,39 @@ function summarizeResourceTiles(game: GameState, type: ResourceType): {
   };
 }
 
+function buildResourceLayoutFingerprint(game: GameState): string {
+  let hash = 2166136261 >>> 0;
+  let liveResourceTiles = 0;
+  const mix = (value: number): void => {
+    hash ^= value;
+    hash = Math.imul(hash, 16777619) >>> 0;
+  };
+  for (let index = 0; index < game.map.length; index += 1) {
+    const resource = game.map[index].resource;
+    if (!resource || resource.amount <= 0 || resource.hp <= 0) continue;
+    liveResourceTiles += 1;
+    mix(index);
+    mix(resourceTypes.indexOf(resource.type) + 1);
+    mix(Math.round(resource.amount));
+    mix(Math.ceil(resource.hp));
+  }
+  return `${game.seed}:${liveResourceTiles}:${hash.toString(16).padStart(8, "0")}`;
+}
+
 function summarizeContestedResourceSites(game: GameState): Array<{
   type: ResourceType;
   x: number;
   y: number;
   amount: number;
+  healthPct: number;
   distanceToCenter: number;
   nearestTribe: TribeId;
   nearestTribeDistance: number;
+  rivalTribe?: TribeId;
+  rivalTribeDistance?: number;
   contested: boolean;
+  scarce: boolean;
+  pressureScore: number;
 }> {
   const center = { x: Math.floor(MAP_SIZE / 2), y: Math.floor(MAP_SIZE / 2) };
   const sites: Array<{
@@ -2557,10 +4176,15 @@ function summarizeContestedResourceSites(game: GameState): Array<{
     x: number;
     y: number;
     amount: number;
+    healthPct: number;
     distanceToCenter: number;
     nearestTribe: TribeId;
     nearestTribeDistance: number;
+    rivalTribe?: TribeId;
+    rivalTribeDistance?: number;
     contested: boolean;
+    scarce: boolean;
+    pressureScore: number;
   }> = [];
   for (const type of resourceTypes) {
     if (!contestedResourceTypes.has(type)) continue;
@@ -2575,20 +4199,33 @@ function summarizeContestedResourceSites(game: GameState): Array<{
       const leader = nearest[0];
       const runnerUp = nearest[1];
       const distanceToCenter = distanceToTile(tile, center);
+      const contested = distanceToCenter <= 42 || (runnerUp ? runnerUp.distance - leader.distance <= 14 : false);
+      const scarce = scarceResourceTypes.has(type);
       sites.push({
         type,
         x: tile.x,
         y: tile.y,
         amount: Math.round(tile.amount),
+        healthPct: Math.round((tile.hp / Math.max(1, tile.maxHp)) * 100),
         distanceToCenter: Math.round(distanceToCenter),
         nearestTribe: leader.tribeId,
         nearestTribeDistance: Math.round(leader.distance),
-        contested: distanceToCenter <= 42 || (runnerUp ? runnerUp.distance - leader.distance <= 14 : false)
+        rivalTribe: runnerUp?.tribeId,
+        rivalTribeDistance: runnerUp ? Math.round(runnerUp.distance) : undefined,
+        contested,
+        scarce,
+        pressureScore: Math.round(
+          (contested ? 100 : 0) +
+            (scarce ? 40 : 0) +
+            Math.max(0, 45 - distanceToCenter) +
+            Math.min(50, Math.round(tile.amount / 12)) +
+            (tile.hp < tile.maxHp ? 25 : 0)
+        )
       });
     }
   }
   return sites
-    .sort((left, right) => Number(right.contested) - Number(left.contested) || left.distanceToCenter - right.distanceToCenter || right.amount - left.amount)
+    .sort((left, right) => right.pressureScore - left.pressureScore || left.distanceToCenter - right.distanceToCenter || right.amount - left.amount)
     .slice(0, 24);
 }
 
@@ -2720,7 +4357,7 @@ function hasDoctrineDecision(tribeId: TribeId): boolean {
 }
 
 function firstDoctrineSetupPending(): boolean {
-  return tribeIds.some((tribeId) => !state.tribes[tribeId].eliminated && !hasDoctrineDecision(tribeId));
+  return tribeIds.some((tribeId) => isTribeActive(state, tribeId) && !hasDoctrineDecision(tribeId));
 }
 
 function isIdentityDecision(decision: AiDecision): boolean {
@@ -2876,7 +4513,7 @@ function tryScheduleSovereignIdentity(): boolean {
       (tribeId) => {
         const model = identityModelForTribe(tribeId);
         return (
-          !state.tribes[tribeId].eliminated &&
+          isTribeActive(state, tribeId) &&
           !state.tribes[tribeId].identityChosen &&
           state.tick >= nextIdentityRetryTick[tribeId] &&
           canStartLlmJob(tribeId, model, true, true)
@@ -2898,7 +4535,7 @@ function tryScheduleSovereignDecision(): boolean {
         const model = strategyModelForTribe(tribeId);
         const firstDoctrine = !hasDoctrineDecision(tribeId);
         return (
-          !state.tribes[tribeId].eliminated &&
+          isTribeActive(state, tribeId) &&
           (firstDoctrine || !firstDoctrineSetupPending()) &&
           (firstDoctrine || !llmFollowupStrategyHoldForTest) &&
           state.tick >= nextLlmDecisionTick[tribeId] &&
@@ -2932,7 +4569,7 @@ function scheduleLlmReply(): void {
         candidate.state === "AWAITING_REPLY" &&
         candidate.messageIds.length === 1 &&
         state.tribes[candidate.recipientTribeId].controller === "llm" &&
-        !state.tribes[candidate.recipientTribeId].eliminated &&
+        isTribeActive(state, candidate.recipientTribeId) &&
         !pendingReplyPacketIds.has(candidate.id) &&
         canStartLlmJob(candidate.recipientTribeId, modelForTribe(candidate.recipientTribeId), false, true)
     )
@@ -2957,7 +4594,7 @@ async function runInitialIdentitySetup(): Promise<void> {
 }
 
 async function runSovereignIdentity(tribeId: TribeId): Promise<void> {
-  if (state.tribes[tribeId].eliminated) return;
+  if (!isTribeActive(state, tribeId)) return;
   const identityModels = identityModelsForTribe(tribeId);
   const primaryModel = identityModels[0];
   if (!primaryModel) return;
@@ -3005,7 +4642,7 @@ async function runSovereignIdentity(tribeId: TribeId): Promise<void> {
     llmStatus = `Identity call failed for ${state.tribes[tribeId].defaultName}. ${rejectedAttempts.at(-1) ?? "unknown failure"}`;
     nextIdentityRetryTick[tribeId] = state.tick + 180;
   }
-  identitySetupComplete = tribeIds.every((id) => state.tribes[id].eliminated || state.tribes[id].identityChosen);
+  identitySetupComplete = tribeIds.every((id) => !isTribeActive(state, id) || state.tribes[id].identityChosen);
   finishLlmJob(tribeId);
   render();
 }
@@ -3215,7 +4852,7 @@ async function runSovereignReply(packetId: string): Promise<void> {
     packet.state !== "AWAITING_REPLY" ||
     packet.messageIds.length > 1 ||
     pendingReplyPacketIds.has(packetId) ||
-    state.tribes[packet.recipientTribeId].eliminated
+    !isTribeActive(state, packet.recipientTribeId)
   ) {
     return;
   }
@@ -3277,10 +4914,10 @@ async function runSovereignReply(packetId: string): Promise<void> {
     }
   }
 
-  if (state.tribes[tribeId].eliminated) {
+  if (!isTribeActive(state, tribeId)) {
     pendingReplyPacketIds.delete(packetId);
     finishLlmJob(tribeId);
-    llmStatus = `${state.tribes[tribeId].name} was eliminated before it could reply.`;
+    llmStatus = `${state.tribes[tribeId].name} is no longer a separate civilization before it could reply.`;
     render();
     return;
   }
@@ -3292,7 +4929,9 @@ async function runSovereignReply(packetId: string): Promise<void> {
     : attachReplyToPacket(state, packetId, {
         subject: reply.subject,
         body: reply.body,
-        diplomacyIntent: reply.diplomacyIntent
+        diplomacyIntent: reply.diplomacyIntent,
+        mergerLeaderTribeId: reply.mergerLeaderTribeId,
+        mergerTerms: reply.mergerTerms
       });
   const accepted = result?.ok
     ? [
@@ -3301,7 +4940,8 @@ async function runSovereignReply(packetId: string): Promise<void> {
 	        ...formatRerouteAccepted(tribeModel, model, provider),
 	        ...transportAccepted(reply.transportNote),
 	        ...recoveryAccepted(reply.recoveryNote),
-	        ...(result.allianceFormed ? ["ALLIANCE: accepted through discussion"] : [])
+	        ...(result.allianceFormed ? ["ALLIANCE: accepted through discussion"] : []),
+	        ...(result.mergerExecuted ? [`MERGER: civilization merged under ${state.tribes[reply.mergerLeaderTribeId ?? packet.originTribeId]?.name ?? "negotiated leader"}`] : [])
       ]
     : [];
   const rejected = staleReason ? [`REPLY_STALE: ${staleReason}`] : result?.ok ? [] : [`REPLY: ${result?.reason ?? "unknown reply failure"}`];
@@ -3341,7 +4981,7 @@ async function runSovereignDecision(tribeId: TribeId, immediate: boolean): Promi
   const firstDoctrine = !hasDoctrineDecision(tribeId);
   const tribeModel = strategyModelForTribe(tribeId);
   if (!beginLlmJob(tribeId, "strategy", tribeModel, firstDoctrine, firstDoctrine)) return;
-  if (state.tribes[tribeId].eliminated) {
+  if (!isTribeActive(state, tribeId)) {
     nextLlmDecisionTick[tribeId] = Number.POSITIVE_INFINITY;
     finishLlmJob(tribeId);
     return;
@@ -3412,10 +5052,10 @@ async function runSovereignDecision(tribeId: TribeId, immediate: boolean): Promi
     }
   }
 
-  if (state.tribes[tribeId].eliminated) {
+  if (!isTribeActive(state, tribeId)) {
     nextLlmDecisionTick[tribeId] = Number.POSITIVE_INFINITY;
     finishLlmJob(tribeId);
-    llmStatus = `${state.tribes[tribeId].name} was eliminated before its strategy could be applied.`;
+    llmStatus = `${state.tribes[tribeId].name} is no longer a separate civilization before its strategy could be applied.`;
     render();
     return;
   }
@@ -3631,7 +5271,7 @@ function buildAiReportTurnContext(decision: AiDecision): string {
   const tribe = state.tribes[decision.tribeId];
   const units = Object.values(state.units).filter((unit) => unit.tribeId === decision.tribeId && unit.hp > 0);
   const buildings = Object.values(state.buildings).filter((building) => building.tribeId === decision.tribeId && building.hp > 0);
-  const military = units.filter((unit) => unit.type === "militia" || unit.type === "archer" || unit.type === "siege_engine").length;
+  const military = units.filter((unit) => isMilitaryUnitType(unit.type)).length;
   const walls = buildings.filter((building) => building.type === "wall").length;
   const gates = buildings.filter((building) => building.type === "gate").length;
   const turrets = buildings.filter((building) => building.type === "turret").length;
@@ -3726,7 +5366,7 @@ function buildAiReportSnapshot(
     },
     counts: {
       ownUnits: ownUnits.length,
-      ownMilitary: ownUnits.filter((unit) => unit.type === "militia" || unit.type === "archer" || unit.type === "siege_engine").length,
+      ownMilitary: ownUnits.filter((unit) => isMilitaryUnitType(unit.type)).length,
       ownBuildings: ownBuildings.length,
       walls: ownBuildings.filter((building) => building.type === "wall").length,
       gates: ownBuildings.filter((building) => building.type === "gate").length,
@@ -4140,11 +5780,11 @@ function normalizedAiReportText(value: string | undefined): string {
 }
 
 function formatCurrentAiReportForInbox(entry: AiBugEntry): string {
-  return `open current ${entry.category}/${entry.severity} turn ${entry.tick} ${aiReportSourceKindLabel(entry.source)} model ${entry.model}: ${clampText(entry.report, 130)}`;
+  return `open current ${entry.category}/${entry.severity} turn ${entry.tick} ${aiReportSourceKindLabel(entry.source)}: ${clampText(entry.report, 130)}`;
 }
 
 function formatOpenAiReportForInbox(entry: AiReportReviewEntry): string {
-  return `open ${entry.category}/${entry.severity} id ${entry.id} turn ${entry.tick} ${aiReportSourceKindLabel(entry.source)} model ${entry.model}: ${clampText(entry.report, 130)}`;
+  return `open ${entry.category}/${entry.severity} id ${entry.id} turn ${entry.tick} ${aiReportSourceKindLabel(entry.source)}: ${clampText(entry.report, 130)}`;
 }
 
 function aiReportSourceKindLabel(source: string | undefined): string {
@@ -4168,7 +5808,7 @@ function formatAiReportLesson(entry: AiReportReviewEntry): string {
   const proof = entry.triageProof ?? entry.bucketProof;
   const note = proof?.summary ?? entry.triageNote ?? entry.bucketNote ?? "";
   const evidence = status === "fixed" && proof?.evidence ? ` proof=${clampText(proof.evidence, 60)}` : "";
-  return `${status} ${entry.category}/${entry.severity} id ${entry.id} turn ${entry.tick} ${aiReportSourceKindLabel(entry.source)} model ${entry.model}: ${clampText(entry.report, 105)}${note ? `; ${clampText(note, 55)}` : ""}${evidence}`;
+  return `${status} ${entry.category}/${entry.severity} id ${entry.id} turn ${entry.tick} ${aiReportSourceKindLabel(entry.source)}: ${clampText(entry.report, 105)}${note ? `; ${clampText(note, 55)}` : ""}${evidence}`;
 }
 
 async function updateAiReportTriage(reportId: string, status: AiReportTriageStatus): Promise<void> {
@@ -4223,7 +5863,7 @@ function rememberAiReportFiled(decision: AiDecision, entry: AiBugEntry): void {
   appendSovereignMemory(
     state,
     decision.tribeId,
-    `AI iteration report filed (${entry.category}/${entry.severity}): ${clampText(entry.report, 150)}`
+    `World report filed (${entry.category}/${entry.severity}): ${clampText(entry.report, 150)}`
   );
 }
 
@@ -4235,7 +5875,7 @@ function rememberAiReportTriage(entry: AiReportReviewEntry, status: AiReportTria
   appendSovereignMemory(
     state,
     tribeId,
-    [`AI iteration report ${status}: ${clampText(entry.report, 125)}`, clampText(proofText, 70)].filter(Boolean).join(" ")
+    [`World report ${status}: ${clampText(entry.report, 125)}`, clampText(proofText, 70)].filter(Boolean).join(" ")
   );
 }
 
@@ -4408,6 +6048,10 @@ function isFortificationType(type: Building["type"]): boolean {
   return type === "wall" || type === "gate" || type === "turret" || type === "watchtower";
 }
 
+function isMilitaryUnitType(type: UnitType): boolean {
+  return type === "militia" || type === "archer" || type === "siege_engine" || type === "battering_ram" || type === "catapult";
+}
+
 function shouldRenderBuildingLabel(building: Building, game: GameState, tier: LabelTier): boolean {
   if (building.id === selectedBuildingId || building.id === constructionFlash?.buildingId) return true;
   if (building.hp < building.maxHp || buildingRepairState(game, building) !== "none") return true;
@@ -4421,7 +6065,7 @@ function shouldRenderUnitLabel(unit: Unit, tier: LabelTier): boolean {
   if (unit.id === selectedUnitId || unit.carriedPacketId !== undefined) return true;
   if (unit.type === "sovereign" || unit.type === "messenger") return true;
   if (tier === "detail") return true;
-  if (tier === "tactical") return unit.type === "militia" || unit.type === "archer" || unit.type === "siege_engine" || unit.type === "sentinel";
+  if (tier === "tactical") return isMilitaryUnitType(unit.type) || unit.type === "sentinel";
   return false;
 }
 
@@ -4439,12 +6083,19 @@ function buildBoardReadabilitySnapshot(game: GameState, visibleUnits: Unit[], vi
         );
       }).length
     : 0;
+  const visibleBuildingSpriteCount = visibleBuildings.filter((building) => {
+    return building.hp > 0 && isWorldPointInViewport(building.x * TILE + TILE / 2, building.y * TILE + TILE / 2, TILE * 2);
+  }).length;
   const visibleUnitLabelCount = showResourceLabels
     ? visibleUnits.filter((unit) => {
         const visual = visualPositionForUnit(unit);
         return isWorldPointInViewport(visual.x * TILE + TILE / 2, visual.y * TILE + TILE / 2) && shouldRenderUnitLabel(unit, tier);
       }).length
     : 0;
+  const visibleUnitSpriteCount = visibleUnits.filter((unit) => {
+    const visual = visualPositionForUnit(unit);
+    return isWorldPointInViewport(visual.x * TILE + TILE / 2, visual.y * TILE + TILE / 2, TILE * 2);
+  }).length;
   const constructionLabelCount = showResourceLabels
     ? activeConstructionFlashes(game).filter((flash) => {
         const building = game.buildings[flash.buildingId];
@@ -4483,12 +6134,37 @@ function buildBoardReadabilitySnapshot(game: GameState, visibleUnits: Unit[], vi
       mapLabelsDefault: showResourceLabels ? "debug labels enabled" : "sprite view",
       visibleResourceSpriteCount: resourceSprites.visible,
       visibleScarceResourceSpriteCount: resourceSprites.scarceVisible,
+      activeResourceSpriteCount,
+      resourceSpritePoolSize: resourceSpritePool.length,
+      visibleBuildingSpriteCount,
+      activeBuildingSpriteCount,
+      buildingSpritePoolSize: buildingSpritePool.length,
+      visibleUnitSpriteCount,
+      activeUnitSpriteCount,
+      unitSpritePoolSize: unitSpritePool.length,
+      activeMapTextCount,
+      mapTextPoolSize: mapTextPool.length,
+      activeRouteVisualCount,
+      activeAmbientTerrainCueCount,
+      activeFogTileCount,
+      activeFogEdgeCueCount,
       resourceTextureTypes: resourceTypes.length,
       buildingTextureTypes: buildingTypes.length,
+      buildingStateTextureTypes: buildingTypes.length * buildingVisualStates.length,
       unitTextureTypes: unitTypes.length,
-      siegeEngineTexture: Boolean(visualTextures?.units.siege_engine),
-      unitAnimation: "frame-time bob, siege-engine wheel silhouette, and packet pulse",
-      buildingAnimation: "turret recoil, gate lock state, fortification joins, and construction focus pulse"
+      unitStateTextureTypes: unitTypes.length * unitVisualStates.length,
+      diplomacyPacketTextureTypes: diplomacyTextureTypes.length,
+      activePacketSpriteCount,
+      packetSpritePoolSize: packetSpritePool.length,
+      siegeEngineTexture: Boolean(visualTextures?.units.siege_engine?.idle),
+      batteringRamTexture: Boolean(visualTextures?.units.battering_ram?.idle),
+      catapultTexture: Boolean(visualTextures?.units.catapult?.idle),
+      unitAnimation: "pooled sprites with idle/move/scout/gather/deliver/repair/attack texture frames, frame-time bob, task cues, team base rings, and packet pulse",
+      buildingAnimation: "pooled building sprites with normal/damaged/critical/repairing/open/closed/locked state textures, turret recoil, fortification joins, and construction focus pulse",
+      diplomacyAnimation: "pooled scroll, reply, and destination-seal sprites riding courier routes with frame-time bob and viewport culling",
+      ambientTerrainAnimation: "single bounded Graphics pass for viewport-culled water shimmer, road dust, canopy drift, grass wind strokes, and hill glints",
+      fogAnimation: "dirty-only fog redraw with softened explored haze and edge cues in player-visibility mode",
+      terrainTexture: "cached chunk terrain with road shoulders, water ripples, forest canopy marks, hill contours, mountain caps, and sparse grass flecks"
     },
     viewportTiles,
     strategicGridStep: 8,
@@ -4500,13 +6176,380 @@ function buildBoardReadabilitySnapshot(game: GameState, visibleUnits: Unit[], vi
       construction: constructionResourceTypes.has(type),
       visibleAtTier: shouldRenderResourceLabel(type, tier)
     })),
-    visualSignatures: {
-      resources: "sprite-textured deposits drawn from live resource health and culled to the viewport",
-      labels: "debug-only map text, disabled by default",
-      forts: "textured walls, gates, and turrets with damage, repair, gate state, and range overlays",
-      units: "textured unit silhouettes with frame-time movement bob, packet satchels, and siege-engine machine sprites"
-    }
+	    visualSignatures: {
+      resources: "higher-resolution pooled sprite-textured deposits drawn from live resource health, exhausted-resource decals for recent depletions, and viewport culling",
+	      labels: "debug-only map text, disabled by default",
+	      forts: "pooled textured walls, gates, and turrets with sprite-state damage, repair, gate passage/lock, and range overlays",
+	      units: "untinted textured unit silhouettes with team base rings, frame-time movement bob, packet satchels, and task-state cues"
+	    },
+	    resourcePressureOverlay: buildResourcePressureOverlayTelemetry(game),
+	    fortificationOverlay: buildFortificationOverlayTelemetry(game, visibleUnits, visibleBuildings)
+	  };
+	}
+
+function buildResourcePressureOverlayTelemetry(game: GameState) {
+  const pressureSites = buildResourcePressureOverlaySites(game);
+  const contestedSites = pressureSites.filter((site) => site.contested);
+  const scarceSites = pressureSites.filter((site) => site.scarce);
+  const raidedSites = pressureSites.filter((site) => site.raided);
+  const deniedSites = pressureSites.filter((site) => site.deniedRecent);
+  const depletedSites = pressureSites.filter((site) => site.depletedRecent);
+  const routeSites = pressureSites.filter((site) => site.routeFromTribe !== undefined);
+  return {
+    enabled: showContestedResources,
+    routeMarkers: routeSites.length,
+    contestedMarkers: contestedSites.length,
+    scarceMarkers: scarceSites.length,
+    raidedMarkers: raidedSites.length,
+    denialMarkers: deniedSites.length,
+    depletionMarkers: depletedSites.length,
+    routeSiteIds: routeSites.map((site) => site.siteId).slice(0, 20),
+    denialSiteIds: deniedSites.map((site) => site.siteId).slice(0, 20),
+    depletionSiteIds: depletedSites.map((site) => site.siteId).slice(0, 20),
+    pressureSites: pressureSites.slice(0, 20),
+    markerPolicy:
+      "visual resource overlay marks contested or scarce deposits, damaged/raided deposits, recent destroyed/depleted deposits with exhausted-world decals, and bounded route pressure from the nearest known anchor"
   };
+}
+
+function buildResourcePressureOverlaySites(game: GameState): Array<{
+  siteId: string;
+  type: ResourceType;
+  x: number;
+  y: number;
+  amount: number;
+  healthPct: number;
+  contested: boolean;
+  scarce: boolean;
+  raided: boolean;
+  deniedRecent: boolean;
+  depletedRecent: boolean;
+  nearestTribe?: TribeId;
+  rivalTribe?: TribeId;
+  routeFromTribe?: TribeId;
+  routeFromX?: number;
+  routeFromY?: number;
+  routeDistance?: number;
+  attackerTribeId?: TribeId;
+  depletedByTribeId?: TribeId;
+  controlledBy?: TribeId;
+  pressureScore: number;
+}> {
+  const activeSites = summarizeContestedResourceSites(game)
+    .filter((site) => site.contested || site.scarce || site.healthPct < 100)
+    .slice(0, 18)
+    .map((site) => {
+      const route = resourcePressureRouteAnchor(game, site.nearestTribe, { x: site.x, y: site.y });
+      return {
+        siteId: resourcePressureSiteId(site.type, site.x, site.y),
+        type: site.type,
+        x: site.x,
+        y: site.y,
+        amount: site.amount,
+        healthPct: site.healthPct,
+        contested: site.contested,
+        scarce: site.scarce,
+        raided: site.healthPct < 100,
+        deniedRecent: false,
+        depletedRecent: false,
+        nearestTribe: site.nearestTribe,
+        rivalTribe: site.rivalTribe,
+        routeFromTribe: route?.tribeId,
+        routeFromX: route?.x,
+        routeFromY: route?.y,
+        routeDistance: route?.distance,
+        pressureScore: site.pressureScore
+      };
+    });
+  const activeKeys = new Set(activeSites.map((site) => site.siteId));
+  const denialSites = recentResourceDenialsForOverlay(game)
+    .filter((denial) => !activeKeys.has(resourcePressureSiteId(denial.type, denial.x, denial.y)))
+    .slice(-12)
+    .map((denial) => {
+      const routeTribe = denial.attackerTribeId ?? denial.controlledBy ?? playerTribe;
+      const route = resourcePressureRouteAnchor(game, routeTribe, { x: denial.x, y: denial.y });
+      return {
+        siteId: resourcePressureSiteId(denial.type, denial.x, denial.y),
+        type: denial.type,
+        x: denial.x,
+        y: denial.y,
+        amount: Math.round(denial.amount),
+        healthPct: 0,
+        contested: false,
+        scarce: scarceResourceTypes.has(denial.type),
+        raided: true,
+        deniedRecent: true,
+        depletedRecent: false,
+        nearestTribe: denial.controlledBy,
+        routeFromTribe: route?.tribeId,
+        routeFromX: route?.x,
+        routeFromY: route?.y,
+        routeDistance: route?.distance,
+        attackerTribeId: denial.attackerTribeId,
+        controlledBy: denial.controlledBy,
+        pressureScore: 220 + (scarceResourceTypes.has(denial.type) ? 40 : 0)
+      };
+    });
+  const blockedKeys = new Set([...activeKeys, ...denialSites.map((site) => site.siteId)]);
+  const depletionSites = recentResourceDepletionsForOverlay(game)
+    .filter((depletion) => !blockedKeys.has(resourcePressureSiteId(depletion.type, depletion.x, depletion.y)))
+    .slice(-12)
+    .map((depletion) => {
+      const routeTribe = depletion.depletedByTribeId ?? depletion.controlledBy ?? playerTribe;
+      const route = resourcePressureRouteAnchor(game, routeTribe, { x: depletion.x, y: depletion.y });
+      return {
+        siteId: resourcePressureSiteId(depletion.type, depletion.x, depletion.y),
+        type: depletion.type,
+        x: depletion.x,
+        y: depletion.y,
+        amount: Math.round(depletion.amount),
+        healthPct: 0,
+        contested: false,
+        scarce: scarceResourceTypes.has(depletion.type),
+        raided: false,
+        deniedRecent: false,
+        depletedRecent: true,
+        nearestTribe: depletion.controlledBy,
+        routeFromTribe: route?.tribeId,
+        routeFromX: route?.x,
+        routeFromY: route?.y,
+        routeDistance: route?.distance,
+        depletedByTribeId: depletion.depletedByTribeId,
+        controlledBy: depletion.controlledBy,
+        pressureScore: 180 + (scarceResourceTypes.has(depletion.type) ? 36 : 0)
+      };
+    });
+  return [...denialSites, ...depletionSites, ...activeSites]
+    .sort((left, right) => right.pressureScore - left.pressureScore || left.siteId.localeCompare(right.siteId))
+    .slice(0, 24);
+}
+
+function recentResourceDenialsForOverlay(game: GameState): ResourceDenialRecord[] {
+  return game.resourceDenials.filter((denial) => {
+    if (game.tick - denial.tick > TICKS_PER_GAME_YEAR * 50) return false;
+    if (observerMode || denial.visibleTo === "all") return true;
+    return denial.visibleTo.includes(playerTribe);
+  });
+}
+
+function recentResourceDepletionsForOverlay(game: GameState): ResourceDepletionRecord[] {
+  return getRecentResourceDepletions(game).filter((depletion) => {
+    if (game.tick - depletion.tick > TICKS_PER_GAME_YEAR * 50) return false;
+    if (observerMode || depletion.visibleTo === "all") return true;
+    return depletion.visibleTo.includes(playerTribe);
+  });
+}
+
+function resourcePressureRouteAnchor(game: GameState, tribeId: TribeId | undefined, target: Position): { tribeId: TribeId; x: number; y: number; distance: number } | undefined {
+  if (!tribeId || !isTribeActive(game, tribeId)) return undefined;
+  let anchor: Position | undefined;
+  try {
+    const townHall = getTownHall(game, tribeId);
+    anchor = { x: townHall.x, y: townHall.y };
+  } catch {
+    const unit = Object.values(game.units).find((candidate) => candidate.tribeId === tribeId && candidate.hp > 0);
+    if (unit) anchor = { x: unit.x, y: unit.y };
+  }
+  if (!anchor) return undefined;
+  return {
+    tribeId,
+    x: Number(anchor.x.toFixed(2)),
+    y: Number(anchor.y.toFixed(2)),
+    distance: Math.round(Math.hypot(anchor.x - target.x, anchor.y - target.y))
+  };
+}
+
+function resourcePressureSiteId(type: ResourceType, x: number, y: number): string {
+  return `${type}@${x},${y}`;
+}
+
+function buildFortificationOverlayTelemetry(game: GameState, visibleUnits: Unit[], visibleBuildings: Building[]) {
+  const visibleById = new Map(visibleBuildings.filter((building) => building.hp > 0).map((building) => [building.id, building]));
+  const visibleFortifications = visibleBuildings.filter(
+    (building) => building.hp > 0 && (building.type === "wall" || building.type === "gate" || building.type === "turret" || building.type === "watchtower")
+  );
+  const visibleWalls = visibleFortifications.filter((building) => building.type === "wall");
+  const visibleGates = visibleFortifications.filter((building) => building.type === "gate");
+  const visibleTurrets = visibleFortifications.filter((building) => building.type === "turret");
+  const visibleWatchtowers = visibleFortifications.filter((building) => building.type === "watchtower");
+  const operatedGateIds = visibleGates.filter((building) => Boolean(building.gateOperation)).map((building) => building.id);
+  const activeSabotageGateIds = visibleGates.filter((building) => Boolean(building.gateSabotage)).map((building) => building.id);
+  const activeAccessTreatyIds = visibleGates.flatMap((building) => getActiveGateAccessTreaties(game, building.id).map((treaty) => treaty.id));
+  const visibleWallGateSegments = [...visibleWalls, ...visibleGates];
+  const blockedForPlayerCount = visibleWallGateSegments.filter((building) => !isTileWalkable(game, building.x, building.y, playerTribe)).length;
+  const passableForPlayerCount = visibleWallGateSegments.filter((building) => isTileWalkable(game, building.x, building.y, playerTribe)).length;
+  const sabotageHistoryGateIds = Array.from(
+    new Set(game.gateSabotageHistory.filter((record) => visibleById.has(record.buildingId)).map((record) => record.buildingId))
+  );
+  const perimeterGroups = buildPerimeterOverlayGroups(game, visibleById);
+  const visualOverlayMarkers = buildFortificationVisualMarkerTelemetry(game, visibleUnits, visibleBuildings, perimeterGroups);
+
+  return {
+    enabled: showDefenseOverlay,
+    visibleCounts: {
+      fortification: visibleFortifications.length,
+      wall: visibleWalls.length,
+      gate: visibleGates.length,
+      turret: visibleTurrets.length,
+      watchtower: visibleWatchtowers.length
+    },
+    blockedForPlayerCount,
+    passableForPlayerCount,
+    operatedGateCount: operatedGateIds.length,
+    operatedGateIds,
+    activeAccessTreatyCount: activeAccessTreatyIds.length,
+    activeAccessTreatyIds,
+    activeSabotageCount: activeSabotageGateIds.length,
+    activeSabotageGateIds,
+    recentSabotageHistoryCount: game.gateSabotageHistory.filter((record) => visibleById.has(record.buildingId)).length,
+    sabotageHistoryGateIds,
+    perimeterGroupCount: perimeterGroups.length,
+    visualOverlayMarkers,
+    perimeterGroups
+  };
+}
+
+function buildFortificationVisualMarkerTelemetry(
+  game: GameState,
+  visibleUnits: Unit[],
+  visibleBuildings: Building[],
+  perimeterGroups: ReturnType<typeof buildPerimeterOverlayGroups>
+) {
+  const visibleWallGateSegments = visibleBuildings.filter(
+    (building) => building.hp > 0 && (building.type === "wall" || building.type === "gate")
+  );
+  const visibleGates = visibleWallGateSegments.filter((building) => building.type === "gate");
+  const blockedRouteBuildingIds = visibleWallGateSegments
+    .filter((building) => !isTileWalkable(game, building.x, building.y, playerTribe))
+    .map((building) => building.id);
+  const safePassageGateIds = visibleGates.filter((building) => isSafePassageGate(game, building)).map((building) => building.id);
+  const operatedGateIds = visibleGates.filter((building) => Boolean(building.gateOperation)).map((building) => building.id);
+  const warFrontMarkers = buildWarFrontOverlayMarkers(game, visibleUnits, visibleBuildings);
+
+  return {
+    enabled: showDefenseOverlay,
+    blockedRouteMarkers: blockedRouteBuildingIds.length,
+    blockedRouteBuildingIds: blockedRouteBuildingIds.slice(0, 20),
+    safePassageMarkers: safePassageGateIds.length,
+    safePassageGateIds: safePassageGateIds.slice(0, 20),
+    operatedGateMarkers: operatedGateIds.length,
+    operatedGateIds: operatedGateIds.slice(0, 20),
+    perimeterCenterMarkers: perimeterGroups.length,
+    perimeterGroupIds: perimeterGroups.map((group) => group.groupId).slice(0, 20),
+    warFrontMarkers: warFrontMarkers.length,
+    warFrontPairs: warFrontMarkers
+      .slice(0, 20)
+      .map((marker) => `${marker.a}:${marker.b}@${Number(marker.x.toFixed(1))},${Number(marker.y.toFixed(1))}`),
+    markerPolicy:
+      "visual defense overlay marks player-blocking walls/gates, negotiated or open safe-passage gates, operated gate writ/toll/detention/release/sabotage badges, authored perimeter centers, and visible war-front contact"
+  };
+}
+
+function isSafePassageGate(game: GameState, building: Building): boolean {
+  if (building.type !== "gate" || building.hp <= 0) return false;
+  if (building.gateSabotage?.action === "jam_closed") return false;
+  const physicallyOpen = building.gateSabotage?.action === "force_open" || (building.gateState ?? "open") === "open";
+  if (!physicallyOpen) return false;
+  if (isTileWalkable(game, building.x, building.y, building.tribeId)) return true;
+  if ((building.gateAccessPolicy ?? "owner_allies") === "all") return true;
+  return getActiveGateAccessTreaties(game, building.id).length > 0;
+}
+
+function buildWarFrontOverlayMarkers(game: GameState, visibleUnits: Unit[], visibleBuildings: Building[]) {
+  const hostileUnits = visibleUnits.filter((unit) => unit.hp > 0 && isMilitaryUnitType(unit.type));
+  const anchors = [
+    ...visibleUnits
+      .filter((unit) => unit.hp > 0)
+      .map((unit) => ({ kind: "unit" as const, id: unit.id, tribeId: unit.tribeId, x: unit.x, y: unit.y })),
+    ...visibleBuildings
+      .filter((building) => building.hp > 0 && (isFortificationType(building.type) || building.type === "townHall"))
+      .map((building) => ({ kind: "building" as const, id: building.id, tribeId: building.tribeId, x: building.x, y: building.y }))
+  ];
+  const markers: Array<{ a: TribeId; b: TribeId; x: number; y: number; distance: number }> = [];
+  const seen = new Set<string>();
+  for (const unit of hostileUnits) {
+    for (const anchor of anchors) {
+      if (anchor.tribeId === unit.tribeId || !game.wars[unit.tribeId]?.[anchor.tribeId]) continue;
+      if (anchor.kind === "unit" && anchor.id === unit.id) continue;
+      const distance = Math.hypot(unit.x - anchor.x, unit.y - anchor.y);
+      if (distance > 14) continue;
+      const ordered = [unit.tribeId, anchor.tribeId].sort().join(":");
+      const key = `${ordered}:${Math.round((unit.x + anchor.x) / 2)},${Math.round((unit.y + anchor.y) / 2)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      markers.push({
+        a: unit.tribeId,
+        b: anchor.tribeId,
+        x: (unit.x + anchor.x) / 2,
+        y: (unit.y + anchor.y) / 2,
+        distance
+      });
+    }
+  }
+  return markers.sort((left, right) => left.distance - right.distance).slice(0, 16);
+}
+
+function buildPerimeterOverlayGroups(game: GameState, visibleById: Map<string, Building>) {
+  const groups = new Map<string, typeof game.fortificationPlans>();
+  for (const plan of game.fortificationPlans) {
+    if (!plan.perimeterGroupId) continue;
+    const existing = groups.get(plan.perimeterGroupId) ?? [];
+    existing.push(plan);
+    groups.set(plan.perimeterGroupId, existing);
+  }
+
+  return Array.from(groups.entries())
+    .map(([groupId, plans]) => {
+      const latestPlan = plans.reduce((latest, plan) => (plan.tick > latest.tick || (plan.tick === latest.tick && plan.id > latest.id) ? plan : latest), plans[0]);
+      const visibleGroupBuildings = plans.flatMap((plan) => {
+        const building = visibleById.get(plan.buildingId);
+        return building ? [building] : [];
+      });
+      const gates = visibleGroupBuildings.filter((building) => building.type === "gate");
+      const walls = visibleGroupBuildings.filter((building) => building.type === "wall");
+      const turrets = visibleGroupBuildings.filter((building) => building.type === "turret");
+      const watchtowers = visibleGroupBuildings.filter((building) => building.type === "watchtower");
+      const activeAccessTreatyIds = gates.flatMap((gate) => getActiveGateAccessTreaties(game, gate.id).map((treaty) => treaty.id));
+      const operatedGateIds = gates.filter((gate) => Boolean(gate.gateOperation)).map((gate) => gate.id);
+      const activeSabotageGateIds = gates.filter((gate) => Boolean(gate.gateSabotage)).map((gate) => gate.id);
+      const xs = visibleGroupBuildings.map((building) => building.x);
+      const ys = visibleGroupBuildings.map((building) => building.y);
+      return {
+        groupId,
+        tribeId: latestPlan.tribeId,
+        pattern: latestPlan.perimeterPattern,
+        direction: latestPlan.perimeterDirection,
+        length: latestPlan.perimeterLength,
+        gateIndex: latestPlan.perimeterGateIndex,
+        planCount: plans.length,
+        segmentCount: Math.max(...plans.map((plan) => plan.perimeterSegmentCount ?? 0), plans.length),
+        visibleSegmentCount: visibleGroupBuildings.length,
+        visibleBuildingIds: visibleGroupBuildings.map((building) => building.id),
+        counts: {
+          wall: walls.length,
+          gate: gates.length,
+          turret: turrets.length,
+          watchtower: watchtowers.length
+        },
+        blockedSegments: [...walls, ...gates].filter((building) => !isTileWalkable(game, building.x, building.y, playerTribe)).length,
+        blockedWallSegments: walls.filter((building) => !isTileWalkable(game, building.x, building.y, playerTribe)).length,
+        passableGateSegments: gates.filter((building) => isTileWalkable(game, building.x, building.y, building.tribeId)).length,
+        passableGatesForPlayer: gates.filter((building) => isTileWalkable(game, building.x, building.y, playerTribe)).length,
+        operatedGateIds,
+        activeAccessTreatyIds,
+        activeSabotageGateIds,
+        placementPreview: latestPlan.placementPreview ?? plans.find((plan) => plan.placementPreview)?.placementPreview,
+        routeBlockedByPlacementCount: latestPlan.placementPreview?.routeBlockedByPlacementCount ?? 0,
+        maxAddedRouteSteps: latestPlan.placementPreview?.maxAddedRouteSteps ?? 0,
+        centerX: xs.length > 0 ? Number((xs.reduce((sum, x) => sum + x, 0) / xs.length).toFixed(2)) : latestPlan.requestedX ?? latestPlan.x,
+        centerY: ys.length > 0 ? Number((ys.reduce((sum, y) => sum + y, 0) / ys.length).toFixed(2)) : latestPlan.requestedY ?? latestPlan.y,
+        latestIntent: latestPlan.fortificationIntent,
+        latestStrategy: latestPlan.perimeterStrategy
+      };
+    })
+    .filter((group) => group.visibleSegmentCount > 0)
+    .sort((left, right) => right.visibleSegmentCount - left.visibleSegmentCount || left.groupId.localeCompare(right.groupId))
+    .slice(0, 12);
 }
 
 function countResourceLabelTelemetry(
@@ -4550,22 +6593,144 @@ function countResourceSpriteTelemetry(
   return { visible, scarceVisible };
 }
 
+function resetResourceSpritePool(): void {
+  activeResourceSpriteCount = 0;
+  for (const sprite of resourceSpritePool) sprite.visible = false;
+}
+
+function acquireResourceSprite(layer: Container, texture: Texture): Sprite {
+  let sprite = resourceSpritePool[activeResourceSpriteCount];
+  if (!sprite) {
+    sprite = new Sprite({ texture });
+    sprite.anchor.set(0.5);
+    resourceSpritePool.push(sprite);
+    layer.addChild(sprite);
+  } else if (sprite.texture !== texture) {
+    sprite.texture = texture;
+  }
+  sprite.visible = true;
+  activeResourceSpriteCount += 1;
+  return sprite;
+}
+
+function resetBuildingSpritePool(): void {
+  activeBuildingSpriteCount = 0;
+  for (const sprite of buildingSpritePool) sprite.visible = false;
+}
+
+function acquireBuildingSprite(texture: Texture): Sprite {
+  let sprite = buildingSpritePool[activeBuildingSpriteCount];
+  if (!sprite) {
+    sprite = new Sprite({ texture });
+    sprite.anchor.set(0.5);
+    buildingSpritePool.push(sprite);
+    buildingSpriteLayer.addChild(sprite);
+  } else if (sprite.texture !== texture) {
+    sprite.texture = texture;
+  }
+  sprite.visible = true;
+  activeBuildingSpriteCount += 1;
+  return sprite;
+}
+
+function resetUnitSpritePool(): void {
+  activeUnitSpriteCount = 0;
+  for (const sprite of unitSpritePool) sprite.visible = false;
+}
+
+function acquireUnitSprite(texture: Texture): Sprite {
+  let sprite = unitSpritePool[activeUnitSpriteCount];
+  if (!sprite) {
+    sprite = new Sprite({ texture });
+    sprite.anchor.set(0.5);
+    unitSpritePool.push(sprite);
+    unitSpriteLayer.addChild(sprite);
+  } else if (sprite.texture !== texture) {
+    sprite.texture = texture;
+  }
+  sprite.visible = true;
+  activeUnitSpriteCount += 1;
+  return sprite;
+}
+
+function resetPacketSpritePool(): void {
+  activePacketSpriteCount = 0;
+  for (const sprite of packetSpritePool) sprite.visible = false;
+}
+
+function acquirePacketSprite(texture: Texture): Sprite {
+  let sprite = packetSpritePool[activePacketSpriteCount];
+  if (!sprite) {
+    sprite = new Sprite({ texture });
+    sprite.anchor.set(0.5);
+    packetSpritePool.push(sprite);
+    packetSpriteLayer.addChild(sprite);
+  } else if (sprite.texture !== texture) {
+    sprite.texture = texture;
+  }
+  sprite.visible = true;
+  activePacketSpriteCount += 1;
+  return sprite;
+}
+
+function resetMapTextPool(): void {
+  activeMapTextCount = 0;
+}
+
+function acquireMapText(layer: Container, text: string, fontSize: number, fill: string, anchorX = 0.5, anchorY = 0.5): Text {
+  const style = {
+    fontFamily: "Arial",
+    fontSize,
+    fontWeight: "700" as const,
+    fill,
+    stroke: { color: "#080706", width: Math.max(2, Math.round(fontSize * 0.28)) }
+  };
+  let label = mapTextPool[activeMapTextCount];
+  if (!label) {
+    label = new Text({ text, style });
+    mapTextPool.push(label);
+  } else {
+    label.text = text;
+    label.style = style;
+  }
+  label.visible = true;
+  label.anchor.set(anchorX, anchorY);
+  layer.addChild(label);
+  activeMapTextCount += 1;
+  return label;
+}
+
 function createVisualTextureAtlas(): VisualTextureAtlas {
   return {
     resources: Object.fromEntries(resourceTypes.map((type) => [type, makeAtlasTexture((graphics, size) => drawResourceTexture(graphics, type, size))])) as Record<
       ResourceType,
       Texture
     >,
-    buildings: Object.fromEntries(buildingTypes.map((type) => [type, makeAtlasTexture((graphics, size) => drawBuildingTexture(graphics, type, size))])) as Record<
-      BuildingType,
-      Texture
-    >,
-    units: Object.fromEntries(unitTypes.map((type) => [type, makeAtlasTexture((graphics, size) => drawUnitTexture(graphics, type, size))])) as Record<UnitType, Texture>
+    buildings: Object.fromEntries(
+      buildingTypes.map((type) => [
+        type,
+        Object.fromEntries(
+          buildingVisualStates.map((state) => [state, makeAtlasTexture((graphics, size) => drawBuildingTexture(graphics, type, size, state))])
+        ) as Record<BuildingVisualState, Texture>
+      ])
+    ) as Record<BuildingType, Record<BuildingVisualState, Texture>>,
+    units: Object.fromEntries(
+      unitTypes.map((type) => [
+        type,
+        Object.fromEntries(unitVisualStates.map((state) => [state, makeAtlasTexture((graphics, size) => drawUnitTexture(graphics, type, size, state))])) as Record<
+          UnitVisualState,
+          Texture
+        >
+      ])
+    ) as Record<UnitType, Record<UnitVisualState, Texture>>,
+    diplomacy: Object.fromEntries(
+      diplomacyTextureTypes.map((type) => [type, makeAtlasTexture((graphics, size) => drawDiplomacyTexture(graphics, type, size))])
+    ) as Record<DiplomacyTextureType, Texture>
   };
 }
 
 function makeAtlasTexture(draw: (graphics: Graphics, size: number) => void): Texture {
-  const size = 48;
+  const size = 64;
   const graphics = new Graphics();
   graphics.rect(0, 0, size, size).fill({ color: 0x000000, alpha: 0 });
   draw(graphics, size);
@@ -4574,20 +6739,66 @@ function makeAtlasTexture(draw: (graphics: Graphics, size: number) => void): Tex
   return texture;
 }
 
+function drawAtlasSparkle(graphics: Graphics, x: number, y: number, size = 3, color = 0xffffff, alpha = 0.84): void {
+  graphics.moveTo(x - size, y).lineTo(x + size, y).moveTo(x, y - size).lineTo(x, y + size).stroke({ color, width: 1.3, alpha });
+}
+
+function drawDiplomacyTexture(graphics: Graphics, type: DiplomacyTextureType, size: number): void {
+  const cx = size / 2;
+  const cy = size / 2;
+  graphics.ellipse(cx, cy + 16, 17, 5).fill({ color: 0x080706, alpha: 0.26 });
+  if (type === "packet_target") {
+    graphics.circle(cx, cy + 1, 19).fill({ color: 0x2b2117, alpha: 0.78 }).stroke({ color: 0x080706, width: 2.2, alpha: 0.84 });
+    graphics.circle(cx, cy + 1, 14).fill({ color: 0xf2d28b, alpha: 0.92 }).stroke({ color: 0x5d3714, width: 1.8, alpha: 0.9 });
+    graphics
+      .moveTo(cx - 9, cy - 2)
+      .lineTo(cx, cy - 11)
+      .lineTo(cx + 9, cy - 2)
+      .lineTo(cx + 7, cy + 11)
+      .lineTo(cx - 7, cy + 11)
+      .closePath()
+      .fill({ color: 0x9b5b31, alpha: 0.9 })
+      .stroke({ color: 0x43230f, width: 1.4, alpha: 0.86 });
+    graphics.rect(cx - 3, cy + 3, 6, 8).fill({ color: 0x442917, alpha: 0.9 });
+    drawAtlasSparkle(graphics, cx + 7, cy - 8, 2.2, 0xfff2b6, 0.72);
+    return;
+  }
+
+  const returning = type === "packet_returning";
+  const paper = returning ? 0xffefc5 : 0xf6e4ba;
+  const paperDark = returning ? 0xe4bf78 : 0xd2aa67;
+  const ribbon = returning ? 0x5fb8e8 : 0xcf4f3f;
+  graphics.roundRect(cx - 18, cy - 9, 36, 20, 5).fill(paper).stroke({ color: 0x4d3217, width: 2, alpha: 0.9 });
+  graphics.circle(cx - 17, cy + 1, 5).fill(paperDark).stroke({ color: 0x4d3217, width: 1.4, alpha: 0.88 });
+  graphics.circle(cx + 17, cy + 1, 5).fill(paperDark).stroke({ color: 0x4d3217, width: 1.4, alpha: 0.88 });
+  graphics.moveTo(cx - 11, cy - 5).lineTo(cx + 11, cy - 5).moveTo(cx - 9, cy + 7).lineTo(cx + 9, cy + 7).stroke({ color: 0x7b5830, width: 1.2, alpha: 0.58 });
+  if (returning) {
+    graphics.moveTo(cx - 13, cy - 4).lineTo(cx, cy + 4).lineTo(cx + 13, cy - 4).stroke({ color: 0x7b5830, width: 1.5, alpha: 0.72 });
+    graphics.rect(cx - 18, cy + 4, 36, 4).fill({ color: ribbon, alpha: 0.74 });
+  } else {
+    graphics.rect(cx - 4, cy - 9, 8, 20).fill({ color: ribbon, alpha: 0.62 });
+  }
+  graphics.circle(cx + 5, cy + 3, 4.4).fill({ color: ribbon, alpha: 0.92 }).stroke({ color: 0x3f1e17, width: 1, alpha: 0.78 });
+  drawAtlasSparkle(graphics, cx - 9, cy - 9, returning ? 2.1 : 1.6, 0xfff6ce, returning ? 0.74 : 0.5);
+}
+
 function drawResourceTexture(graphics: Graphics, type: ResourceType, size: number): void {
   const cx = size / 2;
   const cy = size / 2;
   graphics.ellipse(cx, cy + 14, 15, 5).fill({ color: 0x090806, alpha: 0.26 });
   if (type === "gold") {
+    graphics.regularPoly(cx - 1, cy + 5, 16, 7).fill(0xb46d18).stroke({ color: 0x4d2c07, width: 2, alpha: 0.82 });
     graphics.circle(cx - 7, cy + 3, 7).fill(0xe7a938).stroke({ color: 0x5d3609, width: 2 });
     graphics.circle(cx + 3, cy + 1, 8).fill(0xffd96b).stroke({ color: 0x6b430d, width: 2 });
     graphics.circle(cx + 9, cy + 8, 5).fill(0xf7bc44).stroke({ color: 0x5d3609, width: 1.5 });
-    graphics.circle(cx + 1, cy - 2, 2).fill({ color: 0xfff2b6, alpha: 0.9 });
+    drawAtlasSparkle(graphics, cx + 1, cy - 2, 3.2, 0xfff2b6, 0.9);
+    drawAtlasSparkle(graphics, cx + 10, cy + 3, 2.4, 0xfff2b6, 0.72);
     return;
   }
   if (type === "food") {
-    graphics.rect(cx - 13, cy - 2, 26, 17).fill({ color: 0x6fa34f, alpha: 0.9 }).stroke({ color: 0x2f4d20, width: 2 });
-    for (let i = 0; i < 5; i += 1) {
+    graphics.rect(cx - 15, cy + 1, 30, 16).fill({ color: 0x5e8f3f, alpha: 0.9 }).stroke({ color: 0x2f4d20, width: 2 });
+    graphics.rect(cx - 13, cy + 4, 26, 10).fill({ color: 0x8f7c36, alpha: 0.72 });
+    for (let i = 0; i < 6; i += 1) {
       const x = cx - 10 + i * 5;
       graphics.moveTo(x, cy + 14).lineTo(x + 2, cy - 10).stroke({ color: 0xd9bc52, width: 2, alpha: 0.95 });
       graphics.circle(x + 1, cy - 9, 2.2).fill(0xf2db72);
@@ -4596,18 +6807,20 @@ function drawResourceTexture(graphics: Graphics, type: ResourceType, size: numbe
     return;
   }
   if (type === "wood") {
-    graphics.roundRect(cx - 14, cy - 2, 28, 8, 4).fill(0x9b6a3b).stroke({ color: 0x432816, width: 2 });
-    graphics.roundRect(cx - 11, cy + 7, 24, 8, 4).fill(0xc08a52).stroke({ color: 0x432816, width: 2 });
+    graphics.roundRect(cx - 15, cy - 2, 30, 8, 4).fill(0x9b6a3b).stroke({ color: 0x432816, width: 2 });
+    graphics.roundRect(cx - 12, cy + 7, 26, 8, 4).fill(0xc08a52).stroke({ color: 0x432816, width: 2 });
     graphics.circle(cx - 10, cy + 2, 3).stroke({ color: 0x5b351b, width: 1.4, alpha: 0.9 });
     graphics.circle(cx + 9, cy + 11, 3).stroke({ color: 0x5b351b, width: 1.4, alpha: 0.9 });
-    graphics.circle(cx - 4, cy - 11, 9).fill(0x3f8d4c).stroke({ color: 0x1e4426, width: 2 });
-    graphics.circle(cx + 5, cy - 13, 7).fill(0x58a85e).stroke({ color: 0x1e4426, width: 1.5 });
+    graphics.circle(cx - 4, cy - 11, 10).fill(0x3f8d4c).stroke({ color: 0x1e4426, width: 2 });
+    graphics.circle(cx + 7, cy - 13, 8).fill(0x58a85e).stroke({ color: 0x1e4426, width: 1.5 });
+    graphics.moveTo(cx - 9, cy - 14).lineTo(cx - 3, cy - 20).lineTo(cx + 3, cy - 13).stroke({ color: 0x9fdc72, width: 1.3, alpha: 0.65 });
     return;
   }
   if (type === "stone") {
-    graphics.roundRect(cx - 13, cy + 1, 17, 14, 4).fill(0xa7a297).stroke({ color: 0x3a3834, width: 2 });
-    graphics.roundRect(cx - 2, cy - 8, 15, 18, 4).fill(0xc9c3b8).stroke({ color: 0x4d4942, width: 2 });
+    graphics.roundRect(cx - 15, cy + 1, 18, 14, 4).fill(0xa7a297).stroke({ color: 0x3a3834, width: 2 });
+    graphics.roundRect(cx - 3, cy - 8, 17, 19, 4).fill(0xc9c3b8).stroke({ color: 0x4d4942, width: 2 });
     graphics.roundRect(cx + 5, cy + 6, 10, 9, 3).fill(0x89847a).stroke({ color: 0x34312c, width: 1.5 });
+    graphics.moveTo(cx - 1, cy - 4).lineTo(cx + 9, cy - 2).moveTo(cx - 11, cy + 6).lineTo(cx, cy + 8).stroke({ color: 0xf1eadc, width: 1.2, alpha: 0.52 });
     return;
   }
   if (type === "clay") {
@@ -4615,37 +6828,53 @@ function drawResourceTexture(graphics: Graphics, type: ResourceType, size: numbe
     graphics.roundRect(cx - 13, cy + 4, 26, 10, 2).fill(0xd47a4b).stroke({ color: 0x4a251b, width: 2 });
     graphics.moveTo(cx, cy - 7).lineTo(cx, cy + 13).stroke({ color: 0x6a3221, width: 1.2, alpha: 0.76 });
     graphics.moveTo(cx - 12, cy - 2).lineTo(cx + 12, cy - 2).stroke({ color: 0x6a3221, width: 1.2, alpha: 0.76 });
+    graphics.moveTo(cx - 11, cy + 9).lineTo(cx + 11, cy + 9).stroke({ color: 0xffb37c, width: 1, alpha: 0.52 });
     return;
   }
   if (type === "limestone") {
-    graphics.roundRect(cx - 15, cy - 8, 30, 23, 3).fill(0xded7bd).stroke({ color: 0x5f5a4a, width: 2 });
+    graphics.roundRect(cx - 16, cy - 8, 32, 23, 3).fill(0xded7bd).stroke({ color: 0x5f5a4a, width: 2 });
     graphics.moveTo(cx - 13, cy).lineTo(cx + 13, cy).stroke({ color: 0x9f967b, width: 1.4, alpha: 0.82 });
     graphics.moveTo(cx - 3, cy - 8).lineTo(cx - 3, cy).moveTo(cx + 7, cy).lineTo(cx + 7, cy + 14).stroke({ color: 0x9f967b, width: 1.4, alpha: 0.82 });
     graphics.circle(cx - 8, cy - 3, 1.5).fill({ color: 0xf7f1d7, alpha: 0.86 });
+    graphics.circle(cx + 9, cy + 7, 1.3).fill({ color: 0xf7f1d7, alpha: 0.72 });
     return;
   }
   if (type === "iron") {
-    graphics.regularPoly(cx - 4, cy + 4, 13, 6).fill(0x6f7d88).stroke({ color: 0x1d252b, width: 2 });
-    graphics.regularPoly(cx + 8, cy + 7, 8, 5).fill(0x495660).stroke({ color: 0x1d252b, width: 1.5 });
+    graphics.regularPoly(cx - 4, cy + 4, 14, 6).fill(0x6f7d88).stroke({ color: 0x1d252b, width: 2 });
+    graphics.regularPoly(cx + 8, cy + 7, 9, 5).fill(0x495660).stroke({ color: 0x1d252b, width: 1.5 });
     graphics.circle(cx - 8, cy, 2.4).fill({ color: 0xc3d0d7, alpha: 0.9 });
     graphics.circle(cx + 2, cy + 4, 1.8).fill({ color: 0xdbe6eb, alpha: 0.86 });
+    graphics.moveTo(cx - 10, cy + 8).lineTo(cx + 5, cy - 2).stroke({ color: 0xbfd6df, width: 1.2, alpha: 0.48 });
+    return;
+  }
+  if (type === "coal") {
+    graphics.regularPoly(cx - 5, cy + 5, 13, 6).fill(0x23252a).stroke({ color: 0x090909, width: 2 });
+    graphics.regularPoly(cx + 8, cy + 8, 8, 5).fill(0x3a3d44).stroke({ color: 0x090909, width: 1.5 });
+    graphics.circle(cx - 8, cy, 2.2).fill({ color: 0x9a9a95, alpha: 0.75 });
+    graphics.circle(cx + 1, cy + 7, 1.6).fill({ color: 0xb9b8b0, alpha: 0.65 });
+    graphics.moveTo(cx - 13, cy + 11).lineTo(cx + 11, cy + 1).stroke({ color: 0x666a72, width: 1.1, alpha: 0.48 });
     return;
   }
   graphics.regularPoly(cx - 5, cy + 5, 13, 6).fill(0x23252a).stroke({ color: 0x090909, width: 2 });
   graphics.regularPoly(cx + 8, cy + 8, 8, 5).fill(0x3a3d44).stroke({ color: 0x090909, width: 1.5 });
   graphics.circle(cx - 8, cy, 2.2).fill({ color: 0x9a9a95, alpha: 0.75 });
   graphics.circle(cx + 1, cy + 7, 1.6).fill({ color: 0xb9b8b0, alpha: 0.65 });
+  graphics.moveTo(cx - 13, cy + 11).lineTo(cx + 11, cy + 1).stroke({ color: 0x666a72, width: 1.1, alpha: 0.48 });
 }
 
-function drawBuildingTexture(graphics: Graphics, type: BuildingType, size: number): void {
+function drawBuildingTexture(graphics: Graphics, type: BuildingType, size: number, state: BuildingVisualState = "normal"): void {
   const cx = size / 2;
   const cy = size / 2;
+  const accent = () => drawBuildingTextureStateAccent(graphics, type, state, cx, cy);
   graphics.ellipse(cx, cy + 15, 17, 5).fill({ color: 0x090806, alpha: 0.28 });
   if (type === "townHall") {
     graphics.roundRect(cx - 14, cy - 3, 28, 22, 2).fill(0xd8c7a0).stroke({ color: 0x3a2819, width: 2 });
     graphics.moveTo(cx - 17, cy - 3).lineTo(cx, cy - 18).lineTo(cx + 17, cy - 3).closePath().fill(0x945236).stroke({ color: 0x3a2819, width: 2 });
     graphics.rect(cx - 4, cy + 7, 8, 12).fill(0x5b3a25);
     graphics.rect(cx + 7, cy + 2, 6, 6).fill(0x8fc0d2).stroke({ color: 0x2f3d43, width: 1 });
+    graphics.rect(cx - 12, cy + 2, 6, 6).fill(0xf5efe0).stroke({ color: 0x3a2819, width: 1 });
+    graphics.moveTo(cx, cy - 18).lineTo(cx, cy - 27).lineTo(cx + 9, cy - 23).stroke({ color: 0xf2d28b, width: 2 });
+    accent();
     return;
   }
   if (type === "farm") {
@@ -4655,6 +6884,16 @@ function drawBuildingTexture(graphics: Graphics, type: BuildingType, size: numbe
     }
     graphics.roundRect(cx - 7, cy - 10, 14, 13, 2).fill(0xd5b178).stroke({ color: 0x3a2819, width: 2 });
     graphics.moveTo(cx - 9, cy - 10).lineTo(cx, cy - 18).lineTo(cx + 9, cy - 10).closePath().fill(0xa95b37).stroke({ color: 0x3a2819, width: 2 });
+    accent();
+    return;
+  }
+  if (type === "house") {
+    graphics.roundRect(cx - 13, cy - 1, 26, 20, 2).fill(0xd0b28c).stroke({ color: 0x3a2819, width: 2 });
+    graphics.moveTo(cx - 16, cy - 1).lineTo(cx, cy - 16).lineTo(cx + 16, cy - 1).closePath().fill(0x8f4f35).stroke({ color: 0x3a2819, width: 2 });
+    graphics.rect(cx - 4, cy + 7, 8, 12).fill(0x5f3920);
+    graphics.rect(cx + 6, cy + 3, 5, 5).fill(0x9cc4cf).stroke({ color: 0x2f3d43, width: 1 });
+    graphics.rect(cx - 11, cy + 2, 5, 5).fill(0xf5efe0).stroke({ color: 0x3a2819, width: 1 });
+    accent();
     return;
   }
   if (type === "barracks") {
@@ -4662,6 +6901,8 @@ function drawBuildingTexture(graphics: Graphics, type: BuildingType, size: numbe
     graphics.moveTo(cx - 17, cy - 3).lineTo(cx, cy - 18).lineTo(cx + 17, cy - 3).closePath().fill(0x70422c).stroke({ color: 0x372518, width: 2 });
     graphics.rect(cx - 4, cy + 7, 8, 11).fill(0x422819);
     graphics.moveTo(cx + 8, cy - 13).lineTo(cx + 8, cy - 22).lineTo(cx + 16, cy - 18).stroke({ color: 0xeadfbf, width: 2 });
+    graphics.moveTo(cx - 12, cy + 4).lineTo(cx - 6, cy - 4).moveTo(cx - 6, cy + 4).lineTo(cx - 12, cy - 4).stroke({ color: 0x422819, width: 1.5, alpha: 0.78 });
+    accent();
     return;
   }
   if (type === "market") {
@@ -4671,6 +6912,7 @@ function drawBuildingTexture(graphics: Graphics, type: BuildingType, size: numbe
     }
     graphics.moveTo(cx - 17, cy - 11).lineTo(cx + 17, cy - 11).stroke({ color: 0x372518, width: 2 });
     graphics.circle(cx + 8, cy + 9, 4).fill(0xe3bf4d).stroke({ color: 0x67480f, width: 1.5 });
+    accent();
     return;
   }
   if (type === "watchtower") {
@@ -4678,6 +6920,9 @@ function drawBuildingTexture(graphics: Graphics, type: BuildingType, size: numbe
     graphics.rect(cx - 13, cy - 13, 26, 11).fill(0xd0b17a).stroke({ color: 0x332115, width: 2 });
     graphics.rect(cx - 5, cy + 7, 10, 12).fill(0x5f3920);
     graphics.moveTo(cx - 11, cy + 18).lineTo(cx - 16, cy + 23).moveTo(cx + 11, cy + 18).lineTo(cx + 16, cy + 23).stroke({ color: 0x332115, width: 2 });
+    graphics.circle(cx, cy - 8, 3).fill(0x8fc0d2).stroke({ color: 0x2f3d43, width: 1.2 });
+    graphics.moveTo(cx - 15, cy - 3).lineTo(cx + 15, cy - 3).stroke({ color: 0xeadfbf, width: 1.3, alpha: 0.74 });
+    accent();
     return;
   }
   if (type === "wall") {
@@ -4687,6 +6932,7 @@ function drawBuildingTexture(graphics: Graphics, type: BuildingType, size: numbe
     }
     graphics.moveTo(cx - 17, cy + 1).lineTo(cx + 17, cy + 1).stroke({ color: 0x837b70, width: 1.2, alpha: 0.8 });
     graphics.moveTo(cx - 5, cy - 8).lineTo(cx - 5, cy + 12).moveTo(cx + 8, cy - 8).lineTo(cx + 8, cy + 12).stroke({ color: 0x837b70, width: 1.2, alpha: 0.8 });
+    accent();
     return;
   }
   if (type === "gate") {
@@ -4695,22 +6941,85 @@ function drawBuildingTexture(graphics: Graphics, type: BuildingType, size: numbe
     graphics.moveTo(cx - 5, cy - 1).lineTo(cx - 5, cy + 11).moveTo(cx, cy - 1).lineTo(cx, cy + 11).moveTo(cx + 5, cy - 1).lineTo(cx + 5, cy + 11).stroke({ color: 0xb99257, width: 1.4 });
     graphics.rect(cx - 15, cy - 16, 8, 9).fill(0xe7ddcb).stroke({ color: 0x2b2925, width: 1.2 });
     graphics.rect(cx + 7, cy - 16, 8, 9).fill(0xe7ddcb).stroke({ color: 0x2b2925, width: 1.2 });
+    graphics.moveTo(cx - 13, cy + 4).lineTo(cx + 13, cy + 4).stroke({ color: 0xf2d28b, width: 1.4, alpha: 0.72 });
+    accent();
+    return;
+  }
+  if (type === "turret") {
+    graphics.roundRect(cx - 11, cy - 3, 22, 22, 3).fill(0xbeb4a4).stroke({ color: 0x2b2925, width: 2 });
+    graphics.circle(cx, cy - 7, 10).fill(0xd9c58f).stroke({ color: 0x2b2925, width: 2 });
+    graphics.rect(cx - 4, cy - 20, 8, 11).fill(0x45413a).stroke({ color: 0x181510, width: 1.5 });
+    graphics.moveTo(cx, cy - 17).lineTo(cx + 15, cy - 20).stroke({ color: 0x45413a, width: 3 });
+    graphics.circle(cx + 13, cy - 20, 2.5).fill(0xf2d28b).stroke({ color: 0x181510, width: 1 });
+    accent();
     return;
   }
   graphics.roundRect(cx - 11, cy - 3, 22, 22, 3).fill(0xbeb4a4).stroke({ color: 0x2b2925, width: 2 });
   graphics.circle(cx, cy - 7, 10).fill(0xd9c58f).stroke({ color: 0x2b2925, width: 2 });
   graphics.rect(cx - 4, cy - 20, 8, 11).fill(0x45413a).stroke({ color: 0x181510, width: 1.5 });
   graphics.moveTo(cx, cy - 17).lineTo(cx + 15, cy - 20).stroke({ color: 0x45413a, width: 3 });
+  graphics.circle(cx + 13, cy - 20, 2.5).fill(0xf2d28b).stroke({ color: 0x181510, width: 1 });
+  accent();
 }
 
-function drawUnitTexture(graphics: Graphics, type: UnitType, size: number): void {
+function drawBuildingTextureStateAccent(graphics: Graphics, type: BuildingType, state: BuildingVisualState, cx: number, cy: number): void {
+  if (state === "normal") return;
+  if (state === "gate_open") {
+    graphics.rect(cx - 9, cy - 3, 18, 16).fill({ color: 0x2d2419, alpha: 0.64 });
+    graphics.moveTo(cx - 10, cy + 5).lineTo(cx + 10, cy + 5).stroke({ color: 0x88e68f, width: 2.2, alpha: 0.9 });
+    graphics.moveTo(cx + 5, cy).lineTo(cx + 11, cy + 5).lineTo(cx + 5, cy + 10).stroke({ color: 0x88e68f, width: 1.7, alpha: 0.84 });
+    return;
+  }
+  if (state === "gate_closed" || state === "gate_locked") {
+    graphics.rect(cx - 10, cy - 3, 20, 16).fill({ color: 0x4b3624, alpha: 0.72 }).stroke({ color: 0x100f0c, width: 1.4, alpha: 0.82 });
+    graphics.moveTo(cx - 10, cy + 2).lineTo(cx + 10, cy + 2).moveTo(cx - 9, cy + 8).lineTo(cx + 9, cy + 8).stroke({ color: 0xf2d28b, width: 1.5, alpha: 0.86 });
+    if (state === "gate_locked") {
+      graphics.roundRect(cx + 2, cy + 1, 8, 8, 2).fill(0xffe17b).stroke({ color: 0x100f0c, width: 1.2 });
+      graphics.arc(cx + 6, cy + 1, 3.4, Math.PI, 0).stroke({ color: 0x100f0c, width: 1.2 });
+    }
+    return;
+  }
+  if (state === "repairing") {
+    graphics.circle(cx, cy + 2, type === "wall" || type === "gate" ? 22 : 18).stroke({ color: 0x7bd8ff, width: 1.8, alpha: 0.64 });
+    graphics.moveTo(cx - 17, cy + 14).lineTo(cx - 5, cy + 1).lineTo(cx + 7, cy + 14).stroke({ color: 0x7bd8ff, width: 2.2, alpha: 0.84 });
+    graphics.moveTo(cx + 12, cy - 12).lineTo(cx + 20, cy - 4).moveTo(cx + 20, cy - 12).lineTo(cx + 12, cy - 4).stroke({ color: 0xe6fbff, width: 1.8, alpha: 0.88 });
+    return;
+  }
+  const critical = state === "critical";
+  const crackColor = critical ? 0x2b0806 : 0x3e2118;
+  const rubbleColor = critical ? 0x18120e : 0x4d4034;
+  graphics
+    .moveTo(cx - 15, cy - 8)
+    .lineTo(cx - 7, cy + 1)
+    .lineTo(cx - 10, cy + 12)
+    .moveTo(cx + 14, cy - 6)
+    .lineTo(cx + 5, cy + 4)
+    .lineTo(cx + 9, cy + 14)
+    .stroke({ color: crackColor, width: critical ? 2.4 : 1.7, alpha: critical ? 0.94 : 0.76 });
+  graphics.rect(cx - 17, cy + 13, 8, 5).fill({ color: rubbleColor, alpha: 0.82 });
+  graphics.rect(cx + 9, cy + 12, 7, 6).fill({ color: rubbleColor, alpha: 0.74 });
+  if (critical) {
+    graphics.circle(cx + 13, cy - 13, 4).fill({ color: 0xff6b52, alpha: 0.28 });
+    graphics
+      .moveTo(cx - 18, cy + 17)
+      .lineTo(cx + 18, cy - 12)
+      .stroke({ color: 0x7e1f18, width: 2.4, alpha: 0.6 });
+  }
+}
+
+function drawUnitTexture(graphics: Graphics, type: UnitType, size: number, state: UnitVisualState = "idle"): void {
   const cx = size / 2;
   const cy = size / 2;
+  const accent = () => drawUnitTextureStateAccent(graphics, type, state, cx, cy);
   graphics.ellipse(cx, cy + 15, 12, 4).fill({ color: 0x050504, alpha: 0.3 });
   if (type === "sovereign") {
+    graphics.moveTo(cx - 12, cy + 14).lineTo(cx, cy - 3).lineTo(cx + 12, cy + 14).closePath().fill(0xd9c58f).stroke({ color: 0x100f0c, width: 2 });
     graphics.circle(cx, cy + 3, 10).fill(0xf5efe0).stroke({ color: 0x100f0c, width: 2 });
     graphics.circle(cx, cy - 9, 6).fill(0xf5efe0).stroke({ color: 0x100f0c, width: 2 });
     graphics.moveTo(cx - 8, cy - 14).lineTo(cx - 4, cy - 23).lineTo(cx, cy - 15).lineTo(cx + 4, cy - 23).lineTo(cx + 8, cy - 14).fill(0xf2d28b).stroke({ color: 0x100f0c, width: 1.5 });
+    graphics.circle(cx - 2, cy - 10, 1).fill(0x100f0c);
+    graphics.circle(cx + 3, cy - 10, 1).fill(0x100f0c);
+    accent();
     return;
   }
   if (type === "peon") {
@@ -4718,12 +7027,16 @@ function drawUnitTexture(graphics: Graphics, type: UnitType, size: number): void
     graphics.roundRect(cx - 7, cy - 2, 14, 17, 4).fill(0xf5efe0).stroke({ color: 0x100f0c, width: 2 });
     graphics.moveTo(cx + 9, cy - 5).lineTo(cx + 17, cy + 10).stroke({ color: 0x100f0c, width: 3 });
     graphics.moveTo(cx + 12, cy + 2).lineTo(cx + 19, cy - 3).stroke({ color: 0x100f0c, width: 2 });
+    graphics.moveTo(cx - 4, cy + 14).lineTo(cx - 9, cy + 20).moveTo(cx + 4, cy + 14).lineTo(cx + 9, cy + 20).stroke({ color: 0x100f0c, width: 2.2 });
+    accent();
     return;
   }
   if (type === "sentinel") {
     graphics.moveTo(cx, cy - 18).lineTo(cx + 13, cy + 15).lineTo(cx - 13, cy + 15).closePath().fill(0xf5efe0).stroke({ color: 0x100f0c, width: 2 });
-    graphics.circle(cx, cy - 7, 4).fill(0x100f0c);
+    graphics.circle(cx, cy - 7, 5).fill(0x8fc0d2).stroke({ color: 0x100f0c, width: 1.5 });
+    graphics.circle(cx, cy - 7, 2).fill(0x100f0c);
     graphics.moveTo(cx - 7, cy - 2).lineTo(cx + 7, cy - 2).stroke({ color: 0x100f0c, width: 2 });
+    accent();
     return;
   }
   if (type === "messenger") {
@@ -4732,14 +7045,17 @@ function drawUnitTexture(graphics: Graphics, type: UnitType, size: number): void
     graphics.roundRect(cx + 4, cy - 9, 15, 10, 2).fill(0xf2d28b).stroke({ color: 0x100f0c, width: 1.5 });
     graphics.moveTo(cx + 5, cy - 8).lineTo(cx + 11, cy - 3).lineTo(cx + 18, cy - 8).stroke({ color: 0x7a5620, width: 1.2 });
     graphics.moveTo(cx - 6, cy + 11).lineTo(cx - 15, cy + 18).moveTo(cx + 2, cy + 11).lineTo(cx + 12, cy + 18).stroke({ color: 0x100f0c, width: 3 });
+    accent();
     return;
   }
   if (type === "trader") {
     graphics.circle(cx - 4, cy - 9, 5).fill(0xf5efe0).stroke({ color: 0x100f0c, width: 2 });
     graphics.roundRect(cx - 10, cy - 2, 16, 17, 4).fill(0xf5efe0).stroke({ color: 0x100f0c, width: 2 });
     graphics.roundRect(cx + 5, cy + 1, 12, 13, 3).fill(0xd6b782).stroke({ color: 0x100f0c, width: 2 });
+    graphics.rect(cx + 8, cy + 4, 6, 5).fill(0xf2d28b).stroke({ color: 0x7a5620, width: 1 });
     graphics.circle(cx + 7, cy + 16, 3).fill(0x100f0c);
     graphics.circle(cx + 15, cy + 16, 3).fill(0x100f0c);
+    accent();
     return;
   }
   if (type === "siege_engine") {
@@ -4750,6 +7066,27 @@ function drawUnitTexture(graphics: Graphics, type: UnitType, size: number): void
     graphics.circle(cx - 10, cy + 11, 5).fill(0x2a2018).stroke({ color: 0xf5efe0, width: 1.5 });
     graphics.circle(cx + 10, cy + 11, 5).fill(0x2a2018).stroke({ color: 0xf5efe0, width: 1.5 });
     graphics.moveTo(cx - 14, cy + 1).lineTo(cx + 12, cy + 1).stroke({ color: 0xd7c09a, width: 2, alpha: 0.85 });
+    accent();
+    return;
+  }
+  if (type === "battering_ram") {
+    graphics.roundRect(cx - 18, cy - 7, 36, 15, 4).fill(0x775238).stroke({ color: 0x100f0c, width: 2 });
+    graphics.roundRect(cx - 12, cy - 14, 24, 8, 2).fill(0xb08a5e).stroke({ color: 0x100f0c, width: 1.5 });
+    graphics.moveTo(cx + 12, cy).lineTo(cx + 25, cy).stroke({ color: 0x3a2114, width: 5 });
+    graphics.moveTo(cx + 22, cy - 4).lineTo(cx + 29, cy).lineTo(cx + 22, cy + 4).closePath().fill(0x2b1b12);
+    graphics.circle(cx - 11, cy + 12, 5).fill(0x2a2018).stroke({ color: 0xf5efe0, width: 1.5 });
+    graphics.circle(cx + 11, cy + 12, 5).fill(0x2a2018).stroke({ color: 0xf5efe0, width: 1.5 });
+    accent();
+    return;
+  }
+  if (type === "catapult") {
+    graphics.roundRect(cx - 16, cy + 1, 31, 10, 3).fill(0x8f6b45).stroke({ color: 0x100f0c, width: 2 });
+    graphics.moveTo(cx - 11, cy + 2).lineTo(cx + 5, cy - 16).lineTo(cx + 16, cy + 2).stroke({ color: 0x100f0c, width: 3 });
+    graphics.moveTo(cx - 5, cy - 3).lineTo(cx + 15, cy - 17).stroke({ color: 0x5a3923, width: 4 });
+    graphics.circle(cx + 18, cy - 19, 4).fill(0x2b2925).stroke({ color: 0xf5efe0, width: 1.2 });
+    graphics.circle(cx - 10, cy + 13, 5).fill(0x2a2018).stroke({ color: 0xf5efe0, width: 1.5 });
+    graphics.circle(cx + 10, cy + 13, 5).fill(0x2a2018).stroke({ color: 0xf5efe0, width: 1.5 });
+    accent();
     return;
   }
   if (type === "militia") {
@@ -4757,25 +7094,152 @@ function drawUnitTexture(graphics: Graphics, type: UnitType, size: number): void
     graphics.moveTo(cx - 10, cy - 3).lineTo(cx, cy + 16).lineTo(cx + 10, cy - 3).closePath().fill(0xf5efe0).stroke({ color: 0x100f0c, width: 2 });
     graphics.moveTo(cx + 12, cy - 15).lineTo(cx + 12, cy + 15).stroke({ color: 0x100f0c, width: 3 });
     graphics.moveTo(cx + 8, cy - 10).lineTo(cx + 12, cy - 18).lineTo(cx + 16, cy - 10).stroke({ color: 0x100f0c, width: 2 });
+    graphics.circle(cx - 9, cy + 2, 5).fill(0x9fb0ba).stroke({ color: 0x100f0c, width: 1.5 });
+    accent();
+    return;
+  }
+  if (type === "archer") {
+    graphics.circle(cx - 1, cy - 11, 5).fill(0xf5efe0).stroke({ color: 0x100f0c, width: 2 });
+    graphics.roundRect(cx - 8, cy - 4, 14, 18, 4).fill(0xf5efe0).stroke({ color: 0x100f0c, width: 2 });
+    graphics.moveTo(cx + 12, cy - 14).quadraticCurveTo(cx + 23, cy, cx + 12, cy + 15).stroke({ color: 0x100f0c, width: 3 });
+    graphics.moveTo(cx + 11, cy + 1).lineTo(cx + 23, cy - 5).stroke({ color: 0x100f0c, width: 2 });
+    accent();
     return;
   }
   graphics.circle(cx - 1, cy - 11, 5).fill(0xf5efe0).stroke({ color: 0x100f0c, width: 2 });
   graphics.roundRect(cx - 8, cy - 4, 14, 18, 4).fill(0xf5efe0).stroke({ color: 0x100f0c, width: 2 });
   graphics.moveTo(cx + 12, cy - 14).quadraticCurveTo(cx + 23, cy, cx + 12, cy + 15).stroke({ color: 0x100f0c, width: 3 });
   graphics.moveTo(cx + 11, cy + 1).lineTo(cx + 23, cy - 5).stroke({ color: 0x100f0c, width: 2 });
+  accent();
+}
+
+function drawUnitTextureStateAccent(graphics: Graphics, type: UnitType, state: UnitVisualState, cx: number, cy: number): void {
+  if (state === "idle") return;
+  if (state === "move") {
+    graphics.circle(cx - 12, cy + 20, 2).fill({ color: 0xd8c56b, alpha: 0.68 });
+    graphics.circle(cx + 9, cy + 18, 1.6).fill({ color: 0xf5efe0, alpha: 0.58 });
+    graphics.moveTo(cx - 9, cy + 18).lineTo(cx - 16, cy + 22).stroke({ color: 0x100f0c, width: 1.4, alpha: 0.52 });
+    return;
+  }
+  if (state === "gather") {
+    graphics.moveTo(cx + 11, cy - 12).lineTo(cx + 22, cy + 5).stroke({ color: 0x3d2818, width: 3, alpha: 0.9 });
+    graphics.moveTo(cx + 18, cy - 2).lineTo(cx + 25, cy - 7).stroke({ color: 0xc7c1b3, width: 2, alpha: 0.95 });
+    graphics.circle(cx + 22, cy + 7, 2.5).fill({ color: 0xf2d28b, alpha: 0.85 }).stroke({ color: 0x100f0c, width: 0.8, alpha: 0.72 });
+    return;
+  }
+  if (state === "deliver") {
+    graphics.roundRect(cx + 9, cy - 14, 13, 9, 2).fill({ color: 0xf2d28b, alpha: 0.95 }).stroke({ color: 0x100f0c, width: 1.2 });
+    graphics.moveTo(cx + 10, cy - 13).lineTo(cx + 15, cy - 9).lineTo(cx + 21, cy - 13).stroke({ color: 0x7a5620, width: 1.1, alpha: 0.82 });
+    graphics.circle(cx + 20, cy - 5, 1.8).fill({ color: 0xffffff, alpha: 0.72 });
+    return;
+  }
+  if (state === "repair") {
+    graphics.circle(cx, cy, type === "siege_engine" || type === "battering_ram" || type === "catapult" ? 22 : 18).stroke({ color: 0x7bd8ff, width: 1.5, alpha: 0.58 });
+    graphics.moveTo(cx - 17, cy - 16).lineTo(cx - 9, cy - 8).moveTo(cx - 9, cy - 16).lineTo(cx - 17, cy - 8).stroke({ color: 0x7bd8ff, width: 2.2, alpha: 0.82 });
+    return;
+  }
+  if (state === "attack") {
+    graphics.moveTo(cx + 12, cy - 17).lineTo(cx + 26, cy - 27).stroke({ color: 0xffe17b, width: 2.4, alpha: 0.9 });
+    graphics.moveTo(cx + 21, cy - 27).lineTo(cx + 27, cy - 27).lineTo(cx + 25, cy - 21).stroke({ color: 0xff6b52, width: 1.8, alpha: 0.78 });
+    graphics.circle(cx + 17, cy - 13, 3).fill({ color: 0xff6b52, alpha: 0.38 });
+    return;
+  }
+  if (state === "scout") {
+    graphics.circle(cx, cy - 3, 20).stroke({ color: 0x8fc0d2, width: 1.3, alpha: 0.56 });
+    graphics.moveTo(cx, cy - 3).lineTo(cx + 18, cy - 17).stroke({ color: 0x8fc0d2, width: 1.5, alpha: 0.82 });
+    graphics.circle(cx + 18, cy - 17, 2).fill({ color: 0xe6fbff, alpha: 0.88 });
+  }
 }
 
 function drawTerrain(game: GameState, graphics: Graphics): void {
   graphics.clear();
-  for (let y = 0; y < MAP_SIZE; y += 1) {
-    for (let x = 0; x < MAP_SIZE; x += 1) {
+  drawTerrainChunk(game, graphics, 0, MAP_SIZE, 0, MAP_SIZE);
+}
+
+function drawTerrainChunk(game: GameState, graphics: Graphics, minX: number, maxX: number, minY: number, maxY: number): void {
+  for (let y = minY; y < maxY; y += 1) {
+    for (let x = minX; x < maxX; x += 1) {
       const tile = game.map[tileIndex(x, y)];
       const shade = terrainShade(x, y, game.seed);
       graphics.rect(x * TILE, y * TILE, TILE, TILE).fill(shadeColor(terrainColor(tile.terrain), shade));
       drawTerrainDetail(graphics, x, y, tile.terrain, shade);
     }
   }
-  drawStrategicGrid(graphics);
+  drawStrategicGrid(graphics, minX, maxX, minY, maxY);
+}
+
+function terrainAmbientMark(x: number, y: number, seed: number): number {
+  let value = Math.imul(x + 37, 73856093) ^ Math.imul(y + 19, 19349663) ^ Math.imul(seed + 11, 83492791);
+  value ^= value >>> 13;
+  return Math.abs(value);
+}
+
+function drawAmbientTerrain(game: GameState, graphics: Graphics): void {
+  graphics.clear();
+  activeAmbientTerrainCueCount = 0;
+  const bounds = currentViewportTileBounds(2);
+  const now = renderClockMs || performance.now();
+  const cueLimit = camera.scale < 0.56 ? 140 : 220;
+
+  outer: for (let y = bounds.minY; y <= bounds.maxY; y += 1) {
+    for (let x = bounds.minX; x <= bounds.maxX; x += 1) {
+      if (activeAmbientTerrainCueCount >= cueLimit) break outer;
+      const terrain = game.map[tileIndex(x, y)].terrain;
+      const mark = terrainAmbientMark(x, y, game.seed);
+      const px = x * TILE;
+      const py = y * TILE;
+      const phase = now / 480 + (mark % 97) * 0.11;
+
+      if (terrain === "water") {
+        if (mark % 2 !== 0) continue;
+        const wave = Math.sin(phase) * 1.4;
+        graphics
+          .moveTo(px + 3, py + 8 + wave)
+          .lineTo(px + 8, py + 6 - wave * 0.3)
+          .lineTo(px + 14, py + 8 + wave * 0.45)
+          .lineTo(px + 20, py + 6 - wave * 0.2)
+          .stroke({ color: 0xd7fbff, width: 1.1, alpha: 0.24 + Math.max(0, Math.sin(phase)) * 0.2 });
+        activeAmbientTerrainCueCount += 1;
+        continue;
+      }
+
+      if (camera.scale < 0.56) continue;
+
+      if (terrain === "forest") {
+        if (mark % 11 !== 0) continue;
+        const drift = Math.sin(phase) * 2.2;
+        graphics.circle(px + 8 + drift, py + 7 + Math.cos(phase) * 1.3, 1.4).fill({ color: 0xa6df6b, alpha: 0.32 });
+        graphics.moveTo(px + 13 - drift * 0.4, py + 13).lineTo(px + 17 - drift * 0.2, py + 10).stroke({ color: 0x6fc05c, width: 0.9, alpha: 0.24 });
+        activeAmbientTerrainCueCount += 1;
+        continue;
+      }
+
+      if (terrain === "road") {
+        if (mark % 13 !== 0) continue;
+        const offset = (now / 310 + (mark % TILE)) % TILE;
+        graphics.circle(px + offset, py + TILE / 2 + Math.sin(phase) * 2.5, 1.1).fill({ color: 0xf0d79a, alpha: 0.24 });
+        activeAmbientTerrainCueCount += 1;
+        continue;
+      }
+
+      if (terrain === "hill" || terrain === "mountain") {
+        if (mark % 17 !== 0) continue;
+        graphics
+          .moveTo(px + 6, py + 8 + Math.sin(phase) * 0.8)
+          .lineTo(px + 13, py + 6)
+          .lineTo(px + 18, py + 9 + Math.cos(phase) * 0.7)
+          .stroke({ color: terrain === "mountain" ? 0xf0eee6 : 0xd5c88d, width: 0.9, alpha: 0.18 + Math.max(0, Math.sin(phase)) * 0.16 });
+        activeAmbientTerrainCueCount += 1;
+        continue;
+      }
+
+      if (terrain === "grass" && mark % 31 === 0) {
+        const sway = Math.sin(phase) * 1.4;
+        graphics.moveTo(px + 6, py + 17).lineTo(px + 8 + sway, py + 12).stroke({ color: 0xc2dc74, width: 0.8, alpha: 0.18 });
+        activeAmbientTerrainCueCount += 1;
+      }
+    }
+  }
 }
 
 function drawResourceSprites(game: GameState, layer: Container): void {
@@ -4789,46 +7253,134 @@ function drawResourceSprites(game: GameState, layer: Container): void {
       if (!resource || resource.amount <= 0 || resource.hp <= 0) continue;
       const texture = textures[resource.type];
       if (!texture) continue;
-      const sprite = new Sprite({ texture });
+      const sprite = acquireResourceSprite(layer, texture);
       const scarce = scarceResourceTypes.has(resource.type);
       const health = resource.maxHp > 0 ? clamp(resource.hp / resource.maxHp, 0.25, 1) : 1;
       const pulse = scarce ? 1 + Math.sin(now / 480 + x * 0.7 + y * 0.4) * 0.05 : 1;
-      sprite.anchor.set(0.5);
+      const scale = TILE * (scarce ? 1.25 : 1.08) * pulse * (0.92 + health * 0.08);
       sprite.x = x * TILE + TILE / 2;
       sprite.y = y * TILE + TILE / 2;
-      sprite.width = TILE * (scarce ? 1.24 : 1.08) * pulse;
-      sprite.height = TILE * (scarce ? 1.24 : 1.08) * pulse;
+      sprite.width = scale;
+      sprite.height = scale;
+      sprite.rotation = scarce ? Math.sin(now / 820 + x * 0.4) * 0.025 : (((x * 11 + y * 7) % 7) - 3) * 0.008;
       sprite.alpha = 0.68 + health * 0.32;
-      layer.addChild(sprite);
     }
   }
 }
 
-function drawRoutes(game: GameState, graphics: Graphics): void {
-  graphics.clear();
+type RouteVisual = {
+  id: string;
+  fromX: number;
+  fromY: number;
+  toX: number;
+  toY: number;
+  color: number;
+  returning: boolean;
+};
+
+function collectRouteVisuals(game: GameState): RouteVisual[] {
+  const routes: RouteVisual[] = [];
   for (const packet of Object.values(game.packets)) {
     const carrier = packet.carrierUnitId ? game.units[packet.carrierUnitId] : undefined;
     if (!carrier || packet.state === "COMPLETED") continue;
     const target = packet.state === "IN_TRANSIT_RETURN" ? packet.returnTo : packet.destination;
-    const carrierVisual = visualPositionForUnit(carrier);
-    graphics
-      .moveTo(carrierVisual.x * TILE + TILE / 2, carrierVisual.y * TILE + TILE / 2)
-      .lineTo(target.x * TILE + TILE / 2, target.y * TILE + TILE / 2)
-      .stroke({ color: tribeConfig[packet.originTribeId].color, width: 2, alpha: 0.8 });
+    routes.push({
+      id: packet.id,
+      fromX: carrier.x * TILE + TILE / 2,
+      fromY: carrier.y * TILE + TILE / 2,
+      toX: target.x * TILE + TILE / 2,
+      toY: target.y * TILE + TILE / 2,
+      color: tribeConfig[packet.originTribeId].color,
+      returning: packet.state === "IN_TRANSIT_RETURN"
+    });
   }
+  return routes;
+}
+
+function routeStaticSignature(routes: RouteVisual[]): string {
+  return routes
+    .map((route) => `${route.id}:${route.fromX},${route.fromY}>${route.toX},${route.toY}:${route.color}:${route.returning ? 1 : 0}`)
+    .join("|");
+}
+
+function drawRoutes(game: GameState): void {
+  const now = renderClockMs || performance.now();
+  const routes = collectRouteVisuals(game);
+  activeRouteVisualCount = routes.length;
+  resetPacketSpritePool();
+  const signature = routeStaticSignature(routes);
+  if (signature !== lastRouteStaticSignature) {
+    routeStaticGraphics.clear();
+    for (const route of routes) {
+      routeStaticGraphics
+        .moveTo(route.fromX, route.fromY)
+        .lineTo(route.toX, route.toY)
+        .stroke({ color: 0x080706, width: 5, alpha: 0.28 });
+      routeStaticGraphics
+        .moveTo(route.fromX, route.fromY)
+        .lineTo(route.toX, route.toY)
+        .stroke({ color: route.color, width: route.returning ? 2.4 : 1.8, alpha: route.returning ? 0.84 : 0.68 });
+      routeStaticGraphics.circle(route.toX, route.toY, TILE * 0.28).stroke({ color: route.color, width: 1.4, alpha: 0.46 });
+    }
+    lastRouteStaticSignature = signature;
+  }
+  routePulseGraphics.clear();
+  for (const route of routes) {
+    const dx = route.toX - route.fromX;
+    const dy = route.toY - route.fromY;
+    const routePulse = (now / 900 + route.id.length * 0.071) % 1;
+    const pulseX = route.fromX + dx * routePulse;
+    const pulseY = route.fromY + dy * routePulse;
+    routePulseGraphics
+      .circle(pulseX, pulseY, route.returning ? 4 : 3.2)
+      .fill({ color: route.returning ? 0xf2d28b : route.color, alpha: 0.64 })
+      .stroke({ color: 0x080706, width: 1, alpha: 0.64 });
+    drawRoutePacketSprites(route, pulseX, pulseY, Math.atan2(dy, dx), now);
+  }
+}
+
+function drawRoutePacketSprites(route: RouteVisual, pulseX: number, pulseY: number, angle: number, now: number): void {
+  const textures = visualTextures?.diplomacy;
+  if (!textures) return;
+  if (isWorldPointInViewport(route.toX, route.toY, TILE * 3)) {
+    const target = acquirePacketSprite(textures.packet_target);
+    target.x = route.toX;
+    target.y = route.toY;
+    target.width = 20;
+    target.height = 20;
+    target.rotation = Math.sin(now / 820 + route.id.length) * 0.045;
+    target.alpha = route.returning ? 0.6 : 0.78;
+    target.tint = 0xffffff;
+  }
+  if (!isWorldPointInViewport(pulseX, pulseY, TILE * 3)) return;
+  const packet = acquirePacketSprite(textures[route.returning ? "packet_returning" : "packet_outbound"]);
+  const packetSize = route.returning ? 19 : 17;
+  const bob = Math.sin(now / 180 + route.id.length * 0.6) * 1.2;
+  packet.x = pulseX;
+  packet.y = pulseY - 4 + bob;
+  packet.width = packetSize;
+  packet.height = packetSize;
+  packet.rotation = Math.max(-0.5, Math.min(0.5, angle * 0.32)) + Math.sin(now / 260 + route.id.length) * 0.025;
+  packet.alpha = 0.84 + Math.sin(now / 240 + route.id.length) * 0.1;
+  packet.tint = route.returning ? 0xfff0c9 : 0xffffff;
 }
 
 function drawDynamic(game: GameState, _layer: Container, options: { updateLabels?: boolean } = {}): void {
   const graphics = dynamicGraphics;
   graphics.clear();
+  unitOverlayGraphics.clear();
+  resetUnitSpritePool();
   const updateLabels = options.updateLabels !== false;
   const labelTier = currentLabelTier();
   if (updateLabels) {
     overlayGraphics.clear();
+    buildingUnderlayGraphics.clear();
     buildingGraphics.clear();
     labelBackdropGraphics.clear();
-    resourceSpriteLayer.removeChildren().forEach((child) => child.destroy());
-    dynamicLabelLayer.removeChildren().forEach((child) => child.destroy());
+    resetResourceSpritePool();
+    resetBuildingSpritePool();
+    dynamicLabelLayer.removeChildren();
+    resetMapTextPool();
     lastLabelRenderMs = renderClockMs || performance.now();
     drawResourceSprites(game, resourceSpriteLayer);
     if (showContestedResources) drawContestedResourceOverlays(game, overlayGraphics);
@@ -4839,15 +7391,21 @@ function drawDynamic(game: GameState, _layer: Container, options: { updateLabels
   if (updateLabels && showResourceLabels) addResourceLabels(game, dynamicLabelLayer, labelTier);
   const buildings = observerMode ? Object.values(game.buildings) : getVisibleBuildings(game, playerTribe);
   const units = observerMode ? Object.values(game.units).filter((unit) => unit.hp > 0) : getVisibleUnits(game, playerTribe);
+  const projectiles = observerMode
+    ? Object.values(game.projectiles)
+    : Object.values(game.projectiles).filter((projectile) => game.visibility[playerTribe]?.[tileIndex(Math.round(projectile.x), Math.round(projectile.y))] === 2);
   if (updateLabels) {
     for (const building of buildings) {
+      const buildingWorldX = building.x * TILE + TILE / 2;
+      const buildingWorldY = building.y * TILE + TILE / 2;
+      if (!isWorldPointInViewport(buildingWorldX, buildingWorldY, TILE * 2)) continue;
       drawBuilding(buildingGraphics, building, game);
       if (showResourceLabels && shouldRenderBuildingLabel(building, game, labelTier)) {
         addMapText(
           dynamicLabelLayer,
           buildingAbbrev(building.type),
-          building.x * TILE + TILE / 2,
-          building.y * TILE + TILE / 2 + 0.5,
+          buildingWorldX,
+          buildingWorldY + 0.5,
           building.type === "wall" || building.type === "gate" ? 10 : 8,
           buildingLabelColor(building)
         );
@@ -4855,15 +7413,19 @@ function drawDynamic(game: GameState, _layer: Container, options: { updateLabels
     }
   }
   if (updateLabels && showResourceLabels) addConstructionFocusLabels(game, dynamicLabelLayer);
+  for (const projectile of projectiles) drawProjectile(graphics, projectile);
   for (const unit of units) {
     const visual = visualPositionForUnit(unit);
-    drawUnit(graphics, unit, visual);
+    const unitWorldX = visual.x * TILE + TILE / 2;
+    const unitWorldY = visual.y * TILE + TILE / 2;
+    if (!isWorldPointInViewport(unitWorldX, unitWorldY, TILE * 2)) continue;
+    drawUnit(unitOverlayGraphics, unit, visual);
     if (updateLabels && showResourceLabels && shouldRenderUnitLabel(unit, labelTier)) {
       addMapText(
         dynamicLabelLayer,
         unitAbbrev(unit.type),
-        visual.x * TILE + TILE / 2,
-        visual.y * TILE + TILE / 2 + 0.5,
+        unitWorldX,
+        unitWorldY + 0.5,
         8,
         unit.type === "messenger" ? tribeConfig[unit.tribeId].colorText : "#0c0b09"
       );
@@ -4873,18 +7435,9 @@ function drawDynamic(game: GameState, _layer: Container, options: { updateLabels
     for (const unit of units) {
       if (shouldLabelUnit(unit)) {
         const visual = visualPositionForUnit(unit);
-        const label = new Text({
-          text: unitLabel(game, unit),
-          style: {
-            fontFamily: "Arial",
-            fontSize: unit.type === "sovereign" ? 12 : 9,
-            fill: "#fff8e8",
-            stroke: { color: "#0b0a09", width: 3 }
-          }
-        });
+        const label = acquireMapText(dynamicLabelLayer, unitLabel(game, unit), unit.type === "sovereign" ? 12 : 9, "#fff8e8", 0, 0);
         label.x = visual.x * TILE - (unit.type === "sovereign" ? 28 : 14);
         label.y = visual.y * TILE - 24;
-        dynamicLabelLayer.addChild(label);
       }
     }
   }
@@ -4933,18 +7486,124 @@ function addConstructionFocusLabels(game: GameState, layer: Container): void {
 }
 
 function drawContestedResourceOverlays(game: GameState, graphics: Graphics): void {
-  for (const site of summarizeContestedResourceSites(game).filter((candidate) => candidate.contested)) {
-    const cx = site.x * TILE + TILE / 2;
-    const cy = site.y * TILE + TILE / 2;
-    const color = resourceColorNumber(site.type);
-    const scarce = scarceResourceTypes.has(site.type);
-    graphics.circle(cx, cy, TILE * 0.62).stroke({ color: 0x100f0c, width: 4, alpha: 0.42 });
-    graphics.circle(cx, cy, TILE * 0.56).stroke({ color, width: scarce ? 3 : 2, alpha: scarce ? 0.82 : 0.68 });
+  const pressureSites = buildResourcePressureOverlaySites(game);
+  for (const site of pressureSites) drawResourcePressureRoute(graphics, site);
+  for (const site of pressureSites) if (site.depletedRecent) drawDepletedResourceDecal(graphics, site);
+  for (const site of pressureSites) drawResourcePressureMarker(graphics, site);
+}
+
+function drawResourcePressureRoute(graphics: Graphics, site: ReturnType<typeof buildResourcePressureOverlaySites>[number]): void {
+  if (site.routeFromX === undefined || site.routeFromY === undefined) return;
+  const fromX = site.routeFromX * TILE + TILE / 2;
+  const fromY = site.routeFromY * TILE + TILE / 2;
+  const toX = site.x * TILE + TILE / 2;
+  const toY = site.y * TILE + TILE / 2;
+  const color = site.deniedRecent ? 0xff5a45 : site.depletedRecent ? 0xb4b8a1 : site.contested ? 0xffd86b : resourceColorNumber(site.type);
+  const alpha = site.deniedRecent ? 0.4 : site.depletedRecent ? 0.34 : site.contested ? 0.28 : 0.18;
+  graphics
+    .moveTo(fromX, fromY)
+    .lineTo(toX, toY)
+    .stroke({ color: 0x100f0c, width: site.deniedRecent || site.depletedRecent ? 5 : 4, alpha: alpha * 0.72 });
+  graphics.moveTo(fromX, fromY).lineTo(toX, toY).stroke({ color, width: site.deniedRecent || site.depletedRecent ? 2.2 : 1.6, alpha });
+}
+
+function drawResourcePressureMarker(graphics: Graphics, site: ReturnType<typeof buildResourcePressureOverlaySites>[number]): void {
+  const cx = site.x * TILE + TILE / 2;
+  const cy = site.y * TILE + TILE / 2;
+  const color = site.deniedRecent ? 0xff5a45 : site.depletedRecent ? 0xb4b8a1 : resourceColorNumber(site.type);
+  const radius = site.deniedRecent ? TILE * 0.78 : site.depletedRecent ? TILE * 0.72 : site.raided ? TILE * 0.7 : TILE * 0.58;
+  const width = site.deniedRecent ? 3.4 : site.depletedRecent ? 2.8 : site.scarce ? 3 : 2;
+  graphics.circle(cx, cy, radius + TILE * 0.06).stroke({ color: 0x100f0c, width: 4, alpha: site.deniedRecent || site.depletedRecent ? 0.48 : 0.42 });
+  graphics.circle(cx, cy, radius).stroke({ color, width, alpha: site.deniedRecent || site.depletedRecent || site.scarce ? 0.86 : 0.68 });
+  if (site.contested && site.rivalTribe) {
+    graphics.circle(cx, cy, TILE * 0.36).stroke({ color: tribeConfig[site.rivalTribe].color, width: 1.6, alpha: 0.64 });
   }
+  if (site.depletedRecent) {
+    graphics
+      .moveTo(cx - TILE * 0.34, cy)
+      .lineTo(cx + TILE * 0.34, cy)
+      .moveTo(cx - TILE * 0.22, cy + TILE * 0.16)
+      .lineTo(cx + TILE * 0.22, cy + TILE * 0.16)
+      .stroke({ color: 0xfff4d1, width: 2, alpha: 0.72 });
+  }
+  if (site.raided || site.deniedRecent) {
+    graphics
+      .moveTo(cx - TILE * 0.28, cy - TILE * 0.28)
+      .lineTo(cx + TILE * 0.28, cy + TILE * 0.28)
+      .moveTo(cx + TILE * 0.28, cy - TILE * 0.28)
+      .lineTo(cx - TILE * 0.28, cy + TILE * 0.28)
+      .stroke({ color: 0xfff0c4, width: site.deniedRecent ? 2.2 : 1.6, alpha: site.deniedRecent ? 0.78 : 0.58 });
+  }
+}
+
+function drawDepletedResourceDecal(graphics: Graphics, site: ReturnType<typeof buildResourcePressureOverlaySites>[number]): void {
+  const cx = site.x * TILE + TILE / 2;
+  const cy = site.y * TILE + TILE / 2;
+  const base = resourceColorNumber(site.type);
+  const ownerColor = site.depletedByTribeId ? tribeConfig[site.depletedByTribeId].color : 0xb4b8a1;
+  graphics.ellipse(cx, cy + TILE * 0.2, TILE * 0.46, TILE * 0.18).fill({ color: 0x100f0c, alpha: 0.34 });
+  graphics.ellipse(cx, cy + TILE * 0.15, TILE * 0.36, TILE * 0.12).stroke({ color: 0xf2d28b, width: 1.4, alpha: 0.3 });
+  if (site.type === "wood") {
+    graphics.circle(cx - 5, cy + 2, 6).fill({ color: 0x6b4528, alpha: 0.9 }).stroke({ color: 0x21140c, width: 1.2, alpha: 0.88 });
+    graphics.circle(cx - 5, cy + 2, 2.4).stroke({ color: 0xc08a52, width: 1, alpha: 0.72 });
+    graphics.rect(cx + 4, cy - 4, 4, 13).fill({ color: 0x5b351b, alpha: 0.76 }).stroke({ color: 0x21140c, width: 0.8, alpha: 0.62 });
+    graphics.moveTo(cx + 6, cy - 3).lineTo(cx + 12, cy - 8).lineTo(cx + 14, cy - 4).stroke({ color: 0x88b76b, width: 1.2, alpha: 0.5 });
+  } else if (site.type === "food") {
+    graphics.rect(cx - 9, cy - 1, 18, 8).fill({ color: 0x6c5738, alpha: 0.58 }).stroke({ color: 0x2b1f12, width: 1, alpha: 0.58 });
+    for (let i = 0; i < 4; i += 1) {
+      const stalkX = cx - 6 + i * 4;
+      graphics.moveTo(stalkX, cy + 6).lineTo(stalkX + 2, cy - 7).stroke({ color: 0xbda85f, width: 1.2, alpha: 0.62 });
+      graphics.moveTo(stalkX + 1, cy - 4).lineTo(stalkX + 4, cy - 7).stroke({ color: 0xd8c56b, width: 0.8, alpha: 0.45 });
+    }
+  } else if (site.type === "clay" || site.type === "limestone" || site.type === "stone") {
+    graphics.roundRect(cx - 10, cy - 4, 20, 9, 2).fill({ color: site.type === "clay" ? 0x8b472f : 0x9d9788, alpha: 0.64 }).stroke({ color: 0x211a14, width: 1.2, alpha: 0.66 });
+    graphics
+      .moveTo(cx - 8, cy - 1)
+      .lineTo(cx - 2, cy - 4)
+      .lineTo(cx + 4, cy)
+      .lineTo(cx + 9, cy - 3)
+      .stroke({ color: 0xf5efe0, width: 1, alpha: 0.36 });
+    graphics.rect(cx - 6, cy + 5, 4, 3).fill({ color: base, alpha: 0.45 });
+    graphics.rect(cx + 3, cy + 5, 5, 3).fill({ color: base, alpha: 0.36 });
+  } else {
+    graphics.regularPoly(cx - 4, cy + 1, 7, 5).fill({ color: 0x25272b, alpha: 0.78 }).stroke({ color: 0x080706, width: 1.2, alpha: 0.72 });
+    graphics.regularPoly(cx + 6, cy + 3, 5, 5).fill({ color: site.type === "gold" ? 0x8a5a1b : base, alpha: 0.58 }).stroke({ color: 0x080706, width: 0.9, alpha: 0.62 });
+    graphics.moveTo(cx - 9, cy + 8).lineTo(cx + 10, cy - 3).stroke({ color: 0xe8e0ca, width: 1, alpha: 0.28 });
+  }
+  graphics
+    .moveTo(cx - TILE * 0.28, cy - TILE * 0.12)
+    .lineTo(cx + TILE * 0.28, cy + TILE * 0.12)
+    .moveTo(cx + TILE * 0.24, cy - TILE * 0.14)
+    .lineTo(cx - TILE * 0.24, cy + TILE * 0.1)
+    .stroke({ color: ownerColor, width: 1.8, alpha: 0.58 });
 }
 
 function drawDefenseOverlay(game: GameState, graphics: Graphics): void {
   const buildings = observerMode ? Object.values(game.buildings) : getVisibleBuildings(game, playerTribe);
+  const units = observerMode ? Object.values(game.units).filter((unit) => unit.hp > 0) : getVisibleUnits(game, playerTribe);
+  const visibleById = new Map(buildings.filter((building) => building.hp > 0).map((building) => [building.id, building]));
+  const perimeterGroups = buildPerimeterOverlayGroups(game, visibleById);
+  const fortificationByPosition = new Map<string, Building>();
+  drawPerimeterGroupOverlays(game, graphics, perimeterGroups);
+  drawWarFrontOverlays(game, graphics, units, buildings);
+  for (const building of buildings) {
+    if (building.hp <= 0 || (building.type !== "wall" && building.type !== "gate")) continue;
+    fortificationByPosition.set(`${building.x},${building.y}`, building);
+  }
+  for (const building of fortificationByPosition.values()) {
+    const color = tribeConfig[building.tribeId].color;
+    const cx = building.x * TILE + TILE / 2;
+    const cy = building.y * TILE + TILE / 2;
+    for (const [dx, dy] of [
+      [1, 0],
+      [0, 1]
+    ] as const) {
+      const neighbor = fortificationByPosition.get(`${building.x + dx},${building.y + dy}`);
+      if (!neighbor || neighbor.tribeId !== building.tribeId) continue;
+      graphics.moveTo(cx, cy).lineTo(neighbor.x * TILE + TILE / 2, neighbor.y * TILE + TILE / 2).stroke({ color, width: 5, alpha: 0.26 });
+      graphics.moveTo(cx, cy).lineTo(neighbor.x * TILE + TILE / 2, neighbor.y * TILE + TILE / 2).stroke({ color: 0xf2d28b, width: 1.4, alpha: 0.32 });
+    }
+  }
   for (const building of buildings) {
     if (building.hp <= 0) continue;
     const cx = building.x * TILE + TILE / 2;
@@ -4957,18 +7616,242 @@ function drawDefenseOverlay(game: GameState, graphics: Graphics): void {
     if (building.type === "wall" || building.type === "gate") {
       graphics.rect(building.x * TILE + 1, building.y * TILE + 1, TILE - 2, TILE - 2).stroke({ color: 0x100f0c, width: 4, alpha: 0.42 });
       graphics.rect(building.x * TILE + 2, building.y * TILE + 2, TILE - 4, TILE - 4).stroke({ color, width: 2, alpha: 0.86 });
+      if (!isTileWalkable(game, building.x, building.y, playerTribe)) drawBlockedRouteMarker(graphics, building);
+      if (building.type === "wall") {
+        graphics
+          .moveTo(building.x * TILE + 6, building.y * TILE + 6)
+          .lineTo(building.x * TILE + TILE - 6, building.y * TILE + TILE - 6)
+          .moveTo(building.x * TILE + TILE - 6, building.y * TILE + 6)
+          .lineTo(building.x * TILE + 6, building.y * TILE + TILE - 6)
+          .stroke({ color: 0x100f0c, width: 1.6, alpha: 0.34 });
+      }
       if (building.type === "gate" && building.gateState !== "open") {
         graphics.rect(building.x * TILE + 5, building.y * TILE + 5, TILE - 10, TILE - 10).stroke({ color: 0xffe17b, width: 2, alpha: 0.86 });
       }
+      if (building.type === "gate") {
+        if (isSafePassageGate(game, building)) drawSafePassageCorridor(game, graphics, building);
+        drawGateOperationOverlay(game, graphics, building, cx, cy, color);
+      }
     }
   }
+}
+
+function drawPerimeterGroupOverlays(
+  game: GameState,
+  graphics: Graphics,
+  perimeterGroups: ReturnType<typeof buildPerimeterOverlayGroups>
+): void {
+  for (const group of perimeterGroups) {
+    const color = tribeConfig[group.tribeId].color;
+    const segments = game.fortificationPlans
+      .filter((plan) => plan.perimeterGroupId === group.groupId)
+      .sort((left, right) => (left.perimeterSegmentIndex ?? 0) - (right.perimeterSegmentIndex ?? 0) || left.id.localeCompare(right.id))
+      .flatMap((plan) => {
+        const building = game.buildings[plan.buildingId];
+        return building && building.hp > 0 ? [building] : [];
+      });
+    for (let index = 1; index < segments.length; index += 1) {
+      const previous = segments[index - 1];
+      const current = segments[index];
+      graphics
+        .moveTo(previous.x * TILE + TILE / 2, previous.y * TILE + TILE / 2)
+        .lineTo(current.x * TILE + TILE / 2, current.y * TILE + TILE / 2)
+        .stroke({ color: 0xf2d28b, width: 7, alpha: 0.16 });
+      graphics
+        .moveTo(previous.x * TILE + TILE / 2, previous.y * TILE + TILE / 2)
+        .lineTo(current.x * TILE + TILE / 2, current.y * TILE + TILE / 2)
+        .stroke({ color, width: 3, alpha: 0.28 });
+    }
+    const cx = group.centerX * TILE + TILE / 2;
+    const cy = group.centerY * TILE + TILE / 2;
+    for (const check of group.placementPreview?.routeChecks?.slice(0, 3) ?? []) {
+      const routeColor = check.blockedByPlacement ? 0xff6b52 : check.addedSteps > 0 ? 0xf2d28b : 0x7bd88f;
+      graphics
+        .moveTo(check.fromX * TILE + TILE / 2, check.fromY * TILE + TILE / 2)
+        .lineTo(check.toX * TILE + TILE / 2, check.toY * TILE + TILE / 2)
+        .stroke({ color: routeColor, width: check.blockedByPlacement ? 2.4 : 1.4, alpha: check.blockedByPlacement ? 0.42 : 0.2 });
+    }
+    graphics.circle(cx, cy, TILE * 0.72).stroke({ color: 0x100f0c, width: 4, alpha: 0.26 });
+    graphics
+      .circle(cx, cy, TILE * 0.6)
+      .stroke({ color: group.routeBlockedByPlacementCount > 0 ? 0xff6b52 : 0xf2d28b, width: 2.2, alpha: 0.68 });
+  }
+}
+
+function drawWarFrontOverlays(game: GameState, graphics: Graphics, units: Unit[], buildings: Building[]): void {
+  for (const marker of buildWarFrontOverlayMarkers(game, units, buildings)) {
+    const cx = marker.x * TILE + TILE / 2;
+    const cy = marker.y * TILE + TILE / 2;
+    graphics.circle(cx, cy, TILE * 0.9).stroke({ color: 0x100f0c, width: 5, alpha: 0.34 });
+    graphics.circle(cx, cy, TILE * 0.76).stroke({ color: 0xff5a45, width: 2.8, alpha: 0.78 });
+    graphics
+      .moveTo(cx - TILE * 0.32, cy - TILE * 0.32)
+      .lineTo(cx + TILE * 0.32, cy + TILE * 0.32)
+      .moveTo(cx + TILE * 0.32, cy - TILE * 0.32)
+      .lineTo(cx - TILE * 0.32, cy + TILE * 0.32)
+      .stroke({ color: 0xffc7b7, width: 2, alpha: 0.74 });
+  }
+}
+
+function drawBlockedRouteMarker(graphics: Graphics, building: Building): void {
+  const cx = building.x * TILE + TILE / 2;
+  const cy = building.y * TILE + TILE / 2;
+  graphics.circle(cx, cy, TILE * 0.5).stroke({ color: 0x100f0c, width: 4, alpha: 0.4 });
+  graphics
+    .moveTo(cx - TILE * 0.26, cy - TILE * 0.26)
+    .lineTo(cx + TILE * 0.26, cy + TILE * 0.26)
+    .moveTo(cx + TILE * 0.26, cy - TILE * 0.26)
+    .lineTo(cx - TILE * 0.26, cy + TILE * 0.26)
+    .stroke({ color: 0xff5a45, width: 2.4, alpha: 0.86 });
+}
+
+function drawSafePassageCorridor(game: GameState, graphics: Graphics, building: Building): void {
+  const x = building.x * TILE;
+  const y = building.y * TILE;
+  const cx = x + TILE / 2;
+  const cy = y + TILE / 2;
+  const horizontal = hasAdjacentFortification(game, building, -1, 0) || hasAdjacentFortification(game, building, 1, 0);
+  if (horizontal) {
+    graphics.moveTo(x + 3, cy).lineTo(x + TILE - 3, cy).stroke({ color: 0x0b0c0d, width: 6, alpha: 0.28 });
+    graphics.moveTo(x + 3, cy).lineTo(x + TILE - 3, cy).stroke({ color: 0x7bd8ff, width: 3, alpha: 0.88 });
+    graphics.moveTo(x + TILE - 8, cy - 4).lineTo(x + TILE - 3, cy).lineTo(x + TILE - 8, cy + 4).stroke({ color: 0x7bd8ff, width: 2, alpha: 0.88 });
+  } else {
+    graphics.moveTo(cx, y + 3).lineTo(cx, y + TILE - 3).stroke({ color: 0x0b0c0d, width: 6, alpha: 0.28 });
+    graphics.moveTo(cx, y + 3).lineTo(cx, y + TILE - 3).stroke({ color: 0x7bd8ff, width: 3, alpha: 0.88 });
+    graphics.moveTo(cx - 4, y + TILE - 8).lineTo(cx, y + TILE - 3).lineTo(cx + 4, y + TILE - 8).stroke({ color: 0x7bd8ff, width: 2, alpha: 0.88 });
+  }
+}
+
+function drawGateScrollBadge(graphics: Graphics, x: number, y: number, color: number, alpha = 0.88): void {
+  graphics.roundRect(x - 7, y - 4, 14, 8, 2).fill({ color: 0xf5efe0, alpha }).stroke({ color: 0x100f0c, width: 1.1, alpha: 0.82 });
+  graphics.circle(x - 6, y - 4, 2.1).fill({ color: 0xd8c69c, alpha }).stroke({ color: 0x100f0c, width: 0.7, alpha: 0.68 });
+  graphics.circle(x + 6, y + 4, 2.1).fill({ color: 0xd8c69c, alpha }).stroke({ color: 0x100f0c, width: 0.7, alpha: 0.68 });
+  graphics.moveTo(x - 3, y - 1).lineTo(x + 4, y - 1).moveTo(x - 2, y + 2).lineTo(x + 3, y + 2).stroke({ color, width: 1.2, alpha });
+}
+
+function drawGateCoinBadge(graphics: Graphics, x: number, y: number, pulse: number): void {
+  graphics.circle(x - 2, y + 2, 4.2).fill({ color: 0xb76f18, alpha: 0.92 }).stroke({ color: 0x100f0c, width: 1, alpha: 0.72 });
+  graphics.circle(x + 2, y - 1, 4.4).fill({ color: 0xffd96b, alpha: 0.94 }).stroke({ color: 0x6b430d, width: 1.1 });
+  graphics.circle(x + 2, y - 1, 6.5 + pulse * 1.2).stroke({ color: 0xfff2b6, width: 1.1, alpha: 0.34 + pulse * 0.16 });
+}
+
+function drawGateDetainBadge(graphics: Graphics, x: number, y: number, color: number): void {
+  graphics.roundRect(x - 7, y - 6, 14, 12, 2).fill({ color: 0x15120f, alpha: 0.64 }).stroke({ color, width: 1.4, alpha: 0.88 });
+  for (let offset = -4; offset <= 4; offset += 4) {
+    graphics.moveTo(x + offset, y - 5).lineTo(x + offset, y + 5).stroke({ color: 0xf2d28b, width: 1.2, alpha: 0.82 });
+  }
+  graphics.moveTo(x - 6, y - 1).lineTo(x + 6, y - 1).stroke({ color, width: 1.2, alpha: 0.86 });
+}
+
+function drawGateReleaseBadge(graphics: Graphics, x: number, y: number, color: number): void {
+  graphics.circle(x, y, 6).stroke({ color: 0x100f0c, width: 2, alpha: 0.38 });
+  graphics.moveTo(x - 7, y + 3).lineTo(x + 5, y + 3).lineTo(x + 1, y - 1).moveTo(x + 5, y + 3).lineTo(x + 1, y + 7).stroke({ color, width: 2, alpha: 0.9 });
+}
+
+function drawGateSabotageGlyph(graphics: Graphics, x: number, y: number, pulse: number): void {
+  graphics.circle(x, y, 7 + pulse * 2).stroke({ color: 0xff6bd6, width: 1.6, alpha: 0.42 + pulse * 0.18 });
+  graphics
+    .moveTo(x - 6, y - 6)
+    .lineTo(x + 6, y + 6)
+    .moveTo(x + 6, y - 6)
+    .lineTo(x - 6, y + 6)
+    .stroke({ color: 0xff6bd6, width: 2, alpha: 0.9 });
+  graphics.moveTo(x - 2, y - 8).lineTo(x + 2, y - 2).lineTo(x - 1, y + 1).lineTo(x + 3, y + 8).stroke({ color: 0xfff0c4, width: 1.4, alpha: 0.76 });
+}
+
+function drawGateOperationOverlay(game: GameState, graphics: Graphics, building: Building, cx: number, cy: number, color: number): void {
+  const activeTreaties = getActiveGateAccessTreaties(game, building.id);
+  const now = renderClockMs || performance.now();
+  const pulse = 0.5 + Math.sin(now / 240 + building.x * 0.6 + building.y * 0.3) * 0.5;
+  if ((building.gateState ?? "open") === "open" && !building.gateSabotage) {
+    graphics.circle(cx, cy, TILE * 0.23).stroke({ color: 0x88e68f, width: 2, alpha: 0.78 });
+  }
+  if (building.gateState === "closed") {
+    graphics.rect(cx - TILE * 0.24, cy - TILE * 0.26, TILE * 0.48, TILE * 0.52).stroke({ color: 0xffb35c, width: 2, alpha: 0.82 });
+    graphics.moveTo(cx - TILE * 0.18, cy).lineTo(cx + TILE * 0.18, cy).stroke({ color: 0xffb35c, width: 2, alpha: 0.8 });
+  }
+  if (building.gateState === "locked") {
+    graphics.circle(cx + 5, cy + 2, TILE * 0.18).fill({ color: 0xffe17b, alpha: 0.2 }).stroke({ color: 0xffe17b, width: 2, alpha: 0.88 });
+    graphics.roundRect(cx - 6, cy - 4, 12, 11, 2).fill({ color: 0x231a0f, alpha: 0.72 }).stroke({ color: 0xffe17b, width: 1.3, alpha: 0.92 });
+    graphics.arc(cx, cy - 4, 4.5, Math.PI, 0).stroke({ color: 0xffe17b, width: 1.4, alpha: 0.92 });
+  }
+  if (activeTreaties.length > 0) {
+    graphics.circle(cx, cy, TILE * 0.72).stroke({ color: 0x7bd8ff, width: 2.4, alpha: 0.78 });
+    activeTreaties.slice(0, 3).forEach((_, index) => {
+      drawGateScrollBadge(graphics, cx - TILE * 0.42 + index * 8, cy - TILE * 0.55, 0x7bd8ff, 0.82);
+    });
+  }
+  if (building.gateOperation) {
+    graphics
+      .moveTo(cx, cy - TILE * 0.82)
+      .lineTo(cx + TILE * 0.22, cy - TILE * 0.56)
+      .lineTo(cx, cy - TILE * 0.3)
+      .lineTo(cx - TILE * 0.22, cy - TILE * 0.56)
+      .closePath()
+      .fill({ color, alpha: 0.72 })
+      .stroke({ color: 0xf2d28b, width: 1.5, alpha: 0.88 });
+    if (building.gateOperation.tollGold || building.gateOperation.tollMode) {
+      drawGateCoinBadge(graphics, cx + TILE * 0.48, cy - TILE * 0.38, pulse);
+    }
+    if (
+      building.gateOperation.entryAction === "detain" ||
+      building.gateOperation.detainedPacketAction ||
+      building.gateOperation.detainedPacketId ||
+      building.gateOperation.unpaidAction === "detain"
+    ) {
+      drawGateDetainBadge(graphics, cx - TILE * 0.48, cy + TILE * 0.34, color);
+    }
+    if (building.gateOperation.releaseSubject || building.gateOperation.releaseMessage || building.gateOperation.ransomGold) {
+      drawGateReleaseBadge(graphics, cx + TILE * 0.5, cy + TILE * 0.34, 0x8df07a);
+    }
+    if (building.gateOperation.accessTreatyAction) {
+      const treatyColor = building.gateOperation.accessTreatyAction === "revoke" ? 0xff6b52 : 0x7bd8ff;
+      drawGateScrollBadge(graphics, cx, cy + TILE * 0.62, treatyColor, 0.88);
+      if (building.gateOperation.accessTreatyAction === "revoke") {
+        graphics.moveTo(cx - 8, cy + TILE * 0.55).lineTo(cx + 8, cy + TILE * 0.69).stroke({ color: 0xff6b52, width: 2, alpha: 0.88 });
+      }
+    }
+    if (building.gateOperation.sabotageAction) {
+      drawGateSabotageGlyph(graphics, cx - TILE * 0.46, cy - TILE * 0.36, pulse);
+    }
+  }
+  if (building.gateSabotage) {
+    graphics.circle(cx, cy, TILE * 0.86).stroke({ color: 0xff6bd6, width: 3, alpha: 0.82 });
+    drawGateSabotageGlyph(graphics, cx, cy, pulse);
+  }
+}
+
+function buildingVisualState(building: Building, game: GameState): BuildingVisualState {
+  const ratio = healthRatio(building);
+  if (building.hp > 0 && ratio < 0.34) return "critical";
+  if (buildingRepairState(game, building) !== "none") return "repairing";
+  if (building.hp > 0 && ratio < 0.98) return "damaged";
+  if (building.type === "gate") {
+    const gateState = building.gateState ?? "open";
+    if (gateState === "locked") return "gate_locked";
+    if (gateState === "closed") return "gate_closed";
+    return "gate_open";
+  }
+  return "normal";
+}
+
+function buildingTextureForState(building: Building, game: GameState): Texture | undefined {
+  const textures = visualTextures?.buildings[building.type];
+  return textures?.[buildingVisualState(building, game)] ?? textures?.normal;
+}
+
+function placeSprite(sprite: Sprite, left: number, top: number, width: number, height: number): void {
+  sprite.x = left + width / 2;
+  sprite.y = top + height / 2;
+  sprite.width = width;
+  sprite.height = height;
 }
 
 function drawBuilding(graphics: Graphics, building: Building, game: GameState): void {
   const color = tribeConfig[building.tribeId].color;
   const x = building.x * TILE;
   const y = building.y * TILE;
-  const texture = visualTextures?.buildings[building.type];
+  const texture = buildingTextureForState(building, game);
   if (texture) {
     drawTexturedBuilding(graphics, building, game, x, y, color, texture);
   } else if (building.type === "wall") {
@@ -5040,12 +7923,16 @@ function drawTexturedBuilding(graphics: Graphics, building: Building, game: Game
   const cy = y + TILE / 2;
   const fortified = building.type === "wall" || building.type === "gate";
   if (fortified) {
-    graphics.rect(x, y, TILE, TILE).fill({ color: 0x0f0d0a, alpha: 0.24 });
-    if (hasAdjacentFortification(game, building, 0, -1)) graphics.rect(x + 7, y - 2, 8, 9).fill({ color: 0xcac2b4, alpha: 0.96 });
-    if (hasAdjacentFortification(game, building, 0, 1)) graphics.rect(x + 7, y + TILE - 7, 8, 9).fill({ color: 0xcac2b4, alpha: 0.96 });
-    if (hasAdjacentFortification(game, building, -1, 0)) graphics.rect(x - 2, y + 7, 9, 8).fill({ color: 0xcac2b4, alpha: 0.96 });
-    if (hasAdjacentFortification(game, building, 1, 0)) graphics.rect(x + TILE - 7, y + 7, 9, 8).fill({ color: 0xcac2b4, alpha: 0.96 });
-    graphics.texture(texture, 0xffffff, x - 4, y - 7, TILE + 8, TILE + 12);
+    buildingUnderlayGraphics.rect(x, y, TILE, TILE).fill({ color: 0x0f0d0a, alpha: 0.24 });
+    if (hasAdjacentFortification(game, building, 0, -1)) buildingUnderlayGraphics.rect(x + 7, y - 2, 8, 9).fill({ color: 0xcac2b4, alpha: 0.96 });
+    if (hasAdjacentFortification(game, building, 0, 1)) buildingUnderlayGraphics.rect(x + 7, y + TILE - 7, 8, 9).fill({ color: 0xcac2b4, alpha: 0.96 });
+    if (hasAdjacentFortification(game, building, -1, 0)) buildingUnderlayGraphics.rect(x - 2, y + 7, 9, 8).fill({ color: 0xcac2b4, alpha: 0.96 });
+    if (hasAdjacentFortification(game, building, 1, 0)) buildingUnderlayGraphics.rect(x + TILE - 7, y + 7, 9, 8).fill({ color: 0xcac2b4, alpha: 0.96 });
+    const sprite = acquireBuildingSprite(texture);
+    placeSprite(sprite, x - 4, y - 7, TILE + 8, TILE + 12);
+    sprite.alpha = building.hp < building.maxHp ? 0.9 + healthRatio(building) * 0.1 : 1;
+    sprite.rotation = 0;
+    sprite.tint = 0xffffff;
     graphics.moveTo(x + 3, cy + 1).lineTo(x + TILE - 3, cy + 1).stroke({ color, width: 3, alpha: 0.92 });
     if (building.type === "gate") {
       const gateState = building.gateState ?? "open";
@@ -5054,17 +7941,30 @@ function drawTexturedBuilding(graphics: Graphics, building: Building, game: Game
         if (gateState === "locked") graphics.circle(cx + 5, cy + 3, 3.2).fill(0xffe17b).stroke({ color: 0x0c0a08, width: 1.2 });
       } else {
         graphics.moveTo(x + 10, cy + 4).lineTo(x + TILE - 10, cy + 4).stroke({ color: 0xffe17b, width: 2, alpha: 0.76 });
+        graphics
+          .moveTo(x + 5, cy + 4)
+          .lineTo(x + TILE - 5, cy + 4)
+          .moveTo(x + TILE - 10, cy)
+          .lineTo(x + TILE - 5, cy + 4)
+          .lineTo(x + TILE - 10, cy + 8)
+          .stroke({ color: 0x88e68f, width: 1.6, alpha: 0.72 });
       }
     }
     return;
   }
 
   const scalePad = building.type === "townHall" ? 8 : building.type === "turret" || building.type === "watchtower" ? 6 : 4;
-  graphics.texture(texture, 0xffffff, x - scalePad / 2, y - scalePad, TILE + scalePad, TILE + scalePad * 1.3);
+  buildingUnderlayGraphics.ellipse(cx, y + TILE - 1, TILE * 0.42, 3.8).fill({ color: 0x080706, alpha: 0.28 });
+  const sprite = acquireBuildingSprite(texture);
+  placeSprite(sprite, x - scalePad / 2, y - scalePad, TILE + scalePad, TILE + scalePad * 1.3);
+  sprite.alpha = building.hp < building.maxHp ? 0.9 + healthRatio(building) * 0.1 : 1;
+  sprite.rotation = building.type === "turret" ? Math.sin((renderClockMs || performance.now()) / 520 + building.x * 0.7) * 0.01 : 0;
+  sprite.tint = 0xffffff;
   if (building.type === "turret") {
     const recoil = Math.sin((renderClockMs || performance.now()) / 260 + building.x * 0.7 + building.y * 0.4) * 1.2;
     graphics.moveTo(cx, y + 5).lineTo(cx + 12 + recoil, y + 2).stroke({ color, width: 3, alpha: 0.96 });
     graphics.circle(cx, cy - 5, 6).stroke({ color, width: 2, alpha: 0.9 });
+    graphics.circle(cx + 13 + recoil, y + 2, 2.3).fill({ color: 0xffe17b, alpha: 0.74 });
     return;
   }
   if (building.type === "watchtower") {
@@ -5152,14 +8052,72 @@ function hasAdjacentFortification(game: GameState, building: Building, dx: numbe
   );
 }
 
+function unitSpriteSize(unit: Unit): number {
+  if (unit.type === "sovereign") return 34;
+  if (unit.type === "siege_engine" || unit.type === "battering_ram" || unit.type === "catapult") return 38;
+  if (unit.type === "messenger" || unit.type === "sentinel") return 29;
+  return 31;
+}
+
+function unitVisualState(unit: Unit): UnitVisualState {
+  if (unit.task.kind === "move") return "move";
+  if (unit.task.kind === "scout") return "scout";
+  if (unit.task.kind === "gather") return "gather";
+  if (unit.task.kind === "deliver") return "deliver";
+  if (unit.task.kind === "repair") return "repair";
+  if (unit.task.kind === "attack" || unit.task.kind === "attackBuilding" || unit.task.kind === "attackResource") return "attack";
+  return "idle";
+}
+
+function unitTextureForState(unit: Unit): Texture | undefined {
+  const textures = visualTextures?.units[unit.type];
+  return textures?.[unitVisualState(unit)] ?? textures?.idle;
+}
+
+function drawUnitSprite(graphics: Graphics, unit: Unit, x: number, y: number, radius: number, color: number): boolean {
+  const texture = unitTextureForState(unit);
+  if (!texture) return false;
+  const state = unitVisualState(unit);
+  const size = unitSpriteSize(unit);
+  const now = renderClockMs || performance.now();
+  const activePulse = state === "idle" ? 0 : Math.sin(now / 170 + unit.x * 0.6 + unit.y * 0.35);
+  const sprite = acquireUnitSprite(texture);
+  sprite.x = x;
+  sprite.y = y - 2;
+  sprite.width = size * (state === "attack" ? 1.05 + Math.max(0, activePulse) * 0.03 : 1);
+  sprite.height = size * (state === "move" ? 1 + Math.max(0, activePulse) * 0.025 : 1);
+  sprite.rotation =
+    state === "move"
+      ? Math.sin(now / 160 + unit.x) * 0.035
+      : state === "attack"
+        ? Math.sin(now / 90 + unit.y) * 0.045
+        : (((unit.x * 13 + unit.y * 7) % 5) - 2) * 0.006;
+  sprite.alpha = unit.hp < unit.maxHp ? 0.86 + healthRatio(unit) * 0.14 : 1;
+  sprite.tint = 0xffffff;
+  graphics.ellipse(x, y + radius + 7, radius + 7, 3.5).fill({ color, alpha: 0.28 }).stroke({ color: 0x100f0c, width: 1, alpha: 0.22 });
+  graphics.circle(x - size * 0.34, y - size * 0.3, Math.max(2.2, size * 0.085)).fill({ color, alpha: 0.94 }).stroke({ color: 0x100f0c, width: 0.8, alpha: 0.72 });
+  if (unit.type === "sovereign") {
+    graphics.circle(x, y - size * 0.45, size * 0.18).stroke({ color, width: 2, alpha: 0.96 });
+  } else if (unit.type === "messenger" || unit.type === "trader") {
+    graphics.rect(x - size * 0.18, y + size * 0.17, size * 0.36, 2.2).fill({ color, alpha: 0.86 });
+  } else if (isMilitaryUnitType(unit.type)) {
+    graphics.moveTo(x - size * 0.25, y + size * 0.22).lineTo(x + size * 0.25, y + size * 0.22).stroke({ color, width: 2, alpha: 0.9 });
+  }
+  if (state !== "idle") {
+    graphics.ellipse(x, y + radius + 7, radius + 5, 3).stroke({ color, width: 1.3, alpha: 0.38 });
+  }
+  return true;
+}
+
 function drawUnit(graphics: Graphics, unit: Unit, position: Position = visualPositionForUnit(unit)): void {
   const color = tribeConfig[unit.tribeId].color;
-  const radius = unit.type === "sovereign" ? 9 : unit.type === "siege_engine" ? 9 : unit.type === "messenger" ? 6 : 7;
+  const radius = unit.type === "sovereign" ? 9 : unit.type === "siege_engine" || unit.type === "battering_ram" || unit.type === "catapult" ? 9 : unit.type === "messenger" ? 6 : 7;
   const moving = unit.task.kind !== "idle";
   const stride = moving ? Math.sin((renderClockMs || performance.now()) / 115 + unit.x * 0.9 + unit.y * 0.5) * 1.6 : Math.sin((renderClockMs || performance.now()) / 720 + unit.x) * 0.35;
   const x = position.x * TILE + TILE / 2;
   const y = position.y * TILE + TILE / 2 + stride;
-  drawUnitShape(graphics, unit, x, y, radius, color);
+  if (!drawUnitSprite(graphics, unit, x, y, radius, color)) drawUnitShape(graphics, unit, x, y, radius, color);
+  drawUnitActionCue(graphics, unit, x, y, radius, color);
   if (unit.carriedPacketId) {
     const packetPulse = 0.74 + Math.sin((renderClockMs || performance.now()) / 180) * 0.18;
     graphics.roundRect(x + 6, y - 12, 8, 6, 1.5).fill({ color: 0xf2d28b, alpha: 0.95 }).stroke({ color: 0x100f0c, width: 1 });
@@ -5174,17 +8132,112 @@ function drawUnit(graphics: Graphics, unit: Unit, position: Position = visualPos
   }
 }
 
+function drawUnitActionCue(graphics: Graphics, unit: Unit, x: number, y: number, radius: number, color: number): void {
+  const now = renderClockMs || performance.now();
+  const phase = Math.sin(now / 150 + unit.x * 0.8 + unit.y * 0.35);
+  if (unit.task.kind === "move") {
+    graphics.circle(x - 7, y + radius + 8, 1.8).fill({ color, alpha: 0.32 + Math.max(0, phase) * 0.24 });
+    graphics.circle(x + 6, y + radius + 7, 1.5).fill({ color: 0xf2d28b, alpha: 0.26 + Math.max(0, -phase) * 0.22 });
+    drawMovementHeading(graphics, unit, x, y, color, unit.task.target);
+    return;
+  }
+  if (unit.task.kind === "scout") {
+    const sweep = 0.45 + Math.max(0, phase) * 0.2;
+    graphics.circle(x, y - 2, radius + 8).stroke({ color: 0x8fc0d2, width: 1.4, alpha: sweep });
+    graphics.moveTo(x, y - 2).lineTo(x + 12, y - 11).stroke({ color: 0x8fc0d2, width: 1.3, alpha: 0.5 });
+    return;
+  }
+  if (unit.task.kind === "gather") {
+    const resourceColor = resourceColorNumber(unit.task.resource);
+    graphics.moveTo(x + 8, y - 9).lineTo(x + 16 + phase * 2, y + 1).stroke({ color: 0x100f0c, width: 2.4, alpha: 0.72 });
+    graphics.circle(x + 17 + phase * 2, y + 2, 2.2).fill({ color: resourceColor, alpha: 0.82 }).stroke({ color: 0x100f0c, width: 0.8, alpha: 0.7 });
+    return;
+  }
+  if (unit.task.kind === "deliver") {
+    const alpha = 0.42 + Math.max(0, phase) * 0.22;
+    graphics.roundRect(x + 8, y - 16, 10, 6, 1.5).fill({ color: 0xf2d28b, alpha }).stroke({ color: 0x100f0c, width: 1, alpha: 0.72 });
+    graphics.moveTo(x + 9, y - 15).lineTo(x + 13, y - 12).lineTo(x + 18, y - 15).stroke({ color: 0x7a5620, width: 1, alpha: 0.74 });
+    drawMovementHeading(graphics, unit, x, y, color, unit.task.phase === "returning" ? unit.task.returnTo : unit.task.destination);
+    return;
+  }
+  if (unit.task.kind === "repair") {
+    const alpha = 0.48 + Math.max(0, phase) * 0.3;
+    graphics.circle(x, y, radius + 8).stroke({ color: 0x7bd8ff, width: 1.8, alpha });
+    graphics.moveTo(x + 9, y - 9).lineTo(x + 16, y - 2).moveTo(x + 16, y - 9).lineTo(x + 9, y - 2).stroke({ color: 0x7bd8ff, width: 1.8, alpha: 0.78 });
+    return;
+  }
+  if (unit.task.kind === "attack" || unit.task.kind === "attackBuilding" || unit.task.kind === "attackResource") {
+    const alpha = 0.42 + Math.max(0, phase) * 0.28;
+    graphics.circle(x, y, radius + 7).stroke({ color: 0xff6b52, width: 1.8, alpha });
+    graphics.moveTo(x + 8, y - 10).lineTo(x + 18, y - 18).stroke({ color: 0xffe17b, width: 2, alpha: 0.68 });
+  }
+}
+
+function drawMovementHeading(graphics: Graphics, unit: Unit, x: number, y: number, color: number, target: Position): void {
+  const dx = target.x - unit.x;
+  const dy = target.y - unit.y;
+  const length = Math.hypot(dx, dy);
+  if (length < 0.1) return;
+  const ux = dx / length;
+  const uy = dy / length;
+  const tipX = x + ux * 14;
+  const tipY = y + uy * 14;
+  const leftX = tipX - ux * 5 - uy * 3;
+  const leftY = tipY - uy * 5 + ux * 3;
+  const rightX = tipX - ux * 5 + uy * 3;
+  const rightY = tipY - uy * 5 - ux * 3;
+  graphics.moveTo(tipX, tipY).lineTo(leftX, leftY).lineTo(rightX, rightY).closePath().fill({ color, alpha: 0.72 }).stroke({ color: 0x080706, width: 1, alpha: 0.64 });
+}
+
+function drawProjectile(graphics: Graphics, projectile: SiegeProjectile): void {
+  const x = projectile.x * TILE + TILE / 2;
+  const y = projectile.y * TILE + TILE / 2;
+  const color = tribeConfig[projectile.tribeId].color;
+  const pulse = 0.74 + Math.sin((renderClockMs || performance.now()) / 90 + projectile.x) * 0.2;
+  graphics.circle(x - 8, y + 6, 3.2).fill({ color, alpha: 0.16 });
+  graphics.circle(x - 4, y + 3, 2.4).fill({ color: 0xf2d28b, alpha: 0.22 });
+  graphics.circle(x, y, 4.2).fill({ color: 0x2b2925, alpha: 0.96 }).stroke({ color: 0xf2d28b, width: 1.4, alpha: pulse });
+  graphics.circle(x - 1.2, y - 1.4, 1.4).fill({ color: 0xb8b0a1, alpha: 0.82 });
+  graphics
+    .moveTo(x - 7, y + 5)
+    .lineTo(x - 15, y + 11)
+    .stroke({ color, width: 2, alpha: 0.42 });
+  graphics.moveTo(x + 4, y - 3).lineTo(x + 9, y - 7).stroke({ color: 0xffe17b, width: 1.4, alpha: 0.34 });
+}
+
 function drawFog(game: GameState, graphics: Graphics): void {
   graphics.clear();
+  activeFogTileCount = 0;
+  activeFogEdgeCueCount = 0;
   if (observerMode) return;
   const visibility = game.visibility[playerTribe];
   for (let y = 0; y < MAP_SIZE; y += 1) {
     for (let x = 0; x < MAP_SIZE; x += 1) {
       const v = visibility[tileIndex(x, y)];
       if (v === 2) continue;
-      graphics.rect(x * TILE, y * TILE, TILE, TILE).fill({ color: 0x050505, alpha: v === 1 ? 0.42 : 0.86 });
+      activeFogTileCount += 1;
+      const px = x * TILE;
+      const py = y * TILE;
+      graphics.rect(px, py, TILE, TILE).fill({ color: 0x050505, alpha: v === 1 ? 0.42 : 0.86 });
+      if (v === 1 && (x * 7 + y * 13 + game.tick) % 5 === 0) {
+        graphics.moveTo(px + 3, py + 17).lineTo(px + 12, py + 8).lineTo(px + 21, py + 12).stroke({ color: 0xd7d0c2, width: 0.8, alpha: 0.08 });
+      }
+      if (activeFogEdgeCueCount < 320 && fogTouchesVisibleTile(visibility, x, y)) {
+        activeFogEdgeCueCount += 1;
+        graphics.rect(px + 2, py + 2, TILE - 4, TILE - 4).stroke({ color: 0xb8b0a1, width: 0.8, alpha: v === 1 ? 0.12 : 0.06 });
+      }
     }
   }
+}
+
+function fogTouchesVisibleTile(visibility: Uint8Array, x: number, y: number): boolean {
+  const neighbors = [
+    { x: x - 1, y },
+    { x: x + 1, y },
+    { x, y: y - 1 },
+    { x, y: y + 1 }
+  ];
+  return neighbors.some((neighbor) => neighbor.x >= 0 && neighbor.y >= 0 && neighbor.x < MAP_SIZE && neighbor.y < MAP_SIZE && visibility[tileIndex(neighbor.x, neighbor.y)] === 2);
 }
 
 function drawTerrainDetail(graphics: Graphics, x: number, y: number, terrain: TerrainType, shade: number): void {
@@ -5196,7 +8249,10 @@ function drawTerrainDetail(graphics: Graphics, x: number, y: number, terrain: Te
       .moveTo(px + 2, py + TILE / 2)
       .lineTo(px + TILE - 2, py + TILE / 2)
       .stroke({ color: 0xb69561, width: 2, alpha: 0.48 });
+    graphics.moveTo(px + 2, py + 6).lineTo(px + TILE - 2, py + 6).stroke({ color: 0x6c5738, width: 0.8, alpha: 0.24 });
+    graphics.moveTo(px + 2, py + TILE - 6).lineTo(px + TILE - 2, py + TILE - 6).stroke({ color: 0x6c5738, width: 0.8, alpha: 0.2 });
     if (mark % 5 === 0) graphics.circle(px + TILE / 2, py + TILE / 2, 1.4).fill({ color: 0x6c5738, alpha: 0.6 });
+    if (mark % 7 === 0) graphics.circle(px + 5, py + TILE / 2 + 4, 1).fill({ color: 0xf0d79a, alpha: 0.38 });
     return;
   }
   if (terrain === "water") {
@@ -5207,6 +8263,13 @@ function drawTerrainDetail(graphics: Graphics, x: number, y: number, terrain: Te
       .lineTo(px + 15, py + 7)
       .lineTo(px + 19, py + 5)
       .stroke({ color: 0x9fd0df, width: 1, alpha: 0.42 });
+    if (mark % 2 === 0) {
+      graphics
+        .moveTo(px + 7, py + 15)
+        .lineTo(px + 13, py + 13)
+        .lineTo(px + 19, py + 15)
+        .stroke({ color: 0xc4edf4, width: 0.9, alpha: 0.28 });
+    }
     return;
   }
   if (terrain === "forest") {
@@ -5214,6 +8277,7 @@ function drawTerrainDetail(graphics: Graphics, x: number, y: number, terrain: Te
     graphics.rect(px + 9, py + 12, 4, 6).fill({ color: 0x4b3426, alpha: 0.72 });
     graphics.circle(px + 11, py + 9, 6).fill({ color: 0x2f7b45, alpha: 0.85 });
     graphics.circle(px + 7, py + 11, 4).fill({ color: 0x3f9251, alpha: 0.8 });
+    if (mark % 8 === 0) graphics.circle(px + 15, py + 10, 3).fill({ color: 0x6fb45c, alpha: 0.5 });
     return;
   }
   if (terrain === "hill") {
@@ -5223,6 +8287,7 @@ function drawTerrainDetail(graphics: Graphics, x: number, y: number, terrain: Te
       .lineTo(px + 10, py + 9)
       .lineTo(px + 18, py + 14)
       .stroke({ color: 0xb3a477, width: 1.4, alpha: 0.5 });
+    graphics.moveTo(px + 6, py + 18).lineTo(px + 17, py + 18).stroke({ color: 0x5f5134, width: 0.9, alpha: 0.24 });
     return;
   }
   if (terrain === "mountain") {
@@ -5232,6 +8297,7 @@ function drawTerrainDetail(graphics: Graphics, x: number, y: number, terrain: Te
       .lineTo(px + 10, py + 5)
       .lineTo(px + 19, py + 18)
       .stroke({ color: 0xb5b2aa, width: 1.3, alpha: 0.55 });
+    graphics.moveTo(px + 8, py + 9).lineTo(px + 10, py + 5).lineTo(px + 13, py + 10).stroke({ color: 0xf0eee6, width: 1, alpha: 0.48 });
     graphics
       .moveTo(px + 10, py + 5)
       .lineTo(px + 12, py + 17)
@@ -5246,15 +8312,25 @@ function drawTerrainDetail(graphics: Graphics, x: number, y: number, terrain: Te
       .lineTo(px + 14, py + 12)
       .stroke({ color: 0x8fb565, width: 1, alpha: 0.4 });
   }
+  if (mark % 47 === 0) graphics.circle(px + 17, py + 8, 1.2).fill({ color: 0xd8c56b, alpha: 0.46 });
 }
 
-function drawStrategicGrid(graphics: Graphics): void {
-  const size = MAP_SIZE * TILE;
-  for (let index = 0; index <= MAP_SIZE; index += 8) {
+function drawStrategicGrid(graphics: Graphics, minX = 0, maxX = MAP_SIZE, minY = 0, maxY = MAP_SIZE): void {
+  const startX = Math.ceil(minX / 8) * 8;
+  const startY = Math.ceil(minY / 8) * 8;
+  const minPxX = minX * TILE;
+  const maxPxX = maxX * TILE;
+  const minPxY = minY * TILE;
+  const maxPxY = maxY * TILE;
+  for (let index = startX; index <= maxX; index += 8) {
     const major = index % 16 === 0;
     const offset = index * TILE;
-    graphics.moveTo(offset, 0).lineTo(offset, size).stroke({ color: 0x100f0c, width: major ? 1.2 : 0.7, alpha: major ? 0.18 : 0.08 });
-    graphics.moveTo(0, offset).lineTo(size, offset).stroke({ color: 0x100f0c, width: major ? 1.2 : 0.7, alpha: major ? 0.18 : 0.08 });
+    graphics.moveTo(offset, minPxY).lineTo(offset, maxPxY).stroke({ color: 0x100f0c, width: major ? 1.2 : 0.7, alpha: major ? 0.18 : 0.08 });
+  }
+  for (let index = startY; index <= maxY; index += 8) {
+    const major = index % 16 === 0;
+    const offset = index * TILE;
+    graphics.moveTo(minPxX, offset).lineTo(maxPxX, offset).stroke({ color: 0x100f0c, width: major ? 1.2 : 0.7, alpha: major ? 0.18 : 0.08 });
   }
 }
 
@@ -5321,10 +8397,19 @@ function addResourceLabels(game: GameState, layer: Container, tier: LabelTier): 
 }
 
 function drawUnitShape(graphics: Graphics, unit: Unit, x: number, y: number, radius: number, color: number): void {
-  const texture = visualTextures?.units[unit.type];
+  const texture = visualTextures?.units[unit.type]?.[unitVisualState(unit)] ?? visualTextures?.units[unit.type]?.idle;
   if (texture) {
-    const size = unit.type === "sovereign" ? 34 : unit.type === "siege_engine" ? 38 : unit.type === "messenger" || unit.type === "sentinel" ? 29 : 31;
-    graphics.texture(texture, color, x - size / 2, y - size / 2 - 2, size, size);
+    const size = unitSpriteSize(unit);
+    graphics.ellipse(x, y + radius + 7, radius + 7, 3.5).fill({ color, alpha: 0.28 }).stroke({ color: 0x100f0c, width: 1, alpha: 0.22 });
+    graphics.texture(texture, 0xffffff, x - size / 2, y - size / 2 - 2, size, size);
+    graphics.circle(x - size * 0.34, y - size * 0.3, Math.max(2.2, size * 0.085)).fill({ color, alpha: 0.94 }).stroke({ color: 0x100f0c, width: 0.8, alpha: 0.72 });
+    if (unit.type === "sovereign") {
+      graphics.circle(x, y - size * 0.45, size * 0.18).stroke({ color, width: 2, alpha: 0.96 });
+    } else if (unit.type === "messenger" || unit.type === "trader") {
+      graphics.rect(x - size * 0.18, y + size * 0.17, size * 0.36, 2.2).fill({ color, alpha: 0.86 });
+    } else if (isMilitaryUnitType(unit.type)) {
+      graphics.moveTo(x - size * 0.25, y + size * 0.22).lineTo(x + size * 0.25, y + size * 0.22).stroke({ color, width: 2, alpha: 0.9 });
+    }
     if (unit.task.kind !== "idle") {
       graphics.ellipse(x, y + radius + 7, radius + 5, 3).stroke({ color, width: 1.3, alpha: 0.38 });
     }
@@ -5356,17 +8441,7 @@ function drawUnitShape(graphics: Graphics, unit: Unit, x: number, y: number, rad
 
 function addMapText(layer: Container, text: string, x: number, y: number, fontSize: number, fill: string): boolean {
   if (!isWorldPointInViewport(x, y, 100)) return false;
-  const label = new Text({
-    text,
-    style: {
-      fontFamily: "Arial",
-      fontSize,
-      fontWeight: "700",
-      fill,
-      stroke: { color: "#080706", width: Math.max(2, Math.round(fontSize * 0.28)) }
-    }
-  });
-  label.anchor.set(0.5);
+  const label = acquireMapText(layer, text, fontSize, fill);
   label.x = x;
   label.y = y;
   const paddingX = Math.max(4, Math.ceil(fontSize * 0.36));
@@ -5377,7 +8452,6 @@ function addMapText(layer: Container, text: string, x: number, y: number, fontSi
     .roundRect(x - width / 2, y - height / 2, width, height, Math.min(5, height / 2))
     .fill({ color: 0x080706, alpha: 0.54 })
     .stroke({ color: 0xf2d28b, width: 1, alpha: 0.22 });
-  layer.addChild(label);
   return true;
 }
 
@@ -5402,7 +8476,7 @@ function updateHud(game: GameState): void {
     ["Limestone", tribe.resources.limestone.toFixed(0)],
     ["Iron", tribe.resources.iron.toFixed(0)],
     ["Coal", tribe.resources.coal.toFixed(0)],
-    ["Player pop", `${population}/${tribe.populationCap}`],
+    ["Player pop", `${population}/${getPopulationCap(game, playerTribe)}`],
     ["LLM", activeModel ? "local" : "fallback"],
     ["Tribes", `${victory.survivingTribes}/${tribeIds.length}`],
     ["AI lanes", `${aiStatus.activeLanes}/${aiStatus.maxLanes}`],
@@ -5465,6 +8539,49 @@ function selectedMarkup(game: GameState): string {
           ? `<div class="selected-row">Gate: ${building.gateState ?? "open"}; access ${formatGateAccessPolicy(building.gateAccessPolicy ?? "owner_allies")}</div>`
           : ""
       }
+      ${
+        building.type === "gate" && getActiveGateAccessTreaties(game, building.id).length > 0
+          ? `<div class="selected-row">Access treaties: ${getActiveGateAccessTreaties(game, building.id)
+              .map((treaty) => `${escapeHtml(game.tribes[treaty.targetTribeId].name)}${treaty.expiresAtTick ? ` until ${treaty.expiresAtTick}` : ""}`)
+              .join(", ")}</div>`
+          : ""
+      }
+      ${
+        building.type === "gate" && building.gateSabotage
+          ? `<div class="selected-row">Sabotage: ${escapeHtml(building.gateSabotage.action)} by ${escapeHtml(game.tribes[building.gateSabotage.tribeId].name)}${
+              building.gateSabotage.expiresAtTick ? ` until ${building.gateSabotage.expiresAtTick}` : ""
+            }</div>`
+          : ""
+      }
+      ${
+        building.type === "gate" && building.gateOperation
+          ? `<div class="selected-row">Operation: ${escapeHtml(building.gateOperation.gateOperationIntent ?? building.gateOperation.id)}${
+              building.gateOperation.entryAction ? `; action ${escapeHtml(building.gateOperation.entryAction)}` : ""
+            }${
+              building.gateOperation.tollGold ? `; toll ${building.gateOperation.tollGold} ${escapeHtml(building.gateOperation.tollMode ?? "optional")}` : ""
+            }${
+              building.gateOperation.unpaidAction ? `; unpaid ${escapeHtml(building.gateOperation.unpaidAction)}` : ""
+            }${
+              building.gateOperation.detainedPacketAction ? `; detained ${escapeHtml(building.gateOperation.detainedPacketAction)}` : ""
+            }${
+              building.gateOperation.detainedPacketId ? ` ${escapeHtml(building.gateOperation.detainedPacketId)}` : ""
+            }${
+              building.gateOperation.ransomGold ? `; ransom ${building.gateOperation.ransomGold}` : ""
+            }${
+              building.gateOperation.releaseSubject || building.gateOperation.releaseMessage ? "; release message" : ""
+            }${
+              building.gateOperation.accessTreatyAction ? `; treaty ${escapeHtml(building.gateOperation.accessTreatyAction)}` : ""
+            }${
+              building.gateOperation.accessTreatyName ? ` ${escapeHtml(building.gateOperation.accessTreatyName)}` : ""
+            }${
+              building.gateOperation.sabotageAction ? `; sabotage ${escapeHtml(building.gateOperation.sabotageAction)}` : ""
+            }${
+              building.gateOperation.gatePublicNotice ? `; public ${escapeHtml(building.gateOperation.gatePublicNotice)}` : ""
+            }${
+              building.gateOperation.gateTerms ? `; private ${escapeHtml(building.gateOperation.gateTerms)}` : ""
+            }</div>`
+          : ""
+      }
       ${isBuildableBuilding(building.type) ? `<div class="selected-row">Build cost: ${formatCost(getEffectiveBuildingCost(game, building.tribeId, building.type))}</div>` : ""}
       ${building.hp < building.maxHp ? `<div class="selected-row">Repair cost: ${formatCost(getTribeBuildingRepairCost(game, building.tribeId, building))}</div>` : ""}
       <div class="selected-row">${buildingRole(building.type)}</div>
@@ -5479,8 +8596,8 @@ function llmMarkup(game: GameState): string {
   const quality = modelQualitySummary();
   const aiStatus = compactAiStatus(game);
   const activeJobs = activeLlmJobRows();
-  const identityChosen = tribeIds.filter((tribeId) => game.tribes[tribeId].identityChosen || game.tribes[tribeId].eliminated).length;
-  const firstDoctrines = tribeIds.filter((tribeId) => game.tribes[tribeId].eliminated || hasDoctrineDecision(tribeId)).length;
+  const identityChosen = tribeIds.filter((tribeId) => game.tribes[tribeId].identityChosen || !isTribeActive(game, tribeId)).length;
+  const firstDoctrines = tribeIds.filter((tribeId) => !isTribeActive(game, tribeId) || hasDoctrineDecision(tribeId)).length;
   const activeJobMarkup = activeJobs
     .map((job) => `${escapeHtml(job.tribeName)} ${escapeHtml(job.mode)} with ${escapeHtml(job.model)}`)
     .join("<br>");
@@ -5554,9 +8671,9 @@ function compactAiStatus(game: GameState): {
   return {
     activeLanes: activeLlmJobs.size,
     maxLanes: maxConcurrentLlmJobs(),
-    identitiesChosen: tribeIds.filter((tribeId) => game.tribes[tribeId].identityChosen || game.tribes[tribeId].eliminated).length,
+    identitiesChosen: tribeIds.filter((tribeId) => game.tribes[tribeId].identityChosen || !isTribeActive(game, tribeId)).length,
     identitiesTotal: tribeIds.length,
-    firstDoctrines: tribeIds.filter((tribeId) => game.tribes[tribeId].eliminated || hasDoctrineDecision(tribeId)).length,
+    firstDoctrines: tribeIds.filter((tribeId) => !isTribeActive(game, tribeId) || hasDoctrineDecision(tribeId)).length,
     tribesTotal: tribeIds.length,
     liveDecisions: game.aiDecisions.filter((decision) => decision.provider === "ollama").length,
     fallbackDecisions: game.aiDecisions.filter((decision) => decision.provider === "fallback").length,
@@ -5988,7 +9105,10 @@ function normalizeReportScopeFilter(value: unknown): AiReportScopeFilter {
 function isBuildingMovementBlockingForDisplay(building: Building, tribeId: TribeId): boolean {
   if (building.hp <= 0) return false;
   if (building.type !== "gate") return isBuildingMovementBlocking(building);
+  if (building.gateSabotage?.action === "force_open") return false;
+  if (building.gateSabotage?.action === "jam_closed") return true;
   if (building.gateState !== "open") return true;
+  if (getActiveGateAccessTreaties(state, building.id).some((treaty) => treaty.targetTribeId === tribeId)) return false;
   const policy = building.gateAccessPolicy ?? "owner_allies";
   if (policy === "all") return false;
   if (policy === "owner_only") return tribeId !== building.tribeId;
@@ -6071,16 +9191,23 @@ function aiBugSaveLabel(saveState: AiBugEntry["saveState"]): string {
 }
 
 function tribeMarkup(game: GameState): string {
-  return tribeIds
+  const victory = getVictoryPressure(game);
+  const scoreByTribe = new Map(victory.scoreByTribe.map((score) => [score.tribeId, score]));
+  return victory.scoreByTribe
+    .map((score) => score.tribeId)
     .map((tribeId) => {
       const units = Object.values(game.units).filter((unit) => unit.tribeId === tribeId && unit.hp > 0);
-      const military = units.filter((unit) => unit.type === "militia" || unit.type === "archer" || unit.type === "siege_engine").length;
+      const military = units.filter((unit) => isMilitaryUnitType(unit.type)).length;
       const messengers = units.filter((unit) => unit.type === "messenger").length;
+      const buildings = Object.values(game.buildings).filter((building) => building.tribeId === tribeId && building.hp > 0);
+      const houses = buildings.filter((building) => building.type === "house").length;
+      const walls = buildings.filter((building) => building.type === "wall").length;
+      const gates = buildings.filter((building) => building.type === "gate").length;
+      const turrets = buildings.filter((building) => building.type === "turret").length;
       const packets = Object.values(game.packets).filter(
         (packet) =>
           (packet.originTribeId === tribeId || packet.recipientTribeId === tribeId) &&
-          packet.state !== "COMPLETED" &&
-          packet.state !== "KILLED_WITH_PACKET"
+          !isSettledPacketState(packet)
       ).length;
       const latestDecision = latestDecisionForTribe(game, tribeId);
       const aiStatus = latestDecision
@@ -6090,17 +9217,30 @@ function tribeMarkup(game: GameState): string {
       const wars = tribeIds.filter((other) => game.wars[tribeId]?.[other]).map((other) => game.tribes[other].name);
       const memory = summarizeSovereignMemory(game, tribeId);
       const iterationInbox = buildAiIterationInbox(tribeId);
+      const score = scoreByTribe.get(tribeId);
+      const populationCap = getPopulationCap(game, tribeId);
       return `
-        <div class="tribe-row">
-          <span class="swatch" style="background:${game.tribes[tribeId].colorText}"></span>
-          <strong>${game.tribes[tribeId].name}</strong>
-          <span class="tag">${game.tribes[tribeId].controller.toUpperCase()}</span><br>
+        <div class="tribe-row ${game.tribes[tribeId].eliminated ? "eliminated" : ""}">
+          <div class="tribe-rank-header">
+            <span class="rank-badge">#${score?.rank ?? "?"}</span>
+            <span class="swatch" style="background:${game.tribes[tribeId].colorText}"></span>
+            <strong>${game.tribes[tribeId].name}</strong>
+            <span class="tag">${game.tribes[tribeId].controller.toUpperCase()}</span>
+          </div>
+          <div class="tribe-stat-grid">
+            <div><span class="muted">Score</span><strong>${score?.survivalScore ?? 0}</strong></div>
+            <div><span class="muted">Wealth</span><strong>${score?.wealth ?? computeWealth(game, tribeId)}</strong></div>
+            <div><span class="muted">Pop</span><strong>${units.length}/${populationCap}</strong></div>
+            <div><span class="muted">Happy</span><strong>${score?.happiness ?? Math.round(game.tribes[tribeId].happiness)}</strong></div>
+            <div><span class="muted">Safety</span><strong>${score?.safety ?? 0}</strong></div>
+            <div><span class="muted">W/person</span><strong>${score?.wealthPerCapita ?? 0}</strong></div>
+          </div>
           <span class="muted">Sovereign ${game.tribes[tribeId].sovereignName}</span><br>
           <span class="muted">Style ${game.tribes[tribeId].namingStyle}</span><br>
           <span class="muted">AI ${escapeHtml(aiStatus)}</span><br>
           <span class="muted">Memory ${escapeHtml(memory)}</span><br>
           <span class="muted">Iteration inbox open ${iterationInbox.openReportCount} | resolved ${iterationInbox.resolvedLessonCount}${iterationInbox.promptSummary ? ` | ${escapeHtml(iterationInbox.promptSummary)}` : ""}</span><br>
-          <span class="muted">Wealth ${computeWealth(game, tribeId)} | Units ${units.length} | Military ${military} | Messengers ${messengers} | Packets ${packets} | Alliance ${ally} | War ${wars.join(", ") || "none"}</span>
+          <span class="muted">Military ${military} | Messengers ${messengers} | Packets ${packets} | Houses ${houses} | Walls/gates/turrets ${walls}/${gates}/${turrets} | Alliance ${escapeHtml(ally)} | War ${escapeHtml(wars.join(", ") || "none")}</span>
         </div>
       `;
     })
@@ -6268,13 +9408,14 @@ function bindButtons(): void {
   mustGet("resetViewButton").addEventListener("click", () => {
     followAction = false;
     mustGet("followActionButton").textContent = "Follow action";
-    centerCamera({ x: 66, y: 66 });
+    centerCamera({ x: MAP_SIZE / 2, y: MAP_SIZE / 2 });
     render();
   });
   mustGet("trainPeonButton").addEventListener("click", () => trainFromUi("peon"));
   mustGet("trainMilitiaButton").addEventListener("click", () => trainFromUi("militia"));
   mustGet("trainArcherButton").addEventListener("click", () => trainFromUi("archer"));
   mustGet("buildFarmButton").addEventListener("click", () => buildFromUi("farm"));
+  mustGet("buildHouseButton").addEventListener("click", () => buildFromUi("house"));
   mustGet("buildWatchtowerButton").addEventListener("click", () => buildFromUi("watchtower"));
   mustGet("buildWallButton").addEventListener("click", () => buildFromUi("wall"));
   mustGet("buildGateButton").addEventListener("click", () => buildFromUi("gate"));
@@ -6318,7 +9459,7 @@ function nextManualAskTribe(): TribeId | undefined {
     const index = (manualAskCursor + offset) % tribeIds.length;
     const tribeId = tribeIds[index];
     if (tribeHasActiveLlmJob(tribeId)) continue;
-    if (state.tribes[tribeId].eliminated) continue;
+    if (!isTribeActive(state, tribeId)) continue;
     if (!canStartLlmJob(tribeId, strategyModelForTribe(tribeId))) continue;
     candidates.push(tribeId);
   }
@@ -6606,16 +9747,72 @@ function hoverMarkup(target: HoverTarget): string {
       <div>Armor: ${building.armor}</div>
       <div>Attack: ${building.attack} / range ${building.range}</div>
       ${building.type === "gate" ? `<div>Gate: ${building.gateState ?? "open"}; access ${formatGateAccessPolicy(building.gateAccessPolicy ?? "owner_allies")}</div>` : ""}
+      ${
+        building.type === "gate" && getActiveGateAccessTreaties(state, building.id).length > 0
+          ? `<div>Access treaties: ${getActiveGateAccessTreaties(state, building.id)
+              .map((treaty) => `${escapeHtml(state.tribes[treaty.targetTribeId].name)}${treaty.expiresAtTick ? ` until ${treaty.expiresAtTick}` : ""}`)
+              .join(", ")}</div>`
+          : ""
+      }
+      ${
+        building.type === "gate" && building.gateSabotage
+          ? `<div>Sabotage: ${escapeHtml(building.gateSabotage.action)} by ${escapeHtml(state.tribes[building.gateSabotage.tribeId].name)}${
+              building.gateSabotage.expiresAtTick ? ` until ${building.gateSabotage.expiresAtTick}` : ""
+            }</div>`
+          : ""
+      }
+      ${
+        building.type === "gate" && building.gateOperation
+          ? `<div>Operation: ${escapeHtml(building.gateOperation.gateOperationIntent ?? building.gateOperation.id)}${
+              building.gateOperation.entryAction ? `; action ${escapeHtml(building.gateOperation.entryAction)}` : ""
+            }${
+              building.gateOperation.tollGold ? `; toll ${building.gateOperation.tollGold} ${escapeHtml(building.gateOperation.tollMode ?? "optional")}` : ""
+            }${
+              building.gateOperation.unpaidAction ? `; unpaid ${escapeHtml(building.gateOperation.unpaidAction)}` : ""
+            }${
+              building.gateOperation.detainedPacketAction ? `; detained ${escapeHtml(building.gateOperation.detainedPacketAction)}` : ""
+            }${
+              building.gateOperation.detainedPacketId ? ` ${escapeHtml(building.gateOperation.detainedPacketId)}` : ""
+            }${
+              building.gateOperation.ransomGold ? `; ransom ${building.gateOperation.ransomGold}` : ""
+            }${
+              building.gateOperation.releaseSubject || building.gateOperation.releaseMessage ? "; release message" : ""
+            }${
+              building.gateOperation.accessTreatyAction ? `; treaty ${escapeHtml(building.gateOperation.accessTreatyAction)}` : ""
+            }${
+              building.gateOperation.accessTreatyName ? ` ${escapeHtml(building.gateOperation.accessTreatyName)}` : ""
+            }${
+              building.gateOperation.sabotageAction ? `; sabotage ${escapeHtml(building.gateOperation.sabotageAction)}` : ""
+            }${
+              building.gateOperation.gatePublicNotice ? `; public ${escapeHtml(building.gateOperation.gatePublicNotice)}` : ""
+            }${
+              building.gateOperation.gateTerms ? `; private ${escapeHtml(building.gateOperation.gateTerms)}` : ""
+            }</div>`
+          : ""
+      }
       <div>Position: ${building.x}, ${building.y}</div>
       <div>${buildingRole(building.type)}</div>
     `;
   }
-  const resource = target.resource && target.resource.amount > 0 ? `${target.resource.type} ${Math.round(target.resource.amount)}` : "none";
+  const depletedResource = target.resource && target.resource.amount > 0 ? undefined : recentResourceDepletionAt(state, target.x, target.y);
+  const resource =
+    target.resource && target.resource.amount > 0
+      ? `${target.resource.type} ${Math.round(target.resource.amount)}`
+      : depletedResource
+        ? `exhausted ${depletedResource.type}`
+        : "none";
   const resourceStats = target.resource && target.resource.amount > 0 ? combatStatSnapshot(target.resource) : undefined;
   return `
     <strong>${target.terrain}</strong>
     <div>Tile: ${target.x}, ${target.y}</div>
     <div>Resource: ${resource}</div>
+    ${
+      depletedResource
+        ? `<div>Exhausted at tick ${depletedResource.tick}${
+            depletedResource.depletedByTribeId ? ` by ${escapeHtml(state.tribes[depletedResource.depletedByTribeId].name)}` : ""
+          }</div>`
+        : ""
+    }
     ${
       resourceStats
         ? `
@@ -6628,6 +9825,16 @@ function hoverMarkup(target: HoverTarget): string {
     }
     ${target.resource && target.resource.amount > 0 ? `<div>${resourceRole(target.resource.type)}</div>` : ""}
   `;
+}
+
+function recentResourceDepletionAt(game: GameState, x: number, y: number): ResourceDepletionRecord | undefined {
+  return getRecentResourceDepletions(game)
+    .filter((record) => {
+      if (record.x !== x || record.y !== y) return false;
+      if (observerMode || record.visibleTo === "all") return true;
+      return record.visibleTo.includes(playerTribe);
+    })
+    .sort((left, right) => right.tick - left.tick)[0];
 }
 
 function focusUnit(predicate: (unit: Unit) => boolean): void {
@@ -6668,8 +9875,8 @@ function applyCamera(): void {
 function renderLegend(): void {
   legendPanel.innerHTML = `
     <div class="legend-grid">
-      <span class="legend-item"><b>People</b> sovereigns, workers, sentinels, messengers, traders, militia, archers</span>
-      <span class="legend-item"><b>Towns</b> halls, farms, barracks, markets, watchtowers</span>
+      <span class="legend-item"><b>People</b> sovereigns, workers, sentinels, messengers, traders, militia, archers, rams, catapults</span>
+      <span class="legend-item"><b>Towns</b> halls, houses, farms, barracks, markets, watchtowers</span>
       <span class="legend-item"><b>Fortifications</b> walls, lockable gates, turrets</span>
       <span class="legend-item"><b>Food and timber</b> crop fields and log piles</span>
       <span class="legend-item"><b>Stone materials</b> stone, clay bricks, limestone blocks</span>
@@ -6714,6 +9921,10 @@ function unitAbbrev(type: Unit["type"]): string {
       return "AR";
     case "siege_engine":
       return "SE";
+    case "battering_ram":
+      return "RAM";
+    case "catapult":
+      return "CAT";
   }
 }
 
@@ -6723,6 +9934,8 @@ function buildingAbbrev(type: Building["type"]): string {
       return "TH";
     case "farm":
       return "F";
+    case "house":
+      return "H";
     case "barracks":
       return "BA";
     case "market":
@@ -6820,8 +10033,13 @@ function packetStatusClass(packet: Packet): string {
   if (packet.state === "IN_TRANSIT_OUTBOUND") return "status-outbound";
   if (packet.state === "AWAITING_REPLY") return "status-waiting";
   if (packet.state === "IN_TRANSIT_RETURN" || packet.state === "COMPLETED") return "status-returning";
-  if (packet.state === "KILLED_WITH_PACKET") return "status-lost";
+  if (packet.state === "KILLED_WITH_PACKET" || packet.state === "REFUSED_AT_GATE") return "status-lost";
+  if (packet.state === "DETAINED") return "status-waiting";
   return "status-overdue";
+}
+
+function isSettledPacketState(packet: Packet): boolean {
+  return packet.state === "COMPLETED" || packet.state === "KILLED_WITH_PACKET" || packet.state === "REFUSED_AT_GATE" || packet.state === "DETAINED";
 }
 
 function describeUnitTask(game: GameState, unit: Unit): string {
@@ -6853,8 +10071,18 @@ function describeUnitTask(game: GameState, unit: Unit): string {
     return building ? `Repairing ${building.type} ${building.id}` : "Repairing missing building";
   }
   const building = game.buildings[task.targetBuildingId];
+  if (building && task.assaultPhase === "assembling" && task.assemblyTarget) {
+    return `Assembling for ${task.assaultMode ?? "coordinated"} assault at ${formatPosition(task.assemblyTarget)} before attacking ${building.type} ${building.id}`;
+  }
+  if (building && task.assaultPhase === "waiting_wave") {
+    const wave = task.assaultWaveIndex !== undefined ? `wave ${task.assaultWaveIndex + 1}` : "delayed wave";
+    const release = task.assaultWaveReleaseTick !== undefined ? ` until turn ${task.assaultWaveReleaseTick}` : "";
+    return `Holding ${wave}${release} before attacking ${building.type} ${building.id}`;
+  }
   return building
-    ? `Attacking ${building.type} ${building.id} of ${game.tribes[building.tribeId].name}`
+    ? `Attacking ${building.type} ${building.id} of ${game.tribes[building.tribeId].name}${
+        task.assaultMode && task.assaultMode !== "direct" ? ` (${task.assaultMode})` : ""
+      }`
     : "Attacking missing building";
 }
 
@@ -6871,7 +10099,7 @@ function labelBuilding(type: string): string {
 }
 
 function isBuildableBuilding(type: Building["type"]): type is BuildableBuildingType {
-  return type === "farm" || type === "watchtower" || type === "wall" || type === "gate" || type === "turret";
+  return type === "farm" || type === "house" || type === "watchtower" || type === "wall" || type === "gate" || type === "turret";
 }
 
 function formatCost(cost: ResourceCost): string {
@@ -6887,6 +10115,7 @@ function buildingRole(type: Building["type"]): string {
   if (type === "gate") return "Open gates follow their access policy; closed or locked gates block movement.";
   if (type === "turret") return "Fires on hostile units in range.";
   if (type === "watchtower") return "Extends local vision.";
+  if (type === "house") return "Raises population capacity and lets a safe, fed population grow over years.";
   return "Kingdom structure.";
 }
 

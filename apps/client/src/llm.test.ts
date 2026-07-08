@@ -9,6 +9,7 @@ import {
   isGenerateSchemaCompatibleModel,
   isSchemaTurnCompatibleModel,
   parseOllamaJsonObject,
+  requestSovereignIdentity,
   requestSovereignDecision,
   requestSovereignReply
 } from "./llm";
@@ -60,10 +61,32 @@ describe("Ollama JSON recovery", () => {
     expect(decision.strategySummary).toContain("no orders after elimination");
   });
 
-  it("does not send fallback messengers to eliminated populations", () => {
+  it("does not send fallback messengers to unencountered populations", () => {
     const game = createGame(20260701);
     game.tribes.red.eliminated = true;
     game.tribes.red.eliminatedYear = 100;
+
+    const decision = fallbackDecision(game, "blue");
+
+    expect(decision.orders[0]).toMatchObject({
+      type: "RECRUIT",
+      unitType: "messenger"
+    });
+  });
+
+  it("sends fallback messengers only to encountered populations", () => {
+    const game = createGame(20260701);
+    const sent = sendPlayerMessage(game, "green", "peace");
+    expect(sent.ok).toBe(true);
+    game.tribes.blue.resources.food = 500;
+    game.tribes.blue.resources.gold = 500;
+    const recruited = issueSovereignOrder(game, "blue", {
+      type: "RECRUIT",
+      priority: 1,
+      unitType: "messenger",
+      reason: "Keep one courier free for known-contact fallback diplomacy."
+    });
+    expect(recruited.ok).toBe(true);
 
     const decision = fallbackDecision(game, "blue");
 
@@ -165,6 +188,54 @@ describe("Ollama JSON recovery", () => {
     });
   });
 
+  it("preserves authored merger proposal fields from model decisions", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        response: JSON.stringify({
+          freeformStrategy: "Try a negotiated union only if Green accepts Blue as sole leader in writing.",
+          strategySummary: "Propose a merger without assuming acceptance.",
+          memoryNote: "Green may be offered one crown, but only written acceptance should bind it.",
+          orders: [
+            {
+              type: "SEND_MESSENGER",
+              priority: 1,
+              recipientTribeId: "green",
+              messageType: "MERGER_PROPOSAL",
+              diplomacyIntent: "MERGER_OFFER",
+              mergerLeaderTribeId: "blue",
+              mergerTerms: "Blue holds the single crown; Green keeps household names and shares the treasury.",
+              subject: "One crown compact",
+              body: "I offer a full merger into one civilization under my crown. Refuse, counter, or accept these terms plainly.",
+              reason: "A negotiated merger may keep both populations safer before the century review."
+            }
+          ],
+          unitNames: [],
+          bugReport: "",
+          bugSeverity: "low"
+        })
+      })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("window", {
+      setTimeout: globalThis.setTimeout,
+      clearTimeout: globalThis.clearTimeout
+    });
+
+    const decision = await requestSovereignDecision(createGame(20260702), "blue", "qwen3.5:9b-mlx");
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+
+    expect(body.prompt).toContain("Merger rule");
+    expect(decision.orders[0]).toMatchObject({
+      type: "SEND_MESSENGER",
+      recipientTribeId: "green",
+      messageType: "MERGER_PROPOSAL",
+      diplomacyIntent: "MERGER_OFFER",
+      mergerLeaderTribeId: "blue",
+      mergerTerms: "Blue holds the single crown; Green keeps household names and shares the treasury."
+    });
+  });
+
   it("promotes structured bug-report details even when the model uses the wrong order type", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -212,7 +283,7 @@ describe("Ollama JSON recovery", () => {
     });
   });
 
-  it("turns explicit masonry policy language into an immediate development order", async () => {
+  it("does not convert policy prose into an immediate development order", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -246,12 +317,13 @@ describe("Ollama JSON recovery", () => {
     const decision = await requestSovereignDecision(createGame(20260702), "blue", "qwen3.5:9b-mlx");
 
     expect(decision.orders[0]).toMatchObject({
-      type: "DEVELOP",
-      developmentId: "masonry"
+      type: "SET_POLICY",
+      reason: "Develop Masonry now so my people can raise walls before the century review."
     });
+    expect(decision.orders[0].developmentId).toBeUndefined();
   });
 
-  it("turns explicit generated roadmap development names into immediate development orders", async () => {
+  it("does not convert generated roadmap development names from policy prose", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -285,12 +357,13 @@ describe("Ollama JSON recovery", () => {
     const decision = await requestSovereignDecision(createGame(20260702), "blue", "qwen3.5:9b-mlx");
 
     expect(decision.orders[0]).toMatchObject({
-      type: "DEVELOP",
-      developmentId: "sw_001_unified_settlement_layout"
+      type: "SET_POLICY",
+      reason: "Develop Unified Settlement Layout now so the settlement has a stronger administrative footprint."
     });
+    expect(decision.orders[0].developmentId).toBeUndefined();
   });
 
-  it("turns explicit wall policy language into a placed build order after Masonry", async () => {
+  it("does not convert fortification policy prose into a placed build order", async () => {
     const game = createGame(20260702);
     const developed = issueSovereignOrder(game, "blue", {
       type: "DEVELOP",
@@ -316,6 +389,12 @@ describe("Ollama JSON recovery", () => {
               body: "",
               targetX: 18,
               targetY: 15,
+              fortificationIntent: "northern warning wall",
+              perimeterShape: "short diagonal segment",
+              perimeterStrategy: "Signal a border without fully enclosing our own people.",
+              perimeterPattern: "line",
+              perimeterDirection: "east_west",
+              perimeterLength: 4,
               reason: "Build a wall at 18,15 to mark the northern perimeter."
             }
           ],
@@ -334,14 +413,21 @@ describe("Ollama JSON recovery", () => {
     const decision = await requestSovereignDecision(game, "blue", "qwen3.5:9b-mlx");
 
     expect(decision.orders[0]).toMatchObject({
-      type: "BUILD",
-      buildingType: "wall",
+      type: "SET_POLICY",
       targetX: 18,
-      targetY: 15
+      targetY: 15,
+      fortificationIntent: "northern warning wall",
+      perimeterShape: "short diagonal segment",
+      perimeterStrategy: "Signal a border without fully enclosing our own people.",
+      perimeterPattern: "line",
+      perimeterDirection: "east_west",
+      perimeterLength: 4,
+      reason: "Build a wall at 18,15 to mark the northern perimeter."
     });
+    expect(decision.orders[0].buildingType).toBeUndefined();
   });
 
-  it("turns explicit gate policy language into a placed build order after Masonry and Ironworking", async () => {
+  it("does not convert gate policy prose into a placed build order", async () => {
     const game = createGame(20260703);
     game.tribes.blue.resources = { gold: 500, food: 500, wood: 500, stone: 500, clay: 500, limestone: 500, iron: 500, coal: 500 };
     expect(
@@ -395,11 +481,12 @@ describe("Ollama JSON recovery", () => {
     const decision = await requestSovereignDecision(game, "blue", "qwen3.5:9b-mlx");
 
     expect(decision.orders[0]).toMatchObject({
-      type: "BUILD",
-      buildingType: "gate",
+      type: "SET_POLICY",
       targetX: 19,
-      targetY: 16
+      targetY: 16,
+      reason: "Build a gatehouse at 19,16 to create a lockable passage."
     });
+    expect(decision.orders[0].buildingType).toBeUndefined();
   });
 
   it("preserves LLM-authored gate access policy orders for owned gates", async () => {
@@ -452,6 +539,162 @@ describe("Ollama JSON recovery", () => {
       gateState: "open",
       gateAccessPolicy: "owner_only"
     });
+  });
+
+  it("preserves LLM-authored freeform gate operations", async () => {
+    const game = createGame(202607041);
+    game.tribes.blue.resources = { gold: 500, food: 500, wood: 500, stone: 500, clay: 500, limestone: 500, iron: 500, coal: 500 };
+    expect(issueSovereignOrder(game, "blue", { type: "DEVELOP", priority: 1, developmentId: "masonry", reason: "Unlock stone gates." }).ok).toBe(true);
+    expect(issueSovereignOrder(game, "blue", { type: "DEVELOP", priority: 1, developmentId: "ironworking", reason: "Unlock gate hardware." }).ok).toBe(true);
+    const built = buildStructure(game, "blue", "gate", getTownHall(game, "blue"));
+    expect(built.ok).toBe(true);
+    if (!built.ok) throw new Error("Gate unexpectedly failed to build");
+    const packet = sendPlayerMessage(game, "red", "peace");
+    expect(packet.ok).toBe(true);
+    if (!packet.ok) throw new Error("Expected packet for route-evidence prompt test");
+    game.packets[packet.packetId].routeMemory.push('Safe-passage treaty gatetreaty_prompt "Northern road writ" let Red Banner courier route through Blue Crown gate.');
+    game.gateTreatyIncidents.push({
+      id: "gateincident_prompt",
+      tick: game.tick,
+      treatyId: "gatetreaty_prompt",
+      treatyName: "Northern road writ",
+      buildingId: built.buildingId,
+      gateOwnerTribeId: "blue",
+      affectedTribeId: "red",
+      packetId: packet.packetId,
+      gateOperationId: "gateop_prompt",
+      action: "detain",
+      participantTribeIds: ["blue", "red"],
+      witnessTribeIds: ["green"],
+      summary: "Active gate treaty gatetreaty_prompt covered Red's packet, but Blue detained the courier."
+    });
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        response: JSON.stringify({
+          freeformStrategy: "I will sell the north passage while concealing that I intend to detain scouts who ask too many questions.",
+          strategySummary: "Operate the gate as a toll trap.",
+          memoryNote: "Blue gate terms are a bargaining trap for Red.",
+          orders: [
+            {
+              type: "GATE_OPERATION",
+              priority: 1,
+              buildingId: built.buildingId,
+              recipientTribeId: "red",
+              gateState: "open",
+              gateAccessPolicy: "all",
+              gateOperationIntent: "toll passage with possible detention",
+              gateTerms: "Red envoys pay 9 gold; curious scouts are held until they answer my wealth questions.",
+              gatePublicNotice: "The northern gate is open for paid envoys.",
+              gateEntryAction: "detain",
+              gateTollMode: "required",
+              gateUnpaidAction: "refuse",
+              gateTollGold: 9,
+              gateDetainedPacketAction: "ransom",
+              gateDetainedPacketId: "pkt-royal-hostage",
+              gateRansomGold: 12,
+              gateReleaseSubject: "Gate ransom terms",
+              gateReleaseMessage: "I release this courier after payment, but I may close the road again if Red hides its wealth.",
+              gateAccessTreatyAction: "grant",
+              gateAccessTreatyName: "Northern road writ",
+              gateAccessTreatyTerms: "Red may pass this gate while escorted, but I can revoke the writ at any time.",
+              gateAccessTreatyDurationTicks: 300,
+              gateSabotageAction: "jam_closed",
+              gateSabotageDurationTicks: 80,
+              gateSabotageDamage: 7,
+              gateOperationDurationTicks: 120,
+              messageType: "LETTER",
+              diplomacyIntent: "NONE",
+              subject: "",
+              body: "",
+              reason: "Use gate control as diplomacy, revenue, and leverage."
+            }
+          ],
+          unitNames: [],
+          bugReport: "",
+          bugSeverity: "low"
+        })
+      })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("window", {
+      setTimeout: globalThis.setTimeout,
+      clearTimeout: globalThis.clearTimeout
+    });
+
+    const decision = await requestSovereignDecision(game, "blue", "qwen3.5:9b-mlx");
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+
+    expect(body.prompt).toContain("GATE_OPERATION");
+    expect(body.prompt).toContain("Executable effects are not inferred from prose");
+    expect(body.prompt).toContain("1-based perimeterGateIndex");
+    expect(body.format.properties.orders.items.properties.type.enum).toContain("GATE_OPERATION");
+    expect(body.format.properties.orders.items.properties.perimeterPattern.enum).toContain("gate_line");
+    expect(body.format.properties.orders.items.properties.perimeterDirection.enum).toContain("north_south");
+    expect(body.format.properties.orders.items.properties.perimeterLength.type).toBe("integer");
+    expect(body.format.properties.orders.items.properties.perimeterGateIndex.type).toBe("integer");
+    expect(body.format.properties.orders.items.properties.gateOperationIntent.type).toBe("string");
+    expect(body.format.properties.orders.items.properties.gateEntryAction.enum).toContain("ambush");
+    expect(body.format.properties.orders.items.properties.gateTollMode.enum).toContain("required");
+    expect(body.format.properties.orders.items.properties.gateDetainedPacketAction.enum).toContain("ransom");
+    expect(body.format.properties.orders.items.properties.gateRansomGold.type).toBe("integer");
+    expect(body.format.properties.orders.items.properties.gateAccessTreatyAction.enum).toContain("revoke");
+    expect(body.format.properties.orders.items.properties.gateSabotageAction.enum).toContain("force_open");
+    expect(body.prompt).toContain("gateDetainedPacketId");
+    expect(body.prompt).toContain("gateAccessTreatyAction");
+    expect(body.prompt).toContain("gateSabotageAction");
+    expect(body.prompt).toContain("courier route evidence");
+    expect(body.prompt).toContain("treaty incident evidence");
+    expect(body.prompt).toContain("participant treaty");
+    expect(body.prompt).toContain("Northern road writ");
+    expect(body.prompt).toContain("gateincident_prompt");
+    expect(decision.orders[0]).toMatchObject({
+      type: "GATE_OPERATION",
+      buildingId: built.buildingId,
+      recipientTribeId: "red",
+      gateOperationIntent: "toll passage with possible detention",
+      gateTerms: "Red envoys pay 9 gold; curious scouts are held until they answer my wealth questions.",
+      gatePublicNotice: "The northern gate is open for paid envoys.",
+      gateEntryAction: "detain",
+      gateTollMode: "required",
+      gateUnpaidAction: "refuse",
+      gateTollGold: 9,
+      gateDetainedPacketAction: "ransom",
+      gateDetainedPacketId: "pkt-royal-hostage",
+      gateRansomGold: 12,
+      gateReleaseSubject: "Gate ransom terms",
+      gateReleaseMessage: "I release this courier after payment, but I may close the road again if Red hides its wealth.",
+      gateAccessTreatyAction: "grant",
+      gateAccessTreatyName: "Northern road writ",
+      gateAccessTreatyTerms: "Red may pass this gate while escorted, but I can revoke the writ at any time.",
+      gateAccessTreatyDurationTicks: 300,
+      gateSabotageAction: "jam_closed",
+      gateSabotageDurationTicks: 80,
+      gateSabotageDamage: 7,
+      gateOperationDurationTicks: 120
+    });
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        response: JSON.stringify({
+          freeformStrategy: "I witnessed a gate detention and will remember it without assuming the treaty details are true.",
+          strategySummary: "Record witnessed gate incident.",
+          memoryNote: "Green saw Blue detain a Red courier at the gate; treaty details are unverified.",
+          orders: [{ type: "SET_POLICY", priority: 1, reason: "Keep the witnessed gate incident as diplomatic evidence." }],
+          unitNames: [],
+          bugReport: "",
+          bugSeverity: "low"
+        })
+      })
+    });
+
+    await requestSovereignDecision(game, "green", "qwen3.5:9b-mlx");
+    const greenBody = JSON.parse(fetchMock.mock.calls.at(-1)?.[1].body);
+    expect(greenBody.prompt).toContain("witnessed gate incident");
+    expect(greenBody.prompt).toContain("treaty details unverified by witness");
+    expect(greenBody.prompt).not.toContain("participant treaty gatetreaty_prompt");
   });
 
   it("includes a sovereign catch-up brief with accessible context since its last move", async () => {
@@ -903,7 +1146,7 @@ describe("Ollama JSON recovery", () => {
     });
     for (let index = 0; index < 25; index += 1) {
       advanceGameTicks(game, 1);
-      const result = issueSovereignOrder(game, "red", {
+      const result = issueSovereignOrder(game, "blue", {
         type: "SET_POLICY",
         priority: 1,
         reason: `Public policy signal ${index}.`
@@ -955,7 +1198,7 @@ describe("Ollama JSON recovery", () => {
     });
     for (let index = 0; index < 90; index += 1) {
       advanceGameTicks(game, 1);
-      const result = issueSovereignOrder(game, "red", {
+      const result = issueSovereignOrder(game, "blue", {
         type: "SET_POLICY",
         priority: 1,
         reason: `Heavy public policy signal ${index}.`
@@ -991,7 +1234,7 @@ describe("Ollama JSON recovery", () => {
     expect(catchUp).not.toContain("Heavy public policy signal 0");
   });
 
-  it("includes AI iteration report lessons from sovereign memory in decision prompts", async () => {
+  it("includes World report lessons from sovereign memory in decision prompts", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -1012,15 +1255,15 @@ describe("Ollama JSON recovery", () => {
       clearTimeout: globalThis.clearTimeout
     });
     const game = createGame(20260702);
-    appendSovereignMemory(game, "blue", "AI iteration report filed (self_report/medium): Wall visibility blocked defense planning.");
+    appendSovereignMemory(game, "blue", "World report filed (self_report/medium): Wall visibility blocked defense planning.");
 
     await requestSovereignDecision(game, "blue", "qwen3.5:9b-mlx");
 
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-    expect(body.prompt).toContain("AI iteration report filed (self_report/medium): Wall visibility blocked defense planning.");
+    expect(body.prompt).toContain("World report filed (self_report/medium): Wall visibility blocked defense planning.");
   });
 
-  it("includes explicit AI iteration context in normal decision prompts", async () => {
+  it("includes explicit world continuity context in normal decision prompts", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -1047,11 +1290,122 @@ describe("Ollama JSON recovery", () => {
     });
 
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-    expect(body.prompt).toContain("AI iteration memory:");
-    expect(body.prompt).toContain("open unresolved own reports");
+    expect(body.prompt).toContain("World continuity memory:");
+    expect(body.prompt).toContain("open unresolved world reports");
     expect(body.prompt).toContain("self_report/medium: wall labels were missing");
-    expect(body.prompt).toContain("resolved iteration lessons");
+    expect(body.prompt).toContain("resolved world lessons");
     expect(body.prompt).toContain("fixed self_report: wall labels now visible after smoke proof");
+  });
+
+  it("does not expose unseen sovereign roster, counts, or machine identity in fresh decision prompts", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        response: JSON.stringify({
+          freeformStrategy: "Build food and scout without assuming who else exists.",
+          strategySummary: "Keep knowledge local.",
+          memoryNote: "",
+          orders: [],
+          unitNames: [],
+          bugReport: "",
+          bugSeverity: "low"
+        })
+      })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("window", {
+      setTimeout: globalThis.setTimeout,
+      clearTimeout: globalThis.clearTimeout
+    });
+
+    await requestSovereignDecision(createGame(20260702), "blue", "qwen3.5:9b-mlx");
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const prompt = body.prompt as string;
+    expect(prompt).toContain("Known encountered sovereigns: none confirmed");
+    expect(prompt).toContain("Discovery rule: do not assume any other sovereigns");
+    expect(prompt).toContain("Do not infer a global count, roster, hidden identity list, or true nature");
+    expect(prompt).not.toContain("Known sovereign tribes");
+    expect(prompt).not.toContain("Surviving populations");
+    expect(prompt).not.toContain("recipient AI");
+    expect(prompt).not.toContain("other AIs");
+    expect(prompt).not.toContain("Already chosen identities");
+    expect(prompt).not.toMatch(/\b(red|green|yellow|purple)\b/i);
+    expect(prompt).not.toMatch(/Red Banner|Green Vale|Yellow Knives|Purple Seal/);
+    expect(prompt).not.toMatch(/\b(AI|LLM|human|model)\b/i);
+    expect(prompt).not.toMatch(/simulation|prototype/i);
+  });
+
+  it("keeps unseen chosen identities out of identity prompts", async () => {
+    const game = createGame(20260702);
+    game.tribes.red.name = "Aurelian March";
+    game.tribes.red.sovereignName = "Aurelian";
+    game.tribes.red.identityChosen = true;
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        response: JSON.stringify({
+          realmName: "The Glass Republic",
+          sovereignName: "Iseult the Surveyor",
+          namingStyle: "scholarly civic names",
+          inspiration: "medieval romances and civic chronicles",
+          unitNames: []
+        })
+      })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("window", {
+      setTimeout: globalThis.setTimeout,
+      clearTimeout: globalThis.clearTimeout
+    });
+
+    await requestSovereignIdentity(game, "blue", "qwen3.5:9b-mlx");
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.prompt).not.toContain("Already chosen identities");
+    expect(body.prompt).not.toContain("Aurelian March");
+    expect(body.prompt).not.toContain("Aurelian");
+  });
+
+  it("does not expose undelivered inbound packets before contact", async () => {
+    const game = createGame(20260702);
+    const sent = issueSovereignOrder(game, "red", {
+      type: "SEND_MESSENGER",
+      priority: 1,
+      recipientTribeId: "blue",
+      messageType: "LETTER",
+      diplomacyIntent: "NONE",
+      subject: "Unknown courier",
+      body: "Blue should not know this exists until delivery.",
+      reason: "Test hidden inbound courier."
+    });
+    expect(sent.ok).toBe(true);
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        response: JSON.stringify({
+          freeformStrategy: "Plan only from known evidence.",
+          strategySummary: "No unseen courier knowledge.",
+          memoryNote: "",
+          orders: [],
+          unitNames: [],
+          bugReport: "",
+          bugSeverity: "low"
+        })
+      })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("window", {
+      setTimeout: globalThis.setTimeout,
+      clearTimeout: globalThis.clearTimeout
+    });
+
+    await requestSovereignDecision(game, "blue", "qwen3.5:9b-mlx");
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.prompt).toContain("Messenger packets involving you: none");
+    expect(body.prompt).not.toContain("red->blue");
+    expect(body.prompt).not.toContain("Unknown courier");
   });
 
   it("includes in-world integrity notices in decision prompts for model-authored reports", async () => {
@@ -1103,7 +1457,7 @@ describe("Ollama JSON recovery", () => {
     expect(body.prompt).toContain("public roll says zero living subjects");
   });
 
-  it("carries AI iteration context into compact retry prompts", async () => {
+  it("carries world continuity context into compact retry prompts", async () => {
     const fetchMock = vi
       .fn()
       .mockRejectedValueOnce(new TypeError("Failed to fetch"))
@@ -1133,10 +1487,10 @@ describe("Ollama JSON recovery", () => {
     });
 
     const compactBody = JSON.parse(fetchMock.mock.calls[1][1].body);
-    expect(compactBody.prompt).toContain("AI iteration memory:");
-    expect(compactBody.prompt).toContain("open unresolved own reports");
+    expect(compactBody.prompt).toContain("World continuity memory:");
+    expect(compactBody.prompt).toContain("open unresolved world reports");
     expect(compactBody.prompt).toContain("validation/high: attack target vanished");
-    expect(compactBody.prompt).toContain("resolved iteration lessons");
+    expect(compactBody.prompt).toContain("resolved world lessons");
     expect(compactBody.prompt).toContain("triaged validation: stale target now ignored");
   });
 
@@ -1393,7 +1747,58 @@ describe("Ollama JSON recovery", () => {
     expect(reply.recoveryNote).toContain("reply used compact prompt after parser");
   });
 
-  it("includes AI iteration context in normal reply prompts", async () => {
+  it("preserves explicit merger acceptance fields from model replies", async () => {
+    const game = createGame(20260703);
+    setAllControllers(game, "llm");
+    const sent = issueSovereignOrder(game, "blue", {
+      type: "SEND_MESSENGER",
+      priority: 1,
+      recipientTribeId: "green",
+      messageType: "MERGER_PROPOSAL",
+      diplomacyIntent: "MERGER_OFFER",
+      mergerLeaderTribeId: "blue",
+      mergerTerms: "Blue holds the single crown; Green keeps household names.",
+      subject: "One crown compact",
+      body: "Blue proposes one civilization under Blue as sole leader.",
+      reason: "Create merger proposal for reply normalization."
+    });
+    if (!sent.ok) throw new Error(sent.reason);
+    const packet = Object.values(game.packets).find((candidate) => candidate.originTribeId === "blue" && candidate.recipientTribeId === "green");
+    if (!packet) throw new Error("Expected a merger packet to reply to");
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        response: JSON.stringify({
+          strategyNote: "Accept because one crown may make both peoples safer.",
+          memoryNote: "Accepted Blue as sole merger leader; watch whether it protects Green households.",
+          subject: "Merger accepted",
+          body: "Green accepts one civilization under Blue as sole leader, with our households protected and our stores joined.",
+          diplomacyIntent: "MERGER_ACCEPT",
+          mergerLeaderTribeId: "blue",
+          mergerTerms: "Blue holds the single crown; Green keeps household names.",
+          bugReport: "",
+          bugSeverity: "low"
+        })
+      })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("window", {
+      setTimeout: globalThis.setTimeout,
+      clearTimeout: globalThis.clearTimeout
+    });
+
+    const reply = await requestSovereignReply(game, packet.id, "qwen3.5:9b-mlx");
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+
+    expect(body.prompt).toContain("MERGER_ACCEPT");
+    expect(reply).toMatchObject({
+      diplomacyIntent: "MERGER_ACCEPT",
+      mergerLeaderTribeId: "blue",
+      mergerTerms: "Blue holds the single crown; Green keeps household names."
+    });
+  });
+
+  it("includes world continuity context in normal reply prompts", async () => {
     const game = createGame(20260702);
     const sent = sendPlayerMessage(game, "red", "peace");
     if (!sent.ok) throw new Error(sent.reason);
@@ -1426,10 +1831,10 @@ describe("Ollama JSON recovery", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-    expect(body.prompt).toContain("AI iteration memory:");
-    expect(body.prompt).toContain("open unresolved own reports");
+    expect(body.prompt).toContain("World continuity memory:");
+    expect(body.prompt).toContain("open unresolved world reports");
     expect(body.prompt).toContain("Red reply lost its bug report context");
-    expect(body.prompt).toContain("resolved iteration lessons");
+    expect(body.prompt).toContain("resolved world lessons");
     expect(body.prompt).toContain("Red reply now reads resolved lessons");
     expect(reply.strategyNote).toBe("Use report memory before answering diplomacy.");
   });
@@ -1491,7 +1896,7 @@ describe("Ollama JSON recovery", () => {
     expect(body.prompt).toContain("trains peon");
   });
 
-  it("includes AI iteration context in compact reply prompts", async () => {
+  it("includes world continuity context in compact reply prompts", async () => {
     const game = createGame(20260702);
     const sent = sendPlayerMessage(game, "red", "peace");
     if (!sent.ok) throw new Error(sent.reason);
@@ -1530,10 +1935,10 @@ describe("Ollama JSON recovery", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const compactBody = JSON.parse(fetchMock.mock.calls[1][1].body);
-    expect(compactBody.prompt).toContain("AI iteration memory:");
-    expect(compactBody.prompt).toContain("open unresolved own reports");
+    expect(compactBody.prompt).toContain("World continuity memory:");
+    expect(compactBody.prompt).toContain("open unresolved world reports");
     expect(compactBody.prompt).toContain("compact reply lost unresolved report");
-    expect(compactBody.prompt).toContain("resolved iteration lessons");
+    expect(compactBody.prompt).toContain("resolved world lessons");
     expect(compactBody.prompt).toContain("compact reply should keep the fix");
     expect(reply.strategyNote).toBe("Compact reply kept report memory.");
   });
@@ -1871,12 +2276,14 @@ describe("Ollama JSON recovery", () => {
 
   it("preserves LLM-authored siege targets on attack orders", async () => {
     const game = createGame(20260705);
+    const townHall = getTownHall(game, "blue");
+    const wallTarget = { x: townHall.x + 4, y: townHall.y };
     game.buildings.red_test_wall = {
       id: "red_test_wall",
       type: "wall",
       tribeId: "red",
-      x: 24,
-      y: 20,
+      x: wallTarget.x,
+      y: wallTarget.y,
       hp: 50,
       maxHp: 240,
       armor: 6,
@@ -1897,6 +2304,19 @@ describe("Ollama JSON recovery", () => {
               priority: 1,
               recipientTribeId: "red",
               targetBuildingId: "red_test_wall",
+              siegeIntent: "feint at the road then breach the named wall",
+              assaultPlan: "Use the visible wall as the breach target; if Red opens a gate, redirect pressure there.",
+              assaultMode: "feint",
+              assemblyX: 19,
+              assemblyY: 21,
+              assaultDelayTicks: 12,
+              assaultWaveSize: 2,
+              assaultWaveIntervalTicks: 7,
+              feintDurationTicks: 9,
+              retreatCondition: "Withdraw if no breach is made before the next wealth review.",
+              retreatHealthPct: 45,
+              retreatX: 18,
+              retreatY: 20,
               messageType: "LETTER",
               diplomacyIntent: "NONE",
               subject: "",
@@ -1920,14 +2340,82 @@ describe("Ollama JSON recovery", () => {
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
 
     expect(body.prompt).toContain("Visible foreign buildings:");
-    expect(body.prompt).toContain("red_test_wall: red wall at 24,20 hp 50 armor 6");
-    expect(body.prompt).toContain("targetBuildingId options red_test_wall:red:wall:24,20");
+    expect(body.prompt).toContain(`red_test_wall: red wall at ${wallTarget.x},${wallTarget.y} hp 50 armor 6`);
+    expect(body.prompt).toContain(`targetBuildingId options red_test_wall:red:wall:${wallTarget.x},${wallTarget.y}`);
     expect(body.prompt).toContain("breach estimate");
+    expect(body.prompt).toContain("retreatHealthPct");
+    expect(body.prompt).toContain("assaultMode");
+    expect(body.format.properties.orders.items.properties.buildingType.enum).toContain("house");
+    expect(body.format.properties.orders.items.properties.assaultMode.enum).toContain("coordinated");
+    expect(body.format.properties.orders.items.properties.assaultMode.enum).toContain("feint");
+    expect(body.format.properties.orders.items.properties.assemblyX.type).toBe("integer");
+    expect(body.format.properties.orders.items.properties.assemblyY.type).toBe("integer");
+    expect(body.format.properties.orders.items.properties.assaultDelayTicks.type).toBe("integer");
+    expect(body.format.properties.orders.items.properties.assaultWaveSize.type).toBe("integer");
+    expect(body.format.properties.orders.items.properties.assaultWaveIntervalTicks.type).toBe("integer");
+    expect(body.format.properties.orders.items.properties.feintDurationTicks.type).toBe("integer");
+    expect(body.format.properties.orders.items.properties.retreatHealthPct.type).toBe("integer");
+    expect(body.format.properties.orders.items.properties.retreatX.type).toBe("integer");
+    expect(body.format.properties.orders.items.properties.retreatY.type).toBe("integer");
     expect(decision.orders[0]).toMatchObject({
       type: "ATTACK",
       recipientTribeId: "red",
-      targetBuildingId: "red_test_wall"
+      targetBuildingId: "red_test_wall",
+      siegeIntent: "feint at the road then breach the named wall",
+      assaultPlan: "Use the visible wall as the breach target; if Red opens a gate, redirect pressure there.",
+      assaultMode: "feint",
+      assemblyX: 19,
+      assemblyY: 21,
+      assaultDelayTicks: 12,
+      assaultWaveSize: 2,
+      assaultWaveIntervalTicks: 7,
+      feintDurationTicks: 9,
+      retreatCondition: "Withdraw if no breach is made before the next wealth review.",
+      retreatHealthPct: 45,
+      retreatX: 18,
+      retreatY: 20
     });
+  });
+
+  it("preserves LLM-authored siege tool recruitment choices", async () => {
+    const game = createGame(2026070607);
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        response: JSON.stringify({
+          freeformStrategy: "I want different siege tools available, then I will decide how to use them.",
+          strategySummary: "Recruit siege tools.",
+          memoryNote: "Rams and catapults are tools, not a doctrine.",
+          orders: [
+            {
+              type: "RECRUIT",
+              priority: 1,
+              unitType: "catapult",
+              reason: "I want ranged artillery available."
+            },
+            {
+              type: "RECRUIT",
+              priority: 2,
+              unitType: "battering_ram",
+              reason: "I want a close-range gate breaker available."
+            }
+          ],
+          unitNames: [],
+          bugReport: "",
+          bugSeverity: "low"
+        })
+      })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("window", {
+      setTimeout: globalThis.setTimeout,
+      clearTimeout: globalThis.clearTimeout
+    });
+
+    const decision = await requestSovereignDecision(game, "blue", "qwen3.5:9b-mlx");
+
+    expect(decision.orders[0]).toMatchObject({ type: "RECRUIT", unitType: "catapult" });
+    expect(decision.orders[1]).toMatchObject({ type: "RECRUIT", unitType: "battering_ram" });
   });
 
   it("exposes development and siege-engine capabilities without prescribing strategy", async () => {
@@ -1970,11 +2458,19 @@ describe("Ollama JSON recovery", () => {
     expect(body.prompt).toContain("available options");
     expect(body.prompt).toContain("masonry:Masonry");
     expect(body.prompt).toContain("taxation:Taxation");
+    expect(body.prompt).toContain("tradeoffs");
+    expect(body.prompt).toContain("synergies");
+    expect(body.prompt).toContain("social costs");
+    expect(body.prompt).toMatch(/scarce resources|administrative burden|legitimacy|military capacity/i);
     expect(body.prompt).toContain("RECRUIT siege_engine unavailable requires development Siege Engineering");
+    expect(body.prompt).toContain("RECRUIT battering_ram unavailable requires development Public Works, Siege Engineering");
+    expect(body.prompt).toContain("RECRUIT catapult unavailable requires development Ballistics, Siege Engineering");
     expect(body.prompt).toContain("DEVELOP with a developmentId from the currently available Development options");
     expect(body.prompt).not.toContain("choose DEVELOP masonry first");
     expect(body.prompt.length).toBeLessThan(35_000);
     expect(body.format.properties.orders.items.properties.unitType.enum).toContain("siege_engine");
+    expect(body.format.properties.orders.items.properties.unitType.enum).toContain("battering_ram");
+    expect(body.format.properties.orders.items.properties.unitType.enum).toContain("catapult");
     expect(body.format.properties.orders.items.properties.developmentId.enum).toBeUndefined();
     expect(JSON.stringify(body.format)).not.toContain("sw_175_generational_planning_board");
     expect(decision.orders[0]).toMatchObject({ type: "SET_POLICY" });
@@ -2024,7 +2520,9 @@ describe("Ollama JSON recovery", () => {
   it("preserves LLM-authored resource raid targets on attack orders", async () => {
     const game = createGame(20260707);
     setAllControllers(game, "human");
-    game.map[tileIndex(21, 20)] = { terrain: "hill", resource: createResourceDeposit("iron", 12) };
+    const townHall = getTownHall(game, "blue");
+    const ironTarget = { x: townHall.x + 3, y: townHall.y };
+    game.map[tileIndex(ironTarget.x, ironTarget.y)] = { terrain: "hill", resource: createResourceDeposit("iron", 12) };
     advanceGameTicks(game, 5);
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -2032,19 +2530,19 @@ describe("Ollama JSON recovery", () => {
         response: JSON.stringify({
           freeformStrategy: "Iron is the hinge of future turrets; I will deny this visible deposit before a rival can bargain around it.",
           strategySummary: "Raid a visible iron deposit.",
-          memoryNote: "Iron at 21,20 is a denial target.",
+          memoryNote: `Iron at ${ironTarget.x},${ironTarget.y} is a denial target.`,
           orders: [
             {
               type: "ATTACK",
               priority: 1,
-              targetX: 21,
-              targetY: 20,
+              targetX: ironTarget.x,
+              targetY: ironTarget.y,
               targetResourceType: "iron",
               messageType: "LETTER",
               diplomacyIntent: "NONE",
               subject: "",
               body: "",
-              reason: "Destroy the visible iron deposit at 21,20."
+              reason: `Destroy the visible iron deposit at ${ironTarget.x},${ironTarget.y}.`
             }
           ],
           unitNames: [],
@@ -2063,7 +2561,7 @@ describe("Ollama JSON recovery", () => {
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
 
     expect(body.prompt).toContain("Visible resource raid targets:");
-    expect(body.prompt).toContain("iron at 21,20 amount 12 hp 12 armor 3");
+    expect(body.prompt).toContain(`iron at ${ironTarget.x},${ironTarget.y} amount 12 hp 12 armor 3`);
     expect(body.prompt).toContain("Known resource posture:");
     expect(body.prompt).toContain("posture controlled_by_you");
     expect(body.prompt).toContain("resource-control survival modifier");
@@ -2071,8 +2569,8 @@ describe("Ollama JSON recovery", () => {
     expect(body.format.properties.orders.items.properties.targetResourceType.enum).toContain("iron");
     expect(decision.orders[0]).toMatchObject({
       type: "ATTACK",
-      targetX: 21,
-      targetY: 20,
+      targetX: ironTarget.x,
+      targetY: ironTarget.y,
       targetResourceType: "iron"
     });
   });
@@ -2129,6 +2627,7 @@ describe("Ollama JSON recovery", () => {
     expect(body.prompt).toContain("Own buildings:");
     expect(body.prompt).toContain("blue_test_wall: wall at 22,20 hp 160/240 armor 6");
     expect(body.prompt).toContain("REPAIR available");
+    expect(body.prompt).toContain("Hostile combat pressure at the work site interrupts repair ticks");
     expect(body.prompt).toContain("blue_test_wall:wall:hp160/240");
     expect(body.format.properties.orders.items.properties.type.enum).toContain("REPAIR");
     expect(decision.orders[0]).toMatchObject({
@@ -2174,12 +2673,12 @@ describe("Ollama JSON recovery", () => {
     expect(body.stream).toBe(false);
     expect(body.think).toBe("low");
     expect(body.messages[0].content).toContain("This is your world, your reign, and your living population");
-    expect(body.messages[0].content).toContain("ai_report/medium: chat adapter report context should survive");
+    expect(body.messages[0].content).toContain("world_report/medium: chat adapter report context should survive");
     expect(body.format.properties.freeformStrategy).toBeTruthy();
     expect(decision.strategySummary).toBe("Chat adapter works for gpt-oss.");
   });
 
-  it("sends non-blue AI iteration reports and fixed lessons through the gpt-oss chat prompt", async () => {
+  it("sends non-blue world continuity reports and fixed lessons through the gpt-oss chat prompt", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -2214,14 +2713,14 @@ describe("Ollama JSON recovery", () => {
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(body.prompt).toBeUndefined();
     expect(body.messages[0].content).toContain("You are the embodied sovereign of Green Vale");
-    expect(body.messages[0].content).toContain("AI iteration memory:");
-    expect(body.messages[0].content).toContain("open unresolved own reports");
+    expect(body.messages[0].content).toContain("World continuity memory:");
+    expect(body.messages[0].content).toContain("open unresolved world reports");
     expect(body.messages[0].content).toContain("Green report must reach only Green's prompt");
-    expect(body.messages[0].content).toContain("resolved iteration lessons");
+    expect(body.messages[0].content).toContain("resolved world lessons");
     expect(body.messages[0].content).toContain("Green report became a resolved lesson");
   });
 
-  it("sends reply AI iteration reports and fixed lessons through the gpt-oss chat prompt", async () => {
+  it("sends reply world continuity reports and fixed lessons through the gpt-oss chat prompt", async () => {
     const game = createGame(20260702);
     const sent = sendPlayerMessage(game, "green", "peace");
     if (!sent.ok) throw new Error(sent.reason);
@@ -2261,9 +2760,9 @@ describe("Ollama JSON recovery", () => {
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(body.prompt).toBeUndefined();
     expect(body.messages[0].content).toContain("You are the embodied sovereign of Green Vale");
-    expect(body.messages[0].content).toContain("AI iteration memory:");
+    expect(body.messages[0].content).toContain("World continuity memory:");
     expect(body.messages[0].content).toContain("Green reply report must reach chat prompt");
-    expect(body.messages[0].content).toContain("resolved iteration lessons");
+    expect(body.messages[0].content).toContain("resolved world lessons");
     expect(body.messages[0].content).toContain("Green reply learned the fix");
   });
 

@@ -18,7 +18,7 @@ http://localhost:5173/
 
 ## Current Slice
 
-- Seeded 128 x 128 world.
+- Seeded 224 x 224 world, roughly tripled in playable area versus the original 128 x 128 slice.
 - Five sovereign tribes with starting units, buildings, construction resources, colors, and
   fog-of-war visibility.
 - PixiJS-rendered map with DOM observer HUD.

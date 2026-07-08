@@ -1,4 +1,4 @@
-export const MAP_SIZE = 128;
+export const MAP_SIZE = 224;
 export const TICK_RATE = 10;
 export const TICKS_PER_GAME_YEAR = TICK_RATE * 20;
 export const SURVIVAL_REVIEW_INTERVAL_YEARS = 100;
@@ -15,11 +15,13 @@ export type UnitType =
   | "trader"
   | "militia"
   | "archer"
-  | "siege_engine";
+  | "siege_engine"
+  | "battering_ram"
+  | "catapult";
 export type GateState = "open" | "closed" | "locked";
 export type GateAccessPolicy = "all" | "owner_allies" | "owner_only";
-export type BuildingType = "townHall" | "farm" | "barracks" | "market" | "watchtower" | "wall" | "gate" | "turret";
-export type BuildableBuildingType = "farm" | "watchtower" | "wall" | "gate" | "turret";
+export type BuildingType = "townHall" | "farm" | "house" | "barracks" | "market" | "watchtower" | "wall" | "gate" | "turret";
+export type BuildableBuildingType = "farm" | "house" | "watchtower" | "wall" | "gate" | "turret";
 export type DevelopmentId = string;
 export type DevelopmentCategory =
   | "foundational"
@@ -50,6 +52,7 @@ export type DevelopmentEffectKind =
   | "building_armor"
   | "building_attack"
   | "building_range"
+  | "population_cap"
   | "resource_control"
   | "wealth";
 export type DevelopmentEffect = {
@@ -58,14 +61,17 @@ export type DevelopmentEffect = {
   target?: string;
   description: string;
 };
-export type MessageType = "LETTER" | "REPLY" | "TREATY_PROPOSAL" | "THREAT" | "DEMAND";
+export type MessageType = "LETTER" | "REPLY" | "TREATY_PROPOSAL" | "THREAT" | "DEMAND" | "MERGER_PROPOSAL";
 export type DiplomacyIntent =
   | "NONE"
   | "PEACE_OFFER"
   | "WARNING"
   | "ALLIANCE_OFFER"
   | "ALLIANCE_ACCEPT"
-  | "ALLIANCE_DECLINE";
+  | "ALLIANCE_DECLINE"
+  | "MERGER_OFFER"
+  | "MERGER_ACCEPT"
+  | "MERGER_DECLINE";
 export type PacketState =
   | "IN_TRANSIT_OUTBOUND"
   | "AWAITING_REPLY"
@@ -76,6 +82,14 @@ export type PacketState =
   | "REFUSED_AT_GATE"
   | "DETAINED";
 export type ItemType = "packet";
+export type GatePassageAction = "allow" | "delay" | "refuse" | "detain" | "ambush";
+export type GateDetainedPacketAction = "hold" | "release" | "ransom";
+export type GateAccessTreatyAction = "grant" | "revoke";
+export type GateSabotageAction = "force_open" | "jam_closed" | "damage" | "clear";
+export type GateTollMode = "none" | "optional" | "required";
+export type PerimeterPattern = "single" | "line" | "gate_line";
+export type PerimeterDirection = "east_west" | "north_south" | "northeast_southwest" | "northwest_southeast";
+export type SiegeAssaultMode = "direct" | "coordinated" | "feint" | "probe";
 
 export type Position = {
   x: number;
@@ -136,6 +150,37 @@ export type ResourceDenialRecord = {
   visibleTo: TribeId[] | "all";
 };
 
+export type ResourceDepletionRecord = {
+  id: string;
+  tick: number;
+  type: ResourceType;
+  x: number;
+  y: number;
+  amount: number;
+  maxHp: number;
+  depletedByTribeId?: TribeId;
+  controlledBy?: TribeId;
+  visibleTo: TribeId[] | "all";
+};
+
+export type CivilizationMergerRecord = {
+  id: string;
+  tick: number;
+  year: number;
+  leaderTribeId: TribeId;
+  mergedTribeId: TribeId;
+  proposerTribeId: TribeId;
+  accepterTribeId: TribeId;
+  proposalMessageId: string;
+  acceptanceMessageId: string;
+  terms: string;
+  transferredUnits: number;
+  transferredBuildings: number;
+  transferredResources: Resources;
+  retiredSovereignUnitId?: string;
+  visibleTo: TribeId[] | "all";
+};
+
 export type ResourceControlSummary = {
   tribeId: TribeId;
   controlledDeposits: number;
@@ -172,8 +217,14 @@ export type Development = {
   unlocks: string[];
   category?: DevelopmentCategory;
   phase?: string;
+  aliases: string[];
+  tradeoffs: string[];
+  synergies: string[];
+  socialCosts: string[];
   effects: DevelopmentEffect[];
 };
+type DevelopmentDefinition = Omit<Development, "aliases" | "tradeoffs" | "synergies" | "socialCosts"> &
+  Partial<Pick<Development, "aliases" | "tradeoffs" | "synergies" | "socialCosts">>;
 export type ControllerType = "human" | "scripted" | "llm";
 export type AiOrderType =
   | "SEND_MESSENGER"
@@ -185,6 +236,7 @@ export type AiOrderType =
   | "ATTACK"
   | "REPAIR"
   | "SET_GATE"
+  | "GATE_OPERATION"
   | "PROPOSE_ALLIANCE"
   | "SET_POLICY"
   | "REPORT_BUG"
@@ -194,18 +246,61 @@ export type AiStrategicOrder = {
   type: AiOrderType;
   priority: number;
   recipientTribeId?: TribeId;
-  unitType?: "peon" | "militia" | "archer" | "siege_engine" | "messenger" | "sentinel";
+  unitType?: "peon" | "militia" | "archer" | "siege_engine" | "battering_ram" | "catapult" | "messenger" | "sentinel";
   buildingType?: BuildableBuildingType;
   buildingId?: string;
   targetBuildingId?: string;
   targetResourceType?: ResourceType;
   gateState?: GateState;
   gateAccessPolicy?: GateAccessPolicy;
+  fortificationIntent?: string;
+  perimeterStrategy?: string;
+  perimeterShape?: string;
+  perimeterPattern?: PerimeterPattern;
+  perimeterDirection?: PerimeterDirection;
+  perimeterLength?: number;
+  perimeterGateIndex?: number;
+  gateOperationIntent?: string;
+  gateTerms?: string;
+  gatePublicNotice?: string;
+  gateEntryAction?: GatePassageAction;
+  gateTollMode?: GateTollMode;
+  gateUnpaidAction?: GatePassageAction;
+  gateTollGold?: number;
+  gateDetainedPacketAction?: GateDetainedPacketAction;
+  gateDetainedPacketId?: string;
+  gateRansomGold?: number;
+  gateReleaseSubject?: string;
+  gateReleaseMessage?: string;
+  gateAccessTreatyAction?: GateAccessTreatyAction;
+  gateAccessTreatyName?: string;
+  gateAccessTreatyTerms?: string;
+  gateAccessTreatyDurationTicks?: number;
+  gateSabotageAction?: GateSabotageAction;
+  gateSabotageDurationTicks?: number;
+  gateSabotageDamage?: number;
+  gateOperationDurationTicks?: number;
+  siegeIntent?: string;
+  assaultPlan?: string;
+  assaultMode?: SiegeAssaultMode;
+  assemblyX?: number;
+  assemblyY?: number;
+  assaultDelayTicks?: number;
+  assaultWaveSize?: number;
+  assaultWaveIntervalTicks?: number;
+  feintDurationTicks?: number;
+  retreatCondition?: string;
+  retreatHealthPct?: number;
+  retreatX?: number;
+  retreatY?: number;
+  repairPlan?: string;
   targetX?: number;
   targetY?: number;
   developmentId?: DevelopmentId;
   messageType?: MessageType;
   diplomacyIntent?: DiplomacyIntent;
+  mergerLeaderTribeId?: TribeId;
+  mergerTerms?: string;
   subject?: string;
   body?: string;
   suspectedArea?: string;
@@ -250,6 +345,184 @@ export type DiplomaticIntelItem = {
   summary: string;
   diplomacyIntent: DiplomacyIntent;
   truthStatus: "own_intent" | "unverified_foreign_claim";
+};
+
+export type FortificationPlanRecord = {
+  id: string;
+  tick: number;
+  tribeId: TribeId;
+  buildingId: string;
+  buildingType: BuildableBuildingType;
+  x: number;
+  y: number;
+  requestedX?: number;
+  requestedY?: number;
+  fortificationIntent?: string;
+  perimeterStrategy?: string;
+  perimeterShape?: string;
+  perimeterPattern?: PerimeterPattern;
+  perimeterDirection?: PerimeterDirection;
+  perimeterLength?: number;
+  perimeterGateIndex?: number;
+  perimeterGroupId?: string;
+  perimeterSegmentIndex?: number;
+  perimeterSegmentCount?: number;
+  placementPreview?: FortificationPlacementPreview;
+  reason: string;
+};
+
+export type FortificationPlacementPreview = {
+  resolvedTiles: Array<{ buildingId: string; buildingType: BuildableBuildingType; x: number; y: number }>;
+  requestedCenter?: Position;
+  resolvedCenter: Position;
+  resolvedMoved: boolean;
+  blockingTileCount: number;
+  blockingBuildingIds: string[];
+  gateCount: number;
+  gatePassageBuildingIds: string[];
+  ownerGatePassableCount: number;
+  foreignGatePassableCount: number;
+  nearestForeignTribeId?: TribeId;
+  routeChecks: FortificationRoutePreview[];
+  routeBlockedByPlacementCount: number;
+  maxAddedRouteSteps: number;
+  summary: string;
+};
+
+export type FortificationRoutePreview = {
+  label: string;
+  tribeId: TribeId;
+  fromX: number;
+  fromY: number;
+  toX: number;
+  toY: number;
+  baselineReachable: boolean;
+  currentReachable: boolean;
+  baselinePathLength?: number;
+  currentPathLength?: number;
+  blockedByPlacement: boolean;
+  addedSteps: number;
+};
+
+export type GateOperationRecord = {
+  id: string;
+  tick: number;
+  tribeId: TribeId;
+  buildingId: string;
+  gateState?: GateState;
+  gateAccessPolicy?: GateAccessPolicy;
+  targetTribeId?: TribeId;
+  gateOperationIntent?: string;
+  gateTerms?: string;
+  gatePublicNotice?: string;
+  entryAction?: GatePassageAction;
+  tollMode?: GateTollMode;
+  unpaidAction?: GatePassageAction;
+  tollGold?: number;
+  detainedPacketAction?: GateDetainedPacketAction;
+  detainedPacketId?: string;
+  ransomGold?: number;
+  releaseSubject?: string;
+  releaseMessage?: string;
+  accessTreatyAction?: GateAccessTreatyAction;
+  accessTreatyName?: string;
+  accessTreatyTerms?: string;
+  accessTreatyDurationTicks?: number;
+  sabotageAction?: GateSabotageAction;
+  sabotageDurationTicks?: number;
+  sabotageDamage?: number;
+  expiresAtTick?: number;
+  reason: string;
+};
+
+export type GateOperationState = GateOperationRecord;
+
+export type GateAccessTreatyRecord = {
+  id: string;
+  tick: number;
+  tribeId: TribeId;
+  buildingId: string;
+  targetTribeId: TribeId;
+  action: GateAccessTreatyAction;
+  treatyName?: string;
+  treatyTerms?: string;
+  publicNotice?: string;
+  expiresAtTick?: number;
+  expiredAnnounced?: boolean;
+  reason: string;
+};
+
+export type GateTreatyIncidentRecord = {
+  id: string;
+  tick: number;
+  treatyId: string;
+  treatyName?: string;
+  buildingId: string;
+  gateOwnerTribeId: TribeId;
+  affectedTribeId: TribeId;
+  packetId: string;
+  gateOperationId: string;
+  action: Extract<GatePassageAction, "refuse" | "detain" | "ambush">;
+  participantTribeIds: TribeId[];
+  witnessTribeIds: TribeId[];
+  tollGold?: number;
+  tollUnpaid?: boolean;
+  summary: string;
+};
+
+export type GateSabotageState = {
+  id: string;
+  tick: number;
+  tribeId: TribeId;
+  targetTribeId?: TribeId;
+  action: Extract<GateSabotageAction, "force_open" | "jam_closed">;
+  previousGateState?: GateState;
+  expiresAtTick?: number;
+  reason: string;
+};
+
+export type GateSabotageRecord = {
+  id: string;
+  tick: number;
+  tribeId: TribeId;
+  buildingId: string;
+  targetTribeId?: TribeId;
+  action: GateSabotageAction;
+  previousGateState?: GateState;
+  damage?: number;
+  expiresAtTick?: number;
+  reason: string;
+};
+
+export type SiegePlanRecord = {
+  id: string;
+  tick: number;
+  tribeId: TribeId;
+  kind: "attack" | "repair" | "resource_raid";
+  targetTribeId?: TribeId;
+  targetBuildingId?: string;
+  targetResourceType?: ResourceType;
+  targetX?: number;
+  targetY?: number;
+  siegeIntent?: string;
+  assaultPlan?: string;
+  assaultMode?: SiegeAssaultMode;
+  assemblyX?: number;
+  assemblyY?: number;
+  assaultDelayTicks?: number;
+  assaultStartedTick?: number;
+  assaultWaveSize?: number;
+  assaultWaveIntervalTicks?: number;
+  releasedWaveIndexes?: number[];
+  feintDurationTicks?: number;
+  feintWithdrawTick?: number;
+  retreatCondition?: string;
+  retreatHealthPct?: number;
+  retreatX?: number;
+  retreatY?: number;
+  repairPlan?: string;
+  assignedUnitIds: string[];
+  reason: string;
 };
 
 export type AiDecision = {
@@ -327,6 +600,11 @@ export type Tribe = {
   eliminated: boolean;
   eliminatedYear?: number;
   eliminatedTick?: number;
+  mergedIntoTribeId?: TribeId;
+  mergedLeaderTribeId?: TribeId;
+  mergedTick?: number;
+  mergedYear?: number;
+  mergedTerms?: string;
   populationCap: number;
   lastDecisionTick: number;
   nextMessageTick: number;
@@ -347,9 +625,25 @@ export type UnitTask =
       waitUntilTick?: number;
     }
   | { kind: "attack"; targetUnitId: string; path: Position[] }
-  | { kind: "attackBuilding"; targetBuildingId: string; path: Position[] }
+  | {
+      kind: "attackBuilding";
+      targetBuildingId: string;
+      path: Position[];
+      siegePlanId?: string;
+      siegeIntent?: string;
+      assaultMode?: SiegeAssaultMode;
+      assaultPhase?: "assembling" | "waiting_wave" | "attacking";
+      assemblyTarget?: Position;
+      assemblyHoldUntilTick?: number;
+      assaultWaveIndex?: number;
+      assaultWaveDelayTicks?: number;
+      assaultWaveReleaseTick?: number;
+      feintWithdrawTick?: number;
+      retreatHealthPct?: number;
+      retreatTarget?: Position;
+    }
   | { kind: "attackResource"; target: Position; resource: ResourceType; path: Position[] }
-  | { kind: "repair"; targetBuildingId: string; path: Position[] };
+  | { kind: "repair"; targetBuildingId: string; path: Position[]; siegePlanId?: string; siegeIntent?: string; lastInterruptedTick?: number };
 
 export type DamageableWorldObject = CombatStats & {
   id: string;
@@ -380,6 +674,8 @@ export type Building = CombatStats & {
   y: number;
   gateState?: GateState;
   gateAccessPolicy?: GateAccessPolicy;
+  gateOperation?: GateOperationState;
+  gateSabotage?: GateSabotageState;
 };
 
 export type Message = {
@@ -390,6 +686,8 @@ export type Message = {
   subject: string;
   body: string;
   diplomacyIntent: DiplomacyIntent;
+  mergerLeaderTribeId?: TribeId;
+  mergerTerms?: string;
   requiresReply: boolean;
   replyToMessageId?: string;
   createdTick: number;
@@ -407,6 +705,7 @@ export type Packet = CombatStats & {
   state: PacketState;
   destination: Position;
   returnTo: Position;
+  outboundGateBuildingIds?: string[];
   createdTick: number;
   expectedReturnTick: number;
   lastStateChangeTick: number;
@@ -414,8 +713,25 @@ export type Packet = CombatStats & {
   routeMemory: string[];
 };
 
+export type SiegeProjectile = CombatStats & {
+  id: string;
+  projectileType: "stone_shot";
+  tribeId: TribeId;
+  originUnitId: string;
+  targetBuildingId: string;
+  x: number;
+  y: number;
+  startX: number;
+  startY: number;
+  targetX: number;
+  targetY: number;
+  launchedTick: number;
+  impactTick: number;
+  siegePlanId?: string;
+};
+
 export type CombatStatCoverageIssue = {
-  kind: "unitType" | "buildingType" | "resourceType" | "unit" | "building" | "resource" | "packet" | "map";
+  kind: "unitType" | "buildingType" | "resourceType" | "unit" | "building" | "resource" | "packet" | "projectile" | "map";
   id: string;
   reason: string;
 };
@@ -423,7 +739,7 @@ export type CombatStatCoverageIssue = {
 export type CombatStatCoverageReport = {
   ok: boolean;
   checked: number;
-  byKind: Record<"unitType" | "buildingType" | "resourceType" | "unit" | "building" | "resource" | "packet", number>;
+  byKind: Record<"unitType" | "buildingType" | "resourceType" | "unit" | "building" | "resource" | "packet" | "projectile", number>;
   issues: CombatStatCoverageIssue[];
 };
 
@@ -462,6 +778,9 @@ export type VictoryScoreEntry = {
   survivalScore: number;
   eliminated: boolean;
   eliminatedYear?: number;
+  mergedIntoTribeId?: TribeId;
+  mergedLeaderTribeId?: TribeId;
+  mergedYear?: number;
   rank: number;
 };
 
@@ -475,6 +794,7 @@ export type VictoryPressureStatus = {
   yearsUntilReview: number;
   survivingTribes: number;
   eliminatedTribes: number;
+  mergedTribes: number;
   goldTarget: number;
   wealthTarget: number;
   deadlineTick: number;
@@ -535,6 +855,7 @@ export type GameState = {
   buildings: Record<string, Building>;
   messages: Record<string, Message>;
   packets: Record<string, Packet>;
+  projectiles: Record<string, SiegeProjectile>;
   events: GameEvent[];
   aiDecisions: AiDecision[];
   sovereignDecisionCursors: Record<TribeId, SovereignDecisionCursor>;
@@ -543,6 +864,14 @@ export type GameState = {
   aiInformationRequests: AiInformationRequest[];
   postGameLearnings: PostGameLearning[];
   resourceDenials: ResourceDenialRecord[];
+  resourceDepletions: ResourceDepletionRecord[];
+  civilizationMergers: CivilizationMergerRecord[];
+  fortificationPlans: FortificationPlanRecord[];
+  gateOperations: GateOperationRecord[];
+  gateAccessTreaties: GateAccessTreatyRecord[];
+  gateTreatyIncidents: GateTreatyIncidentRecord[];
+  gateSabotageHistory: GateSabotageRecord[];
+  siegePlans: SiegePlanRecord[];
   sovereignMemories: Record<TribeId, SovereignMemory>;
   diplomaticIntel: Record<TribeId, DiplomaticIntelItem[]>;
   alliances: Partial<Record<TribeId, TribeId>>;
@@ -553,8 +882,8 @@ export type GameState = {
 };
 
 export const tribeIds: TribeId[] = ["blue", "red", "green", "yellow", "purple"];
-export const unitTypes: readonly UnitType[] = ["sovereign", "peon", "sentinel", "messenger", "trader", "militia", "archer", "siege_engine"] as const;
-export const buildingTypes: readonly BuildingType[] = ["townHall", "farm", "barracks", "market", "watchtower", "wall", "gate", "turret"] as const;
+export const unitTypes: readonly UnitType[] = ["sovereign", "peon", "sentinel", "messenger", "trader", "militia", "archer", "siege_engine", "battering_ram", "catapult"] as const;
+export const buildingTypes: readonly BuildingType[] = ["townHall", "farm", "house", "barracks", "market", "watchtower", "wall", "gate", "turret"] as const;
 
 export const tribeConfig: Record<TribeId, Pick<Tribe, "id" | "name" | "color" | "colorText" | "controller">> = {
   blue: {
@@ -594,12 +923,30 @@ export const tribeConfig: Record<TribeId, Pick<Tribe, "id" | "name" | "color" | 
   }
 };
 
+function scaleMapCoordinate(value: number): number {
+  return clamp(Math.round((value / 128) * MAP_SIZE), 8, MAP_SIZE - 9);
+}
+
+function mapCenter(): Position {
+  const center = Math.floor(MAP_SIZE / 2);
+  return { x: center, y: center };
+}
+
+function scaledMapOffset(value: number): number {
+  return Math.round((value / 128) * MAP_SIZE);
+}
+
+function fromMapCenter(dx: number, dy: number): Position {
+  const center = mapCenter();
+  return { x: center.x + scaledMapOffset(dx), y: center.y + scaledMapOffset(dy) };
+}
+
 const starts: Record<TribeId, Position> = {
-  blue: { x: 18, y: 20 },
-  red: { x: 108, y: 22 },
-  green: { x: 21, y: 106 },
-  yellow: { x: 107, y: 103 },
-  purple: { x: 66, y: 66 }
+  blue: { x: scaleMapCoordinate(18), y: scaleMapCoordinate(20) },
+  red: { x: scaleMapCoordinate(108), y: scaleMapCoordinate(22) },
+  green: { x: scaleMapCoordinate(21), y: scaleMapCoordinate(106) },
+  yellow: { x: scaleMapCoordinate(107), y: scaleMapCoordinate(103) },
+  purple: mapCenter()
 };
 
 type UnitStatDefinition = Pick<Unit, "hp" | "maxHp" | "armor" | "speed" | "visionRadius" | "attack" | "range" | "attackCooldown">;
@@ -612,7 +959,9 @@ const unitStats: Record<UnitType, UnitStatDefinition> = {
   trader: { hp: 44, maxHp: 44, armor: 1, speed: 1.1, visionRadius: 5, attack: 0, range: 0, attackCooldown: 0 },
   militia: { hp: 55, maxHp: 55, armor: 2, speed: 1.05, visionRadius: 5, attack: 7, range: 1.2, attackCooldown: 0 },
   archer: { hp: 40, maxHp: 40, armor: 1, speed: 1.0, visionRadius: 6, attack: 5, range: 4.4, attackCooldown: 0 },
-  siege_engine: { hp: 110, maxHp: 110, armor: 4, speed: 0.62, visionRadius: 4, attack: 18, range: 3.2, attackCooldown: 0 }
+  siege_engine: { hp: 110, maxHp: 110, armor: 4, speed: 0.62, visionRadius: 4, attack: 18, range: 3.2, attackCooldown: 0 },
+  battering_ram: { hp: 150, maxHp: 150, armor: 7, speed: 0.48, visionRadius: 3, attack: 20, range: 1.4, attackCooldown: 0 },
+  catapult: { hp: 85, maxHp: 85, armor: 2, speed: 0.42, visionRadius: 5, attack: 24, range: 7.5, attackCooldown: 0 }
 };
 
 const packetStats: CombatStats = { hp: 8, maxHp: 8, armor: 0, attack: 0, range: 0, attackCooldown: 0 };
@@ -625,18 +974,47 @@ function repairHpPerTick(state: GameState, tribeId: TribeId): number {
 }
 
 export const resourceTypes: readonly ResourceType[] = ["gold", "food", "wood", "stone", "clay", "limestone", "iron", "coal"] as const;
-export const trainableUnitTypes: readonly ("peon" | "militia" | "archer" | "siege_engine")[] = ["peon", "militia", "archer", "siege_engine"] as const;
+export type ResourceScarcityTier = "abundant" | "common" | "limited" | "scarce";
+export type ResourceScarcityPolicy = {
+  tier: ResourceScarcityTier;
+  localStarterPatch: boolean;
+  centralConflictPatch: boolean;
+  wildWeight: number;
+};
+export const resourceScarcityPolicy: Readonly<Record<ResourceType, ResourceScarcityPolicy>> = Object.freeze({
+  food: { tier: "abundant", localStarterPatch: true, centralConflictPatch: false, wildWeight: 10 },
+  wood: { tier: "abundant", localStarterPatch: true, centralConflictPatch: false, wildWeight: 0 },
+  stone: { tier: "common", localStarterPatch: true, centralConflictPatch: true, wildWeight: 16 },
+  clay: { tier: "common", localStarterPatch: true, centralConflictPatch: true, wildWeight: 16 },
+  limestone: { tier: "limited", localStarterPatch: true, centralConflictPatch: true, wildWeight: 17 },
+  gold: { tier: "limited", localStarterPatch: true, centralConflictPatch: true, wildWeight: 14 },
+  iron: { tier: "scarce", localStarterPatch: false, centralConflictPatch: true, wildWeight: 15 },
+  coal: { tier: "scarce", localStarterPatch: false, centralConflictPatch: true, wildWeight: 12 }
+});
+export const scarceMapResourceTypes: readonly ResourceType[] = Object.freeze(resourceTypes.filter((type) => resourceScarcityPolicy[type].tier === "scarce"));
+export const trainableUnitTypes: readonly ("peon" | "militia" | "archer" | "siege_engine" | "battering_ram" | "catapult")[] = [
+  "peon",
+  "militia",
+  "archer",
+  "siege_engine",
+  "battering_ram",
+  "catapult"
+] as const;
 const unitTrainingCosts: Record<(typeof trainableUnitTypes)[number], ResourceCost> = {
   peon: { food: 50 },
   militia: { food: 60, gold: 20 },
   archer: { food: 40, gold: 30, wood: 25 },
-  siege_engine: { wood: 120, stone: 80, iron: 35, coal: 20, gold: 70 }
+  siege_engine: { wood: 120, stone: 80, iron: 35, coal: 20, gold: 70 },
+  battering_ram: { wood: 150, stone: 50, iron: 45, gold: 60 },
+  catapult: { wood: 170, stone: 120, iron: 55, coal: 35, gold: 90 }
 };
 const unitDevelopmentRequirements: Record<(typeof trainableUnitTypes)[number], DevelopmentId[]> = {
   peon: [],
   militia: [],
   archer: [],
-  siege_engine: ["siege_engineering"]
+  siege_engine: ["siege_engineering"],
+  battering_ram: ["public_works", "siege_engineering"],
+  catapult: ["ballistics", "siege_engineering"]
 };
 const coreDevelopmentIds: readonly DevelopmentId[] = [
   "masonry",
@@ -657,7 +1035,7 @@ const coreDevelopmentIds: readonly DevelopmentId[] = [
   "espionage"
 ] as const;
 
-const coreDevelopmentCatalog: Record<DevelopmentId, Development> = {
+const coreDevelopmentCatalog: Record<DevelopmentId, DevelopmentDefinition> = {
   masonry: {
     id: "masonry",
     name: "Masonry",
@@ -742,12 +1120,13 @@ const coreDevelopmentCatalog: Record<DevelopmentId, Development> = {
     description: "State-managed labor crews for roads, repairs, and civic construction.",
     cost: { wood: 40, stone: 30, gold: 40 },
     prerequisites: [],
-    unlocks: ["faster repairs", "cheaper civic maintenance"],
+    unlocks: ["faster repairs", "cheaper civic maintenance", "larger civic housing capacity"],
     category: "infrastructure",
     phase: "core",
     effects: [
       { kind: "repair_speed", amount: 2, description: "State crews repair structures faster." },
-      { kind: "repair_cost_multiplier", amount: -0.15, description: "Repair logistics waste fewer materials." }
+      { kind: "repair_cost_multiplier", amount: -0.15, description: "Repair logistics waste fewer materials." },
+      { kind: "population_cap", amount: 4, description: "Civic works make larger towns easier to sustain." }
     ]
   },
   siege_engineering: {
@@ -1089,9 +1468,9 @@ type RoadmapDevelopmentSeed = {
   index: number;
 };
 
-function buildGeneratedDevelopmentCatalog(): Record<DevelopmentId, Development> {
+function buildGeneratedDevelopmentCatalog(): Record<DevelopmentId, DevelopmentDefinition> {
   const seeds = parseRoadmapDevelopmentSeeds();
-  const generated: Record<DevelopmentId, Development> = {};
+  const generated: Record<DevelopmentId, DevelopmentDefinition> = {};
   for (const seed of seeds) {
     generated[seed.id] = {
       id: seed.id,
@@ -1243,6 +1622,7 @@ function inferDevelopmentEffects(seed: RoadmapDevelopmentSeed): DevelopmentEffec
   if (seed.category === "social") {
     add("yearly_happiness", 0.45, "Social institutions improve happiness and cohesion.");
     add("safety", 0.45, "Social resilience improves public safety.");
+    add("population_cap", 0.8, "Social institutions make larger stable populations easier to sustain.");
   }
   if (seed.category === "information") {
     add("yearly_happiness", 0.25, "Information institutions shape public trust.");
@@ -1269,11 +1649,13 @@ function inferDevelopmentEffects(seed: RoadmapDevelopmentSeed): DevelopmentEffec
     add("construction_cost_multiplier", -0.018, "Infrastructure reduces construction waste.");
     add("repair_cost_multiplier", -0.018, "Infrastructure improves maintenance logistics.");
     add("resource_control", 0.55, "Infrastructure improves access to useful deposits.");
+    add("population_cap", 0.7, "Infrastructure supports denser settlements.");
   }
   if (seed.category === "long_horizon") {
     add("yearly_happiness", 0.25, "Long-horizon institutions improve continuity.");
     add("safety", 0.8, "Long-horizon institutions reduce cross-century fragility.");
     add("wealth", 2.2, "Long-horizon institutions preserve productive capacity.");
+    add("population_cap", 0.6, "Long-horizon institutions improve intergenerational population capacity.");
   }
 
   if (/\b(slavery|forced labor|quota|tax farming|monopoly|censorship|secrecy|restriction|monopsony)\b/.test(text)) {
@@ -1315,20 +1697,153 @@ function inferDevelopmentEffects(seed: RoadmapDevelopmentSeed): DevelopmentEffec
   if (/\b(health|granary|harvest|food|agricultural)\b/.test(text)) {
     add("yearly_happiness", 0.25, "Food and health institutions reduce hardship.");
     add("safety", 0.45, "Food and health institutions improve survival safety.");
+    add("population_cap", 1.5, "Food and health institutions support population growth.");
+  }
+  if (/\b(settlement|housing|census|population|family|clinic|sanitation|water)\b/.test(text)) {
+    add("population_cap", 2, "Settlement institutions increase sustainable population capacity.");
   }
 
   return effects;
 }
 
+function normalizeDevelopment(definition: DevelopmentDefinition): Development {
+  return {
+    ...definition,
+    cost: { ...definition.cost },
+    prerequisites: [...definition.prerequisites],
+    unlocks: [...definition.unlocks],
+    aliases: uniqueNonEmpty([...(definition.aliases ?? []), ...inferDevelopmentAliases(definition)]).slice(0, 8),
+    tradeoffs: uniqueNonEmpty([...(definition.tradeoffs ?? []), ...inferDevelopmentTradeoffs(definition)]).slice(0, 5),
+    synergies: uniqueNonEmpty([...(definition.synergies ?? []), ...inferDevelopmentSynergies(definition)]).slice(0, 5),
+    socialCosts: uniqueNonEmpty([...(definition.socialCosts ?? []), ...inferDevelopmentSocialCosts(definition)]).slice(0, 5),
+    effects: definition.effects.map((effect) => ({ ...effect }))
+  };
+}
+
+function uniqueNonEmpty(values: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    const trimmed = value.trim().replace(/\s+/g, " ");
+    if (!trimmed || seen.has(trimmed.toLowerCase())) continue;
+    seen.add(trimmed.toLowerCase());
+    result.push(trimmed);
+  }
+  return result;
+}
+
+function inferDevelopmentAliases(development: DevelopmentDefinition): string[] {
+  const idWords = development.id
+    .replace(/^sw_\d+_/, "")
+    .split("_")
+    .filter((word) => word.length > 2);
+  const nameWords = development.name
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]+/g, " ")
+    .split(/\s+/)
+    .filter((word) => word.length > 2);
+  return uniqueNonEmpty([
+    development.name,
+    development.category ?? "",
+    development.phase ?? "",
+    ...idWords,
+    ...nameWords,
+    ...development.unlocks.flatMap((unlock) => unlock.toLowerCase().split(/[^a-z0-9]+/)).filter((word) => word.length > 3)
+  ]);
+}
+
+function inferDevelopmentTradeoffs(development: DevelopmentDefinition): string[] {
+  const text = developmentSearchText(development);
+  const tradeoffs: string[] = [];
+  const categoryTradeoffs: Record<DevelopmentCategory, string> = {
+    foundational: "early stability costs starter labor and materials",
+    governance: "coordination improves, but factions and succession constraints become harder to ignore",
+    economy: "wealth tools can concentrate power, create dependence, or invite raids",
+    labor: "labor policy changes output, legitimacy, happiness, and repair capacity together",
+    social: "social cohesion improves, but public programs consume food, gold, and attention",
+    information: "information control or openness changes trust, secrecy, and diplomatic credibility",
+    law: "formal rules improve safety but constrain arbitrary sovereign action",
+    security: "security networks improve warning at the cost of gold, secrecy, and suspicion",
+    military: "military capacity diverts scarce iron, coal, people, and gold from growth",
+    diplomacy: "external leverage depends on promises that others may keep, break, or fake",
+    infrastructure: "fixed assets improve logistics but tie scarce resources to visible targets",
+    long_horizon: "late institutions improve continuity but take resources before their payoff is certain"
+  };
+  if (development.category) tradeoffs.push(categoryTradeoffs[development.category]);
+  if (usesScarceResources(development.cost)) tradeoffs.push("requires scarce resources that may force scouting, trade, conflict, or rationing");
+  if (development.effects.some((effect) => effect.amount < 0)) tradeoffs.push("has negative side effects that the sovereign must consciously accept or mitigate");
+  if (/\b(slavery|forced labor|quota|coerc|censor|propaganda|secrecy|restriction|monopoly|monopsony|tax farming)\b/.test(text)) {
+    tradeoffs.push("can produce short-term control or output while damaging trust, safety, or legitimacy");
+  }
+  if (/\b(free press|assembly|rights|accountability|petition|public)\b/.test(text)) {
+    tradeoffs.push("can strengthen legitimacy while making criticism, leaks, and faction pressure harder to suppress");
+  }
+  if (/\b(wall|gate|turret|fortress|siege|army|militia|conscription|mercenary|draft)\b/.test(text)) {
+    tradeoffs.push("raises deterrence while signaling militarization to neighbors");
+  }
+  return tradeoffs;
+}
+
+function inferDevelopmentSynergies(development: DevelopmentDefinition): string[] {
+  const text = developmentSearchText(development);
+  const synergies: string[] = [];
+  const categorySynergies: Record<DevelopmentCategory, string> = {
+    foundational: "pairs with scouting, basic housing, resource control, and first laws",
+    governance: "pairs with taxation, courts, diplomacy, and succession planning",
+    economy: "pairs with markets, taxation, trade routes, debt, banking, and resource claims",
+    labor: "pairs with construction, repairs, public works, abolition, or coercive production paths",
+    social: "pairs with population growth, health, education, welfare, and civic legitimacy",
+    information: "pairs with diplomacy, espionage, propaganda, public ledgers, or free press paths",
+    law: "pairs with courts, policing, rights, taxation, anti-corruption, and treaty enforcement",
+    security: "pairs with sentinels, counter-intelligence, gates, watchtowers, and witness ledgers",
+    military: "pairs with walls, gates, turrets, siege units, doctrines, and scarce metal control",
+    diplomacy: "pairs with messengers, treaties, safe-passage writs, trade, threats, and mergers",
+    infrastructure: "pairs with construction resources, roads, bridges, repairs, housing, and supply lines",
+    long_horizon: "pairs with archives, constitutional locks, reconstruction, and cross-century survival"
+  };
+  if (development.category) synergies.push(categorySynergies[development.category]);
+  if (development.effects.some((effect) => effect.kind.startsWith("building_"))) synergies.push("strengthens buildings or fortifications already unlocked by related engineering");
+  if (development.effects.some((effect) => effect.kind.startsWith("unit_"))) synergies.push("improves units that are trained, named, and assigned by the sovereign");
+  if (development.effects.some((effect) => effect.kind === "population_cap")) synergies.push("supports larger populations when food, safety, happiness, and housing also keep up");
+  if (development.effects.some((effect) => effect.kind === "yearly_gold_per_population" || effect.kind === "wealth")) synergies.push("compounds with population growth and controlled resource deposits");
+  if (/\b(wall|fortress|gate|turret|watchtower)\b/.test(text)) synergies.push("combines with perimeter placement, gates, repair crews, and resource chokepoints");
+  if (/\b(press|media|ledger|archive|intelligence|espionage|counter)\b/.test(text)) synergies.push("improves what the sovereign can verify, conceal, publish, or dispute");
+  return synergies;
+}
+
+function inferDevelopmentSocialCosts(development: DevelopmentDefinition): string[] {
+  const text = developmentSearchText(development);
+  const costs: string[] = ["administrative burden and public opportunity cost"];
+  if (usesScarceResources(development.cost)) costs.push("scarce-resource pressure can slow housing, defense, or trade alternatives");
+  if (development.effects.some((effect) => effect.kind.includes("happiness") && effect.amount < 0)) costs.push("recurring happiness loss can threaten population growth and survival reviews");
+  if (development.effects.some((effect) => effect.kind === "safety" && effect.amount < 0)) costs.push("safety loss increases the chance the population feels endangered");
+  if (/\b(slavery|forced labor|quota|coerc|debt-bond)\b/.test(text)) costs.push("coercion creates severe legitimacy harm, resistance risk, and moral injury");
+  if (/\b(censor|propaganda|secrecy|controlled media)\b/.test(text)) costs.push("truth and trust costs can poison diplomacy and internal feedback");
+  if (/\b(conscription|draft|war|army|militia|mercenary|siege|shock)\b/.test(text)) costs.push("militarization risks casualties, fear, and family disruption");
+  if (/\b(tax|tariff|toll|levy|debt|bond|monopoly|monopsony|procurement)\b/.test(text)) costs.push("households and traders may bear heavier burdens or resentment");
+  if (/\b(migration restriction|assimilation|exile|minority|religious)\b/.test(text)) costs.push("identity pressure can create exclusion, unrest, or legitimacy disputes");
+  if (/\b(free press|assembly|petition|rights|accountability)\b/.test(text)) costs.push("public contestation can expose mistakes, faction conflict, or broken promises");
+  return costs;
+}
+
+function developmentSearchText(development: DevelopmentDefinition): string {
+  return `${development.id} ${development.name} ${development.description} ${development.category ?? ""} ${development.unlocks.join(" ")}`.toLowerCase();
+}
+
+function usesScarceResources(cost: ResourceCost): boolean {
+  return scarceMapResourceTypes.some((type) => (cost[type] ?? 0) > 0);
+}
+
 const generatedDevelopmentCatalog = buildGeneratedDevelopmentCatalog();
 export const developmentCatalog: Record<DevelopmentId, Development> = {
-  ...coreDevelopmentCatalog,
-  ...generatedDevelopmentCatalog
+  ...Object.fromEntries(Object.values(coreDevelopmentCatalog).map((development) => [development.id, normalizeDevelopment(development)])),
+  ...Object.fromEntries(Object.values(generatedDevelopmentCatalog).map((development) => [development.id, normalizeDevelopment(development)]))
 };
 export const developmentIds: readonly DevelopmentId[] = Object.freeze([...coreDevelopmentIds, ...Object.keys(generatedDevelopmentCatalog)]);
 
 const buildingCosts: Record<BuildableBuildingType, ResourceCost> = {
   farm: { wood: 60 },
+  house: { wood: 45, clay: 25, stone: 15, food: 20 },
   watchtower: { wood: 80, stone: 60, clay: 30, limestone: 20, gold: 50 },
   wall: { wood: 20, stone: 30, clay: 25, limestone: 15 },
   gate: { wood: 35, stone: 45, clay: 20, limestone: 25, iron: 20 },
@@ -1338,6 +1853,7 @@ const buildingCosts: Record<BuildableBuildingType, ResourceCost> = {
 const buildingRepairCosts: Record<BuildingType, ResourceCost> = {
   townHall: { wood: 30, stone: 25, clay: 10 },
   farm: { wood: 10 },
+  house: { wood: 10, clay: 6, stone: 4 },
   barracks: { wood: 18, stone: 12 },
   market: { wood: 15, stone: 10, gold: 5 },
   watchtower: { wood: 20, stone: 20, limestone: 8 },
@@ -1348,6 +1864,7 @@ const buildingRepairCosts: Record<BuildingType, ResourceCost> = {
 
 const buildingDevelopmentRequirements: Record<BuildableBuildingType, DevelopmentId[]> = {
   farm: [],
+  house: [],
   watchtower: [],
   wall: ["masonry"],
   gate: ["masonry", "ironworking"],
@@ -1360,6 +1877,7 @@ const buildingStats: Record<
 > = {
   townHall: { maxHp: 500, armor: 8, visionRadius: 7, blocksMovement: false, attack: 0, range: 0, cooldownTicks: 0 },
   farm: { maxHp: 180, armor: 1, visionRadius: 6, blocksMovement: false, attack: 0, range: 0, cooldownTicks: 0 },
+  house: { maxHp: 150, armor: 1, visionRadius: 5, blocksMovement: false, attack: 0, range: 0, cooldownTicks: 0 },
   barracks: { maxHp: 220, armor: 3, visionRadius: 7, blocksMovement: false, attack: 0, range: 0, cooldownTicks: 0 },
   market: { maxHp: 200, armor: 2, visionRadius: 7, blocksMovement: false, attack: 0, range: 0, cooldownTicks: 0 },
   watchtower: { maxHp: 260, armor: 3, visionRadius: 12, blocksMovement: false, attack: 0, range: 0, cooldownTicks: 0 },
@@ -1414,8 +1932,9 @@ function isDevelopmentEffectActive(state: GameState, tribeId: TribeId, developme
 function developmentEffectMatchesTarget(effect: DevelopmentEffect, target?: UnitType | BuildingType | string): boolean {
   if (!effect.target || effect.target === "all" || !target) return true;
   if (effect.target === target) return true;
-  if (effect.target === "military") return target === "militia" || target === "archer" || target === "siege_engine";
-  if (effect.target === "logistics") return target === "peon" || target === "messenger" || target === "trader" || target === "siege_engine";
+  if (effect.target === "military") return target === "militia" || target === "archer" || target === "siege_engine" || target === "battering_ram" || target === "catapult";
+  if (effect.target === "logistics") return target === "peon" || target === "messenger" || target === "trader" || target === "siege_engine" || target === "battering_ram" || target === "catapult";
+  if (effect.target === "siege_engine") return target === "siege_engine" || target === "battering_ram" || target === "catapult";
   if (effect.target === "worker") return target === "peon";
   if (effect.target === "fortification") return target === "wall" || target === "gate" || target === "turret" || target === "watchtower";
   return false;
@@ -1425,7 +1944,11 @@ function developmentCostMultiplier(state: GameState, tribeId: TribeId, kind: "co
   return clamp(1 + developmentEffectAmount(state, tribeId, kind), 0.45, 1.5);
 }
 
-export function createGame(seed = 1337): GameState {
+export function createRandomGameSeed(): number {
+  return ((Math.floor(Math.random() * 0xffffffff) ^ Date.now()) >>> 0) || 1;
+}
+
+export function createGame(seed = createRandomGameSeed()): GameState {
   const state: GameState = {
     seed,
     tick: 0,
@@ -1436,6 +1959,7 @@ export function createGame(seed = 1337): GameState {
     buildings: {},
     messages: {},
     packets: {},
+    projectiles: {},
     events: [],
     aiDecisions: [],
     sovereignDecisionCursors: {} as Record<TribeId, SovereignDecisionCursor>,
@@ -1444,6 +1968,14 @@ export function createGame(seed = 1337): GameState {
     aiInformationRequests: [],
     postGameLearnings: [],
     resourceDenials: [],
+    resourceDepletions: [],
+    civilizationMergers: [],
+    fortificationPlans: [],
+    gateOperations: [],
+    gateAccessTreaties: [],
+    gateTreatyIncidents: [],
+    gateSabotageHistory: [],
+    siegePlans: [],
     sovereignMemories: {} as Record<TribeId, SovereignMemory>,
     diplomaticIntel: {} as Record<TribeId, DiplomaticIntelItem[]>,
     alliances: {},
@@ -1488,7 +2020,7 @@ export function createGame(seed = 1337): GameState {
   }
   for (const id of tribeIds) state.tribes[id].lastYearWealth = computeWealth(state, id);
 
-  addEvent(state, "WORLD_STARTED", "World seeded", "Five sovereign tribes have entered the valley.", "all");
+  addEvent(state, "WORLD_STARTED", "World seeded", "Your people awaken to a wider valley beyond their maps.", "all");
   updateVisibility(state);
   return state;
 }
@@ -1502,9 +2034,13 @@ export function advanceGameTicks(state: GameState, ticks: number): void {
   const wholeTicks = Math.max(0, Math.floor(ticks));
   for (let i = 0; i < wholeTicks; i += 1) {
     state.tick += 1;
+    updateGateOperations(state);
+    updateGateAccessTreaties(state);
+    updateGateSabotage(state);
     updateScriptedAi(state);
     updateUnits(state);
     updateCombat(state);
+    updateProjectiles(state);
     updatePackets(state);
     updateYearlyWellbeing(state);
     updateVictoryPressure(state);
@@ -1531,12 +2067,24 @@ export function setAllControllers(state: GameState, controller: ControllerType):
   for (const tribeId of tribeIds) state.tribes[tribeId].controller = controller;
 }
 
+export function isTribeMerged(state: GameState, tribeId: TribeId): boolean {
+  return Boolean(state.tribes[tribeId]?.mergedIntoTribeId);
+}
+
+export function isTribeActive(state: GameState, tribeId: TribeId): boolean {
+  const tribe = state.tribes[tribeId];
+  return Boolean(tribe && !tribe.eliminated && !tribe.mergedIntoTribeId);
+}
+
 export function issueSovereignOrder(
   state: GameState,
   tribeId: TribeId,
   order: AiStrategicOrder
 ): { ok: true; summary: string } | { ok: false; reason: string } {
   if (state.tribes[tribeId].eliminated) return { ok: false, reason: `${state.tribes[tribeId].name} has been eliminated` };
+  if (state.tribes[tribeId].mergedIntoTribeId) {
+    return { ok: false, reason: `${state.tribes[tribeId].name} has merged into ${state.tribes[state.tribes[tribeId].mergedIntoTribeId].name}` };
+  }
   switch (order.type) {
     case "SEND_MESSENGER": {
       const recipient = order.recipientTribeId;
@@ -1549,7 +2097,11 @@ export function issueSovereignOrder(
         clampText(order.subject ?? `Message from ${state.tribes[tribeId].name}`, 80),
         clampText(order.body ?? `${state.tribes[tribeId].name} writes: ${order.reason}`, 800),
         true,
-        order.diplomacyIntent ?? inferDiplomacyIntent(order.messageType ?? "LETTER", order.body)
+        order.diplomacyIntent ?? inferDiplomacyIntent(order.messageType ?? "LETTER", order.body),
+        {
+          mergerLeaderTribeId: order.mergerLeaderTribeId,
+          mergerTerms: order.mergerTerms
+        }
       );
       if (!result.ok) return { ok: false, reason: result.reason };
       return { ok: true, summary: `sent messenger to ${state.tribes[recipient].name}` };
@@ -1584,18 +2136,29 @@ export function issueSovereignOrder(
       if (!result.ok) return { ok: false, reason: result.reason };
       return { ok: true, summary: `trained ${unitType}` };
     }
-    case "BUILD": {
-      const townHall = findTownHall(state, tribeId);
-      if (!townHall) return { ok: false, reason: "town hall destroyed" };
-      const result = buildStructure(state, tribeId, order.buildingType ?? "farm", orderBuildTarget(order, townHall));
-      if (!result.ok) return { ok: false, reason: result.reason };
-      return { ok: true, summary: `built ${order.buildingType ?? "farm"}` };
-    }
+	    case "BUILD": {
+	      const townHall = findTownHall(state, tribeId);
+	      if (!townHall) return { ok: false, reason: "town hall destroyed" };
+	      const buildingType = order.buildingType ?? "farm";
+	      const target = orderBuildTarget(order, townHall);
+	      const perimeter = buildPerimeterFromOrder(state, tribeId, order, buildingType, target);
+	      if (perimeter) {
+	        if (!perimeter.ok) return { ok: false, reason: perimeter.reason };
+	        return { ok: true, summary: perimeter.summary };
+	      }
+	      const result = buildStructure(state, tribeId, buildingType, target);
+	      if (!result.ok) return { ok: false, reason: result.reason };
+	      recordFortificationPlanFromOrder(state, tribeId, order, result.buildingId, buildingType);
+	      return { ok: true, summary: `built ${buildingType}` };
+	    }
     case "SET_GATE": {
       const result = setGateState(state, tribeId, order.gateState ?? "locked", order.buildingId, order.gateAccessPolicy);
       if (!result.ok) return { ok: false, reason: result.reason };
+      recordGateOperationFromOrder(state, tribeId, order, result.buildingId, { activate: hasGateOperationIntent(order) });
       return { ok: true, summary: result.summary };
     }
+    case "GATE_OPERATION":
+      return applyGateOperationOrder(state, tribeId, order);
     case "DEVELOP": {
       if (!order.developmentId) return { ok: false, reason: "missing development id" };
       const result = chooseDevelopment(state, tribeId, order.developmentId);
@@ -1607,7 +2170,7 @@ export function issueSovereignOrder(
       if (!sentinel) return { ok: false, reason: "no idle sentinel available" };
       const target = chooseScoutTarget(state, tribeId);
       sentinel.task = { kind: "scout", target, path: findPath(state, sentinel, target) };
-      addEvent(state, "AI_SCOUT_ORDER", `${state.tribes[tribeId].name} sends a sentinel`, `${sentinel.name} scouts toward ${target.x},${target.y}.`, "all");
+      addEvent(state, "AI_SCOUT_ORDER", `${state.tribes[tribeId].name} sends a sentinel`, `${sentinel.name} scouts toward ${target.x},${target.y}.`, [tribeId]);
       return { ok: true, summary: "sent sentinel scouting" };
     }
     case "DEFEND": {
@@ -1621,17 +2184,17 @@ export function issueSovereignOrder(
         moved += 1;
       }
       if (moved === 0) return { ok: false, reason: "no defenders available" };
-      addEvent(state, "AI_DEFEND_ORDER", `${state.tribes[tribeId].name} consolidates defense`, `${moved} defenders move toward the town hall.`, "all");
+      addEvent(state, "AI_DEFEND_ORDER", `${state.tribes[tribeId].name} consolidates defense`, `${moved} defenders move toward the town hall.`, [tribeId]);
       return { ok: true, summary: `moved ${moved} defenders` };
     }
     case "ATTACK":
-      return issueAttackOrder(state, tribeId, order.recipientTribeId, order.reason, order.targetBuildingId ?? order.buildingId, orderResourceTarget(order));
+      return issueAttackOrder(state, tribeId, order.recipientTribeId, order.reason, order.targetBuildingId ?? order.buildingId, orderResourceTarget(order), order);
     case "REPAIR":
-      return issueRepairOrder(state, tribeId, order.targetBuildingId ?? order.buildingId);
+      return issueRepairOrder(state, tribeId, order.targetBuildingId ?? order.buildingId, order);
     case "REPORT_BUG": {
       const title = clampText(order.subject ?? "AI self-report", 80);
       const body = clampText(order.body || order.reason, 260);
-      addEvent(state, "AI_SELF_REPORT", `${state.tribes[tribeId].name} reports an issue`, formatBugReportEventBody(title, body, order), "all");
+      addEvent(state, "AI_SELF_REPORT", `${state.tribes[tribeId].name} reports an issue`, formatBugReportEventBody(title, body, order), [tribeId]);
       return { ok: true, summary: title };
     }
     case "REQUEST_INFO": {
@@ -1647,12 +2210,12 @@ export function issueSovereignOrder(
       };
       state.aiInformationRequests.push(request);
       if (state.aiInformationRequests.length > 80) state.aiInformationRequests.shift();
-      addEvent(state, "AI_INFO_REQUEST", `${state.tribes[tribeId].name} requests information`, `${subject}: ${body}`, "all");
+      addEvent(state, "AI_INFO_REQUEST", `${state.tribes[tribeId].name} requests information`, `${subject}: ${body}`, [tribeId]);
       answerInformationRequest(state, request);
       return { ok: true, summary: subject };
     }
     case "SET_POLICY":
-      addEvent(state, "AI_POLICY", `${state.tribes[tribeId].name} sets policy`, clampText(order.reason, 180), "all");
+      addEvent(state, "AI_POLICY", `${state.tribes[tribeId].name} sets policy`, clampText(order.reason, 180), [tribeId]);
       return { ok: true, summary: "policy noted" };
   }
 }
@@ -1678,6 +2241,635 @@ function orderResourceTarget(order: AiStrategicOrder): { x: number; y: number; t
   };
 }
 
+function orderRetreatTarget(order: AiStrategicOrder | undefined, fallback: Position): Position | undefined {
+  const threshold = optionalOrderNumber(order?.retreatHealthPct, 100);
+  const timedWithdrawal = optionalOrderNumber(order?.feintDurationTicks, TICK_RATE * 120);
+  const x = Number(order?.retreatX);
+  const y = Number(order?.retreatY);
+  if (!threshold && !timedWithdrawal && (!Number.isFinite(x) || !Number.isFinite(y))) return undefined;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return fallback;
+  return {
+    x: clamp(Math.round(x), 1, MAP_SIZE - 2),
+    y: clamp(Math.round(y), 1, MAP_SIZE - 2)
+  };
+}
+
+function orderAssemblyTarget(order: AiStrategicOrder | undefined): Position | undefined {
+  const x = Number(order?.assemblyX);
+  const y = Number(order?.assemblyY);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return undefined;
+  return {
+    x: clamp(Math.round(x), 1, MAP_SIZE - 2),
+    y: clamp(Math.round(y), 1, MAP_SIZE - 2)
+  };
+}
+
+function optionalOrderText(value: string | undefined, maxLength: number): string | undefined {
+  const clean = clampText(value ?? "", maxLength);
+  return clean.length > 0 ? clean : undefined;
+}
+
+function optionalOrderNumber(value: number | undefined, max: number): number | undefined {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) return undefined;
+  return Math.min(max, Math.max(1, Math.round(number)));
+}
+
+function pushBoundedRecord<T>(records: T[], record: T, maxLength: number): void {
+  records.push(record);
+  if (records.length > maxLength) records.splice(0, records.length - maxLength);
+}
+
+function hasGateOperationIntent(order: AiStrategicOrder): boolean {
+  return Boolean(
+    optionalOrderText(order.gateOperationIntent, 120) ||
+      optionalOrderText(order.gateTerms, 300) ||
+      optionalOrderText(order.gatePublicNotice, 220) ||
+      order.gateEntryAction ||
+      order.gateTollMode ||
+      order.gateUnpaidAction ||
+      optionalOrderNumber(order.gateTollGold, 100000) !== undefined ||
+      order.gateDetainedPacketAction ||
+      optionalOrderText(order.gateDetainedPacketId, 80) ||
+      optionalOrderNumber(order.gateRansomGold, 100000) !== undefined ||
+      optionalOrderText(order.gateReleaseSubject, 80) ||
+      optionalOrderText(order.gateReleaseMessage, 600) ||
+      order.gateAccessTreatyAction ||
+      optionalOrderText(order.gateAccessTreatyName, 100) ||
+      optionalOrderText(order.gateAccessTreatyTerms, 360) ||
+      optionalOrderNumber(order.gateAccessTreatyDurationTicks, TICKS_PER_GAME_YEAR * 100) !== undefined ||
+      order.gateSabotageAction ||
+      optionalOrderNumber(order.gateSabotageDurationTicks, TICKS_PER_GAME_YEAR * 20) !== undefined ||
+      optionalOrderNumber(order.gateSabotageDamage, 5000) !== undefined ||
+      optionalOrderNumber(order.gateOperationDurationTicks, TICKS_PER_GAME_YEAR * 100) !== undefined ||
+      order.recipientTribeId
+  );
+}
+
+function isBuildableFortification(buildingType: BuildableBuildingType): boolean {
+  return buildingType === "wall" || buildingType === "gate" || buildingType === "turret" || buildingType === "watchtower";
+}
+
+function recordFortificationPlanFromOrder(
+  state: GameState,
+  tribeId: TribeId,
+  order: AiStrategicOrder,
+  buildingId: string,
+  buildingType: BuildableBuildingType,
+  segment?: {
+    groupId?: string;
+    index?: number;
+    count?: number;
+    pattern?: PerimeterPattern;
+    direction?: PerimeterDirection;
+    length?: number;
+    gateIndex?: number;
+  }
+): FortificationPlanRecord | undefined {
+  if (!isBuildableFortification(buildingType) && !order.fortificationIntent && !order.perimeterStrategy && !order.perimeterShape) return undefined;
+  const building = state.buildings[buildingId];
+  if (!building) return undefined;
+  const record: FortificationPlanRecord = {
+    id: nextId(state, "fortplan"),
+    tick: state.tick,
+    tribeId,
+    buildingId,
+    buildingType,
+    x: building.x,
+    y: building.y,
+    requestedX: Number.isFinite(order.targetX) ? Number(order.targetX) : undefined,
+    requestedY: Number.isFinite(order.targetY) ? Number(order.targetY) : undefined,
+    fortificationIntent: optionalOrderText(order.fortificationIntent, 120),
+    perimeterStrategy: optionalOrderText(order.perimeterStrategy, 320),
+    perimeterShape: optionalOrderText(order.perimeterShape, 140),
+    perimeterPattern: segment?.pattern ?? order.perimeterPattern,
+    perimeterDirection: segment?.direction ?? order.perimeterDirection,
+    perimeterLength: segment?.length ?? optionalOrderNumber(order.perimeterLength, 12),
+    perimeterGateIndex: segment?.gateIndex ?? optionalOrderNumber(order.perimeterGateIndex, 12),
+    perimeterGroupId: segment?.groupId,
+    perimeterSegmentIndex: segment?.index,
+    perimeterSegmentCount: segment?.count,
+    placementPreview: buildFortificationPlacementPreview(state, tribeId, [buildingId], {
+      requestedX: Number.isFinite(order.targetX) ? Number(order.targetX) : undefined,
+      requestedY: Number.isFinite(order.targetY) ? Number(order.targetY) : undefined
+    }),
+    reason: optionalOrderText(order.reason, 220) ?? "No stated fortification reason."
+  };
+  pushBoundedRecord(state.fortificationPlans, record, 120);
+  addEvent(
+    state,
+    "FORTIFICATION_PLAN_RECORDED",
+    `${state.tribes[tribeId].name} records a fortification plan`,
+    `${buildingType} ${buildingId} at ${building.x},${building.y}. ${record.fortificationIntent ? `Intent: ${record.fortificationIntent}. ` : ""}${
+      record.perimeterStrategy ? `Plan: ${record.perimeterStrategy}` : record.reason
+    }${record.placementPreview ? ` Preview: ${record.placementPreview.summary}` : ""}`,
+    [tribeId]
+  );
+  return record;
+}
+
+function refreshFortificationGroupPlacementPreview(state: GameState, tribeId: TribeId, groupId: string): void {
+  const groupPlans = state.fortificationPlans.filter((plan) => plan.perimeterGroupId === groupId && plan.tribeId === tribeId);
+  if (groupPlans.length === 0) return;
+  const preview = buildFortificationPlacementPreview(
+    state,
+    tribeId,
+    groupPlans.map((plan) => plan.buildingId),
+    {
+      requestedX: groupPlans.find((plan) => Number.isFinite(plan.requestedX))?.requestedX,
+      requestedY: groupPlans.find((plan) => Number.isFinite(plan.requestedY))?.requestedY
+    }
+  );
+  if (!preview) return;
+  for (const plan of groupPlans) plan.placementPreview = preview;
+}
+
+function buildFortificationPlacementPreview(
+  state: GameState,
+  tribeId: TribeId,
+  buildingIds: string[],
+  request: { requestedX?: number; requestedY?: number } = {}
+): FortificationPlacementPreview | undefined {
+  const buildings = buildingIds
+    .map((buildingId) => state.buildings[buildingId])
+    .filter((building): building is Building => Boolean(building && building.hp > 0));
+  if (buildings.length === 0) return undefined;
+  const resolvedTiles = buildings.map((building) => ({ buildingId: building.id, buildingType: building.type as BuildableBuildingType, x: building.x, y: building.y }));
+  const resolvedCenter = averageBuildingPosition(buildings);
+  const requestedCenter =
+    Number.isFinite(request.requestedX) && Number.isFinite(request.requestedY)
+      ? { x: Math.round(Number(request.requestedX)), y: Math.round(Number(request.requestedY)) }
+      : undefined;
+  const gates = buildings.filter((building) => building.type === "gate");
+  const blocking = buildings.filter((building) => isBuildingMovementBlocking(building));
+  const nearestForeign = nearestForeignTownHall(state, tribeId, resolvedCenter);
+  const ownerGatePassableCount = gates.filter((gate) => isTileWalkable(state, gate.x, gate.y, tribeId)).length;
+  const foreignGatePassableCount = nearestForeign ? gates.filter((gate) => isTileWalkable(state, gate.x, gate.y, nearestForeign.tribeId)).length : 0;
+  const routeChecks = buildFortificationRouteChecks(state, tribeId, buildingIds, resolvedCenter, nearestForeign);
+  const routeBlockedByPlacementCount = routeChecks.filter((check) => check.blockedByPlacement).length;
+  const maxAddedRouteSteps = routeChecks.reduce((max, check) => Math.max(max, check.addedSteps), 0);
+  const summaryParts = [
+    `resolved ${buildings.length} tile${buildings.length === 1 ? "" : "s"}`,
+    `${blocking.length} blocking`,
+    gates.length > 0 ? `${ownerGatePassableCount}/${gates.length} gates passable to owner` : "no gates",
+    nearestForeign ? `${foreignGatePassableCount}/${gates.length} gates passable to nearest foreign ${nearestForeign.tribeId}` : "no foreign town route",
+    routeBlockedByPlacementCount > 0 ? `${routeBlockedByPlacementCount} route checks blocked` : `max route detour ${maxAddedRouteSteps}`
+  ];
+  return {
+    resolvedTiles,
+    requestedCenter,
+    resolvedCenter,
+    resolvedMoved: requestedCenter ? Math.round(requestedCenter.x) !== Math.round(resolvedCenter.x) || Math.round(requestedCenter.y) !== Math.round(resolvedCenter.y) : false,
+    blockingTileCount: blocking.length,
+    blockingBuildingIds: blocking.map((building) => building.id),
+    gateCount: gates.length,
+    gatePassageBuildingIds: gates.filter((gate) => isTileWalkable(state, gate.x, gate.y, tribeId)).map((gate) => gate.id),
+    ownerGatePassableCount,
+    foreignGatePassableCount,
+    nearestForeignTribeId: nearestForeign?.tribeId,
+    routeChecks,
+    routeBlockedByPlacementCount,
+    maxAddedRouteSteps,
+    summary: summaryParts.join("; ")
+  };
+}
+
+function buildFortificationRouteChecks(
+  state: GameState,
+  tribeId: TribeId,
+  buildingIds: string[],
+  resolvedCenter: Position,
+  nearestForeign: { tribeId: TribeId; townHall: Building } | undefined
+): FortificationRoutePreview[] {
+  const ownerTownHall = findTownHall(state, tribeId);
+  if (!ownerTownHall) return [];
+  const checks: FortificationRoutePreview[] = [
+    compareRouteWithAndWithoutBuildings(state, buildingIds, "owner_to_fortification", tribeId, ownerTownHall, resolvedCenter)
+  ];
+  if (nearestForeign) {
+    checks.push(compareRouteWithAndWithoutBuildings(state, buildingIds, "owner_to_nearest_foreign_town", tribeId, ownerTownHall, nearestForeign.townHall));
+    checks.push(
+      compareRouteWithAndWithoutBuildings(state, buildingIds, "nearest_foreign_to_owner_town", nearestForeign.tribeId, nearestForeign.townHall, ownerTownHall)
+    );
+  }
+  return checks;
+}
+
+function compareRouteWithAndWithoutBuildings(
+  state: GameState,
+  buildingIds: string[],
+  label: string,
+  tribeId: TribeId,
+  from: Position,
+  to: Position
+): FortificationRoutePreview {
+  const current = routeProbe(state, tribeId, from, to);
+  const baseline = withBuildingsTemporarilyRemoved(state, buildingIds, () => routeProbe(state, tribeId, from, to));
+  const addedSteps =
+    current.reachable && baseline.reachable ? Math.max(0, (current.pathLength ?? 0) - (baseline.pathLength ?? 0)) : current.reachable || !baseline.reachable ? 0 : 9999;
+  return {
+    label,
+    tribeId,
+    fromX: Math.round(from.x),
+    fromY: Math.round(from.y),
+    toX: Math.round(to.x),
+    toY: Math.round(to.y),
+    baselineReachable: baseline.reachable,
+    currentReachable: current.reachable,
+    baselinePathLength: baseline.pathLength,
+    currentPathLength: current.pathLength,
+    blockedByPlacement: baseline.reachable && !current.reachable,
+    addedSteps
+  };
+}
+
+function routeProbe(state: GameState, tribeId: TribeId, from: Position, to: Position): { reachable: boolean; pathLength?: number } {
+  const start = findNearestWalkable(state, from, tribeId) ?? { x: Math.round(from.x), y: Math.round(from.y) };
+  const goal = findNearestWalkable(state, to, tribeId) ?? { x: Math.round(to.x), y: Math.round(to.y) };
+  const path = findPath(state, { x: start.x, y: start.y, tribeId }, goal);
+  const reachable = pathArrives(path, goal);
+  return { reachable, pathLength: reachable ? path.length : undefined };
+}
+
+function withBuildingsTemporarilyRemoved<T>(state: GameState, buildingIds: string[], run: () => T): T {
+  const removed: Array<[string, Building]> = [];
+  for (const buildingId of buildingIds) {
+    const building = state.buildings[buildingId];
+    if (!building) continue;
+    removed.push([buildingId, building]);
+    delete state.buildings[buildingId];
+  }
+  try {
+    return run();
+  } finally {
+    for (const [buildingId, building] of removed) state.buildings[buildingId] = building;
+  }
+}
+
+function averageBuildingPosition(buildings: Building[]): Position {
+  return {
+    x: Number((buildings.reduce((sum, building) => sum + building.x, 0) / buildings.length).toFixed(2)),
+    y: Number((buildings.reduce((sum, building) => sum + building.y, 0) / buildings.length).toFixed(2))
+  };
+}
+
+function nearestForeignTownHall(state: GameState, tribeId: TribeId, origin: Position): { tribeId: TribeId; townHall: Building } | undefined {
+  return tribeIds
+    .filter((other) => other !== tribeId && isTribeActive(state, other))
+    .flatMap((other) => {
+      const townHall = findTownHall(state, other);
+      return townHall ? [{ tribeId: other, townHall, distance: Math.hypot(townHall.x - origin.x, townHall.y - origin.y) }] : [];
+    })
+    .sort((left, right) => left.distance - right.distance || left.tribeId.localeCompare(right.tribeId))[0];
+}
+
+function findGateSaboteurUnit(state: GameState, tribeId: TribeId, gate: Building): Unit | undefined {
+  return Object.values(state.units)
+    .filter(
+      (unit) =>
+        unit.tribeId === tribeId &&
+        unit.hp > 0 &&
+        unit.type !== "messenger" &&
+        unit.type !== "trader" &&
+        distance(unit, gate) <= 2.5
+    )
+    .sort((left, right) => distance(left, gate) - distance(right, gate) || left.id.localeCompare(right.id))[0];
+}
+
+function orderHasForeignGateControlFields(order: AiStrategicOrder): boolean {
+  return Boolean(
+    order.gateState ||
+      order.gateAccessPolicy ||
+      order.gateEntryAction ||
+      order.gateTollMode ||
+      order.gateUnpaidAction ||
+      order.gateTollGold ||
+      order.gateDetainedPacketAction ||
+      order.gateDetainedPacketId ||
+      order.gateRansomGold ||
+      order.gateReleaseSubject ||
+      order.gateReleaseMessage ||
+      order.gateAccessTreatyAction ||
+      order.gateAccessTreatyName ||
+      order.gateAccessTreatyTerms ||
+      order.gateAccessTreatyDurationTicks
+  );
+}
+
+function resolveGateForOperation(
+  state: GameState,
+  tribeId: TribeId,
+  order: AiStrategicOrder
+): { ok: true; gate: Building; owned: boolean; saboteur?: Unit } | { ok: false; reason: string } {
+  const requestedId = order.gateSabotageAction ? order.targetBuildingId ?? order.buildingId : order.buildingId ?? order.targetBuildingId;
+  const gate = requestedId
+    ? state.buildings[requestedId]
+    : Object.values(state.buildings)
+        .filter((building) => building.tribeId === tribeId && building.type === "gate" && building.hp > 0)
+        .sort((left, right) => left.id.localeCompare(right.id))[0];
+  if (!gate || gate.hp <= 0) return { ok: false, reason: "no living gate found" };
+  if (gate.type !== "gate") return { ok: false, reason: "selected building is not a gate" };
+  if (gate.tribeId === tribeId) return { ok: true, gate, owned: true };
+  if (!order.gateSabotageAction) return { ok: false, reason: "cannot control another tribe's gate" };
+  if (orderHasForeignGateControlFields(order)) return { ok: false, reason: "foreign gate operation can only use explicit sabotage fields" };
+  const saboteur = findGateSaboteurUnit(state, tribeId, gate);
+  if (!saboteur) return { ok: false, reason: "foreign gate sabotage requires a nearby living non-messenger unit" };
+  return { ok: true, gate, owned: false, saboteur };
+}
+
+function recordGateOperationFromOrder(
+  state: GameState,
+  tribeId: TribeId,
+  order: AiStrategicOrder,
+  buildingId: string,
+  options: { activate: boolean }
+): GateOperationRecord | undefined {
+  const gate = state.buildings[buildingId];
+  if (!gate || gate.type !== "gate" || gate.hp <= 0) return undefined;
+  const durationTicks = optionalOrderNumber(order.gateOperationDurationTicks, TICKS_PER_GAME_YEAR * 100);
+  const record: GateOperationRecord = {
+    id: nextId(state, "gateop"),
+    tick: state.tick,
+    tribeId,
+    buildingId,
+    gateState: gate.gateState,
+    gateAccessPolicy: gate.gateAccessPolicy,
+    targetTribeId: order.recipientTribeId,
+    gateOperationIntent: optionalOrderText(order.gateOperationIntent, 120),
+    gateTerms: optionalOrderText(order.gateTerms, 320),
+    gatePublicNotice: optionalOrderText(order.gatePublicNotice, 220),
+    entryAction: order.gateEntryAction,
+    tollMode: order.gateTollMode,
+    unpaidAction: order.gateUnpaidAction,
+    tollGold: optionalOrderNumber(order.gateTollGold, 100000),
+    detainedPacketAction: order.gateDetainedPacketAction,
+    detainedPacketId: optionalOrderText(order.gateDetainedPacketId, 80),
+    ransomGold: optionalOrderNumber(order.gateRansomGold, 100000),
+    releaseSubject: optionalOrderText(order.gateReleaseSubject, 80),
+    releaseMessage: optionalOrderText(order.gateReleaseMessage, 600),
+    accessTreatyAction: order.gateAccessTreatyAction,
+    accessTreatyName: optionalOrderText(order.gateAccessTreatyName, 100),
+    accessTreatyTerms: optionalOrderText(order.gateAccessTreatyTerms, 360),
+    accessTreatyDurationTicks: optionalOrderNumber(order.gateAccessTreatyDurationTicks, TICKS_PER_GAME_YEAR * 100),
+    sabotageAction: order.gateSabotageAction,
+    sabotageDurationTicks: optionalOrderNumber(order.gateSabotageDurationTicks, TICKS_PER_GAME_YEAR * 20),
+    sabotageDamage: optionalOrderNumber(order.gateSabotageDamage, 5000),
+    expiresAtTick: durationTicks ? state.tick + durationTicks : undefined,
+    reason: optionalOrderText(order.reason, 220) ?? "No stated gate operation reason."
+  };
+  pushBoundedRecord(state.gateOperations, record, 120);
+  if (options.activate) gate.gateOperation = record;
+  return record;
+}
+
+function applyGateAccessTreatyOperation(
+  state: GameState,
+  tribeId: TribeId,
+  gate: Building,
+  record: GateOperationRecord
+): { ok: true; summary: string } | { ok: false; reason: string } {
+  if (!record.accessTreatyAction) return { ok: true, summary: "no access treaty action" };
+  if (gate.tribeId !== tribeId) return { ok: false, reason: "only a gate owner can grant or revoke access treaties" };
+  const targetTribeId = record.targetTribeId;
+  if (!targetTribeId || targetTribeId === tribeId) return { ok: false, reason: "access treaty requires a counterparty tribe" };
+  const treaty: GateAccessTreatyRecord = {
+    id: nextId(state, "gatetreaty"),
+    tick: state.tick,
+    tribeId,
+    buildingId: gate.id,
+    targetTribeId,
+    action: record.accessTreatyAction,
+    treatyName: record.accessTreatyName,
+    treatyTerms: record.accessTreatyTerms ?? record.gateTerms,
+    publicNotice: record.gatePublicNotice,
+    expiresAtTick: record.accessTreatyAction === "grant" && record.accessTreatyDurationTicks ? state.tick + record.accessTreatyDurationTicks : undefined,
+    reason: record.reason
+  };
+  pushBoundedRecord(state.gateAccessTreaties, treaty, 160);
+  addEvent(
+    state,
+    record.accessTreatyAction === "grant" ? "GATE_ACCESS_TREATY_GRANTED" : "GATE_ACCESS_TREATY_REVOKED",
+    `${state.tribes[tribeId].name} ${record.accessTreatyAction === "grant" ? "grants" : "revokes"} gate passage`,
+    `Gate ${gate.id} at ${gate.x},${gate.y} ${record.accessTreatyAction === "grant" ? "grants controlled passage to" : "revokes controlled passage from"} ${
+      state.tribes[targetTribeId].name
+    }${treaty.expiresAtTick ? ` until turn ${treaty.expiresAtTick}` : ""}. ${record.accessTreatyTerms ?? record.reason}`,
+    [tribeId, targetTribeId]
+  );
+  return { ok: true, summary: `${record.accessTreatyAction} access treaty ${treaty.id}` };
+}
+
+function applyGateSabotageOperation(
+  state: GameState,
+  tribeId: TribeId,
+  gate: Building,
+  record: GateOperationRecord,
+  saboteur?: Unit
+): { ok: true; summary: string } | { ok: false; reason: string } {
+  if (!record.sabotageAction) return { ok: true, summary: "no sabotage action" };
+  const base: Omit<GateSabotageRecord, "id"> = {
+    tick: state.tick,
+    tribeId,
+    buildingId: gate.id,
+    targetTribeId: record.targetTribeId,
+    action: record.sabotageAction,
+    previousGateState: gate.gateSabotage?.previousGateState ?? gate.gateState ?? "open",
+    reason: record.reason
+  };
+
+  if (record.sabotageAction === "clear") {
+    const previous = gate.gateSabotage;
+    if (previous) gate.gateState = previous.previousGateState ?? gate.gateState ?? "open";
+    delete gate.gateSabotage;
+    pushBoundedRecord(state.gateSabotageHistory, { id: nextId(state, "gatesabotage"), ...base }, 120);
+    addEvent(
+      state,
+      "GATE_SABOTAGE_CLEARED",
+      `${state.tribes[tribeId].name} clears gate sabotage`,
+      `Gate ${gate.id} at ${gate.x},${gate.y} is cleared of sabotage and is now ${gate.gateState ?? "open"}. ${record.reason}`,
+      [gate.tribeId, tribeId]
+    );
+    return { ok: true, summary: `cleared sabotage on ${gate.id}` };
+  }
+
+  if (record.sabotageAction === "damage") {
+    const damage = record.sabotageDamage ?? 45;
+    const beforeHp = gate.hp;
+    const destroyed = applyBuildingDamage(state, gate, damage, tribeId);
+    pushBoundedRecord(state.gateSabotageHistory, { id: nextId(state, "gatesabotage"), ...base, damage }, 120);
+    addEvent(
+      state,
+      "GATE_SABOTAGE_DAMAGED",
+      `${state.tribes[tribeId].name} sabotages a gate`,
+      `${saboteur ? `${saboteur.name} ` : ""}damages gate ${gate.id} at ${gate.x},${gate.y} for ${Math.max(0, beforeHp - Math.max(0, gate.hp))} hp.${
+        destroyed ? " The gate is destroyed." : ""
+      } ${record.reason}`,
+      [gate.tribeId, tribeId]
+    );
+    return { ok: true, summary: `damaged ${gate.id}` };
+  }
+
+  const expiresAtTick = record.sabotageDurationTicks ? state.tick + record.sabotageDurationTicks : undefined;
+  const sabotage: GateSabotageState = {
+    id: nextId(state, "gatesabotage"),
+    tick: state.tick,
+    tribeId,
+    targetTribeId: record.targetTribeId,
+    action: record.sabotageAction,
+    previousGateState: gate.gateSabotage?.previousGateState ?? gate.gateState ?? "open",
+    expiresAtTick,
+    reason: record.reason
+  };
+  gate.gateSabotage = sabotage;
+  gate.gateState = record.sabotageAction === "force_open" ? "open" : "locked";
+  pushBoundedRecord(
+    state.gateSabotageHistory,
+    {
+      id: sabotage.id,
+      ...base,
+      action: record.sabotageAction,
+      previousGateState: sabotage.previousGateState,
+      expiresAtTick
+    },
+    120
+  );
+  addEvent(
+    state,
+    record.sabotageAction === "force_open" ? "GATE_SABOTAGED_OPEN" : "GATE_SABOTAGED_CLOSED",
+    `${state.tribes[tribeId].name} sabotages a gate`,
+    `${saboteur ? `${saboteur.name} ` : ""}${record.sabotageAction === "force_open" ? "forces open" : "jams shut"} gate ${gate.id} at ${gate.x},${gate.y}${
+      expiresAtTick ? ` until turn ${expiresAtTick}` : ""
+    }. ${record.reason}`,
+    [gate.tribeId, tribeId]
+  );
+  return { ok: true, summary: `${record.sabotageAction} on ${gate.id}` };
+}
+
+function applyGateOperationOrder(
+  state: GameState,
+  tribeId: TribeId,
+  order: AiStrategicOrder
+): { ok: true; summary: string } | { ok: false; reason: string } {
+  const resolved = resolveGateForOperation(state, tribeId, order);
+  if (!resolved.ok) return resolved;
+  const gate = resolved.gate;
+  if (resolved.owned && order.gateState) gate.gateState = order.gateState;
+  if (resolved.owned && order.gateAccessPolicy) gate.gateAccessPolicy = order.gateAccessPolicy;
+  const record = recordGateOperationFromOrder(state, tribeId, order, gate.id, { activate: true });
+  if (!record) return { ok: false, reason: "could not record gate operation" };
+  addEvent(
+    state,
+    "GATE_OPERATION_SET",
+    `${state.tribes[tribeId].name} issues private gate orders`,
+    `Gate ${gate.id} at ${gate.x},${gate.y}: ${record.gateOperationIntent ?? "custom operation"}. ${
+      record.gateTerms ? `Private terms: ${record.gateTerms}. ` : ""
+    }${record.targetTribeId ? `Counterparty: ${state.tribes[record.targetTribeId].name}. ` : ""}${
+      record.entryAction ? `Entry action: ${record.entryAction}. ` : ""
+    }${record.tollGold ? `Toll: ${record.tollGold} gold${record.tollMode ? ` (${record.tollMode})` : ""}. ` : ""}${
+      record.unpaidAction ? `Unpaid action: ${record.unpaidAction}. ` : ""
+    }${record.detainedPacketAction ? `Detained packet action: ${record.detainedPacketAction}. ` : ""}${
+      record.detainedPacketId ? `Packet: ${record.detainedPacketId}. ` : ""
+    }${record.ransomGold ? `Ransom: ${record.ransomGold} gold. ` : ""}${
+      record.releaseSubject || record.releaseMessage ? "Release message prepared. " : ""
+    }${record.accessTreatyAction ? `Access treaty: ${record.accessTreatyAction}. ` : ""}${
+      record.accessTreatyName ? `Treaty name: ${record.accessTreatyName}. ` : ""
+    }${record.accessTreatyDurationTicks ? `Treaty duration: ${record.accessTreatyDurationTicks} ticks. ` : ""}${
+      record.sabotageAction ? `Sabotage: ${record.sabotageAction}. ` : ""
+    }${record.sabotageDamage ? `Sabotage damage: ${record.sabotageDamage}. ` : ""}${
+      record.sabotageDurationTicks ? `Sabotage duration: ${record.sabotageDurationTicks} ticks. ` : ""
+    }${record.expiresAtTick ? `Expires at turn ${record.expiresAtTick}. ` : ""}${record.reason}`,
+    [tribeId]
+  );
+  if (record.gatePublicNotice) {
+  addEvent(
+    state,
+    "GATE_PUBLIC_NOTICE",
+    `${state.tribes[tribeId].name} posts a gate notice`,
+    `Gate ${gate.id} at ${gate.x},${gate.y}: ${record.gatePublicNotice}`,
+      directVisionVisibleTo(state, gate, [tribeId, record.targetTribeId])
+    );
+  }
+  const accessTreatyResult = applyGateAccessTreatyOperation(state, tribeId, gate, record);
+  if (!accessTreatyResult.ok) return { ok: false, reason: accessTreatyResult.reason };
+  const sabotageResult = applyGateSabotageOperation(state, tribeId, gate, record, resolved.saboteur);
+  if (!sabotageResult.ok) return { ok: false, reason: sabotageResult.reason };
+  const detainedPacketResult = applyDetainedPacketGateOperation(state, tribeId, gate, record);
+  if (!detainedPacketResult.ok) return { ok: false, reason: detainedPacketResult.reason };
+  updateVisibility(state);
+  return {
+    ok: true,
+    summary: [
+      `recorded gate operation ${record.id} on ${gate.id}`,
+      accessTreatyResult.summary === "no access treaty action" ? "" : accessTreatyResult.summary,
+      sabotageResult.summary === "no sabotage action" ? "" : sabotageResult.summary,
+      detainedPacketResult.summary === "no detained packet action" ? "" : detainedPacketResult.summary
+    ]
+      .filter(Boolean)
+      .join("; ")
+  };
+}
+
+function recordSiegePlan(
+  state: GameState,
+  tribeId: TribeId,
+  input: {
+    kind: SiegePlanRecord["kind"];
+    targetTribeId?: TribeId;
+    targetBuildingId?: string;
+    targetResourceType?: ResourceType;
+    targetX?: number;
+    targetY?: number;
+    siegeIntent?: string;
+    assaultPlan?: string;
+    assaultMode?: SiegeAssaultMode;
+    assemblyX?: number;
+    assemblyY?: number;
+    assaultDelayTicks?: number;
+    assaultStartedTick?: number;
+    assaultWaveSize?: number;
+    assaultWaveIntervalTicks?: number;
+    feintDurationTicks?: number;
+    feintWithdrawTick?: number;
+    retreatCondition?: string;
+    retreatHealthPct?: number;
+    retreatX?: number;
+    retreatY?: number;
+    repairPlan?: string;
+    assignedUnitIds: string[];
+    reason: string;
+  }
+): SiegePlanRecord {
+  const record: SiegePlanRecord = {
+    id: nextId(state, "siegeplan"),
+    tick: state.tick,
+    tribeId,
+    kind: input.kind,
+    targetTribeId: input.targetTribeId,
+    targetBuildingId: optionalOrderText(input.targetBuildingId, 80),
+    targetResourceType: input.targetResourceType,
+    targetX: Number.isFinite(input.targetX) ? Math.round(Number(input.targetX)) : undefined,
+    targetY: Number.isFinite(input.targetY) ? Math.round(Number(input.targetY)) : undefined,
+    siegeIntent: optionalOrderText(input.siegeIntent, 140),
+    assaultPlan: optionalOrderText(input.assaultPlan, 360),
+    assaultMode: input.assaultMode,
+    assemblyX: Number.isFinite(input.assemblyX) ? Math.round(Number(input.assemblyX)) : undefined,
+    assemblyY: Number.isFinite(input.assemblyY) ? Math.round(Number(input.assemblyY)) : undefined,
+    assaultDelayTicks: optionalOrderNumber(input.assaultDelayTicks, TICK_RATE * 120),
+    assaultWaveSize: optionalOrderNumber(input.assaultWaveSize, 12),
+    assaultWaveIntervalTicks: optionalOrderNumber(input.assaultWaveIntervalTicks, TICK_RATE * 120),
+    releasedWaveIndexes: [],
+    feintDurationTicks: optionalOrderNumber(input.feintDurationTicks, TICK_RATE * 120),
+    retreatCondition: optionalOrderText(input.retreatCondition, 220),
+    retreatHealthPct: optionalOrderNumber(input.retreatHealthPct, 100),
+    retreatX: Number.isFinite(input.retreatX) ? Math.round(Number(input.retreatX)) : undefined,
+    retreatY: Number.isFinite(input.retreatY) ? Math.round(Number(input.retreatY)) : undefined,
+    repairPlan: optionalOrderText(input.repairPlan, 260),
+    assignedUnitIds: input.assignedUnitIds.slice(0, 12),
+    reason: optionalOrderText(input.reason, 220) ?? "No stated siege reason."
+  };
+  pushBoundedRecord(state.siegePlans, record, 120);
+  return record;
+}
+
 export function formAlliance(state: GameState, a: TribeId, b: TribeId): { ok: true; summary: string } | { ok: false; reason: string } {
   if (a === b) return { ok: false, reason: "a tribe cannot ally with itself" };
   if (state.alliances[a] === b && state.alliances[b] === a) return { ok: true, summary: `${state.tribes[a].name} is already allied with ${state.tribes[b].name}` };
@@ -1687,7 +2879,7 @@ export function formAlliance(state: GameState, a: TribeId, b: TribeId): { ok: tr
   state.alliances[b] = a;
   delete state.wars[a][b];
   delete state.wars[b][a];
-  addEvent(state, "ALLIANCE_FORMED", `${state.tribes[a].name} allies with ${state.tribes[b].name}`, "Each tribe can hold only this one alliance unless it is later broken.", "all");
+  addEvent(state, "ALLIANCE_FORMED", `${state.tribes[a].name} allies with ${state.tribes[b].name}`, "Each tribe can hold only this one alliance unless it is later broken.", [a, b]);
   return { ok: true, summary: `${state.tribes[a].name} allied with ${state.tribes[b].name}` };
 }
 
@@ -1697,15 +2889,16 @@ function issueAttackOrder(
   targetTribeId: TribeId | undefined,
   reason: string | undefined,
   targetBuildingId?: string,
-  targetResource?: { x: number; y: number; type?: ResourceType }
+  targetResource?: { x: number; y: number; type?: ResourceType },
+  order?: AiStrategicOrder
 ): { ok: true; summary: string } | { ok: false; reason: string } {
   const targetBuilding = targetBuildingId ? state.buildings[targetBuildingId] : undefined;
   if (!targetBuilding && targetResource) {
-    return issueResourceAttackOrder(state, tribeId, targetTribeId, reason, targetResource);
+    return issueResourceAttackOrder(state, tribeId, targetTribeId, reason, targetResource, order);
   }
   const resolvedTargetTribeId = targetTribeId ?? targetBuilding?.tribeId;
   if (!resolvedTargetTribeId || resolvedTargetTribeId === tribeId || !tribeIds.includes(resolvedTargetTribeId)) return { ok: false, reason: "invalid attack target" };
-  if (state.tribes[resolvedTargetTribeId].eliminated) return { ok: false, reason: `${state.tribes[resolvedTargetTribeId].name} has been eliminated` };
+  if (!isTribeActive(state, resolvedTargetTribeId)) return { ok: false, reason: `${state.tribes[resolvedTargetTribeId].name} is not an active separate civilization` };
   if (targetBuildingId) {
     if (!targetBuilding || targetBuilding.hp <= 0) return { ok: false, reason: "target building is missing or destroyed" };
     if (targetBuilding.tribeId !== resolvedTargetTribeId) return { ok: false, reason: "target building belongs to a different tribe" };
@@ -1718,16 +2911,83 @@ function issueAttackOrder(
   if (attackers.length === 0) return { ok: false, reason: "no military units available" };
   declareWar(state, tribeId, resolvedTargetTribeId, reason ?? "AI attack order");
   if (targetBuilding) {
-    for (const unit of attackers) {
+    const retreatTarget = orderRetreatTarget(order, findTownHall(state, tribeId) ?? starts[tribeId]);
+    const assemblyTarget = orderAssemblyTarget(order);
+    const siegePlan = recordSiegePlan(state, tribeId, {
+      kind: "attack",
+      targetTribeId: resolvedTargetTribeId,
+      targetBuildingId: targetBuilding.id,
+      siegeIntent: order?.siegeIntent,
+      assaultPlan: order?.assaultPlan,
+      assaultMode: order?.assaultMode,
+      assemblyX: assemblyTarget?.x,
+      assemblyY: assemblyTarget?.y,
+      assaultDelayTicks: order?.assaultDelayTicks,
+      assaultWaveSize: order?.assaultWaveSize,
+      assaultWaveIntervalTicks: order?.assaultWaveIntervalTicks,
+      feintDurationTicks: order?.feintDurationTicks,
+      retreatCondition: order?.retreatCondition,
+      retreatHealthPct: order?.retreatHealthPct,
+      retreatX: retreatTarget?.x,
+      retreatY: retreatTarget?.y,
+      assignedUnitIds: attackers.map((unit) => unit.id),
+      reason: reason ?? "AI siege order"
+    });
+    const assaultPhase = siegePlan.assaultMode === "coordinated" && assemblyTarget ? "assembling" : "attacking";
+    const assemblyHoldUntilTick =
+      assaultPhase === "assembling" && siegePlan.assaultDelayTicks !== undefined ? state.tick + siegePlan.assaultDelayTicks : undefined;
+    const feintWithdrawTick =
+      (siegePlan.assaultMode === "feint" || siegePlan.assaultMode === "probe") && siegePlan.feintDurationTicks !== undefined
+        ? state.tick + siegePlan.feintDurationTicks
+        : undefined;
+    siegePlan.feintWithdrawTick = feintWithdrawTick;
+    const waveSize = siegePlan.assaultWaveSize ? clamp(siegePlan.assaultWaveSize, 1, attackers.length) : attackers.length;
+    const waveIntervalTicks = siegePlan.assaultWaveIntervalTicks ?? 0;
+    for (const [index, unit] of attackers.entries()) {
+      const assaultWaveIndex = Math.floor(index / waveSize);
+      const assaultWaveDelayTicks = assaultWaveIndex > 0 && waveIntervalTicks > 0 ? assaultWaveIndex * waveIntervalTicks : undefined;
       const attackPosition = findBuildingAttackPosition(state, unit, targetBuilding);
-      unit.task = { kind: "attackBuilding", targetBuildingId: targetBuilding.id, path: findPath(state, unit, attackPosition) };
+      const initialAssaultPhase =
+        assaultPhase === "assembling" ? "assembling" : assaultWaveDelayTicks !== undefined ? "waiting_wave" : "attacking";
+      const immediateTarget =
+        (initialAssaultPhase === "assembling" || initialAssaultPhase === "waiting_wave") && assemblyTarget ? assemblyTarget : attackPosition;
+      unit.task = {
+        kind: "attackBuilding",
+        targetBuildingId: targetBuilding.id,
+        path: findPath(state, unit, immediateTarget),
+        siegePlanId: siegePlan.id,
+        siegeIntent: siegePlan.siegeIntent,
+        assaultMode: siegePlan.assaultMode,
+        assaultPhase: initialAssaultPhase,
+        assemblyTarget,
+        assemblyHoldUntilTick,
+        assaultWaveIndex,
+        assaultWaveDelayTicks,
+        assaultWaveReleaseTick: assaultWaveDelayTicks !== undefined && initialAssaultPhase === "waiting_wave" ? state.tick + assaultWaveDelayTicks : undefined,
+        feintWithdrawTick,
+        retreatHealthPct: siegePlan.retreatHealthPct,
+        retreatTarget:
+          siegePlan.retreatX !== undefined && siegePlan.retreatY !== undefined
+            ? { x: siegePlan.retreatX, y: siegePlan.retreatY }
+            : undefined
+      };
     }
     addEvent(
       state,
       "WAR_SIEGE_ORDER",
       `${state.tribes[tribeId].name} attacks ${state.tribes[resolvedTargetTribeId].name}'s ${labelBuildingType(targetBuilding.type)}`,
-      `${attackers.length} military units move to destroy ${targetBuilding.type} ${targetBuilding.id} at ${targetBuilding.x},${targetBuilding.y}. ${clampText(reason ?? "No stated reason.", 180)}`,
-      "all"
+      `${attackers.length} military units move to destroy ${targetBuilding.type} ${targetBuilding.id} at ${targetBuilding.x},${targetBuilding.y}. ${
+        siegePlan.siegeIntent ? `Intent: ${siegePlan.siegeIntent}. ` : ""
+      }${siegePlan.assaultPlan ? `Plan: ${siegePlan.assaultPlan}. ` : ""}${
+        siegePlan.assaultMode ? `Mode: ${siegePlan.assaultMode}. ` : ""
+      }${assemblyTarget ? `Rally at ${assemblyTarget.x},${assemblyTarget.y}. ` : ""}${
+        siegePlan.assaultDelayTicks ? `Assembly window ${siegePlan.assaultDelayTicks} ticks. ` : ""
+      }${siegePlan.assaultWaveSize ? `Wave size ${siegePlan.assaultWaveSize}. ` : ""}${
+        siegePlan.assaultWaveIntervalTicks ? `Wave interval ${siegePlan.assaultWaveIntervalTicks} ticks. ` : ""
+      }${siegePlan.feintDurationTicks ? `Withdraw after ${siegePlan.feintDurationTicks} ticks. ` : ""}${
+        siegePlan.retreatHealthPct ? `Retreat below ${siegePlan.retreatHealthPct}% health. ` : ""
+      }${clampText(reason ?? "No stated reason.", 180)}`,
+      directVisionVisibleTo(state, targetBuilding, [tribeId, resolvedTargetTribeId])
     );
     return {
       ok: true,
@@ -1750,7 +3010,7 @@ function issueAttackOrder(
     "WAR_ATTACK_ORDER",
     `${state.tribes[tribeId].name} attacks ${state.tribes[resolvedTargetTribeId].name}`,
     `${attackers.length} military units move under war orders. ${clampText(reason ?? "No stated reason.", 180)}`,
-    "all"
+    [tribeId]
   );
   return { ok: true, summary: `declared war on ${state.tribes[resolvedTargetTribeId].name} and sent ${attackers.length} attackers` };
 }
@@ -1760,7 +3020,8 @@ function issueResourceAttackOrder(
   tribeId: TribeId,
   targetTribeId: TribeId | undefined,
   reason: string | undefined,
-  targetResource: { x: number; y: number; type?: ResourceType }
+  targetResource: { x: number; y: number; type?: ResourceType },
+  order?: AiStrategicOrder
 ): { ok: true; summary: string } | { ok: false; reason: string } {
   if (state.visibility[tribeId]?.[tileIndex(targetResource.x, targetResource.y)] !== 2) {
     return { ok: false, reason: "target resource tile is not currently visible" };
@@ -1773,7 +3034,7 @@ function issueResourceAttackOrder(
   }
   if (targetTribeId) {
     if (targetTribeId === tribeId || !tribeIds.includes(targetTribeId)) return { ok: false, reason: "invalid attack target" };
-    if (state.tribes[targetTribeId].eliminated) return { ok: false, reason: `${state.tribes[targetTribeId].name} has been eliminated` };
+    if (!isTribeActive(state, targetTribeId)) return { ok: false, reason: `${state.tribes[targetTribeId].name} is not an active separate civilization` };
   }
   const attackers = Object.values(state.units)
     .filter((unit) => unit.tribeId === tribeId && unit.hp > 0 && isFieldCombatUnit(unit))
@@ -1781,6 +3042,18 @@ function issueResourceAttackOrder(
   if (attackers.length === 0) return { ok: false, reason: "no military units available" };
   if (targetTribeId) declareWar(state, tribeId, targetTribeId, reason ?? "AI resource raid order");
   const target = { x: targetResource.x, y: targetResource.y };
+  recordSiegePlan(state, tribeId, {
+    kind: "resource_raid",
+    targetTribeId,
+    targetResourceType: resource.type,
+    targetX: target.x,
+    targetY: target.y,
+    siegeIntent: order?.siegeIntent,
+    assaultPlan: order?.assaultPlan,
+    retreatCondition: order?.retreatCondition,
+    assignedUnitIds: attackers.map((unit) => unit.id),
+    reason: reason ?? "AI resource raid order"
+  });
   for (const unit of attackers) {
     const attackPosition = findResourceAttackPosition(state, unit, target);
     unit.task = { kind: "attackResource", resource: resource.type, target, path: findPath(state, unit, attackPosition) };
@@ -1849,7 +3122,8 @@ function findTargetInteractionPosition(state: GameState, unit: Unit, target: Pos
 function issueRepairOrder(
   state: GameState,
   tribeId: TribeId,
-  targetBuildingId?: string
+  targetBuildingId?: string,
+  order?: AiStrategicOrder
 ): { ok: true; summary: string } | { ok: false; reason: string } {
   if (!targetBuildingId) return { ok: false, reason: "missing repair target building id" };
   const building = state.buildings[targetBuildingId];
@@ -1864,18 +3138,36 @@ function issueRepairOrder(
   const cost = getTribeBuildingRepairCost(state, tribeId, building);
   if (!canAfford(state.tribes[tribeId].resources, cost)) return { ok: false, reason: `Not enough resources to repair ${building.type}. Need ${formatResourceCost(cost)}.` };
   spendResources(state.tribes[tribeId].resources, cost);
+  const underSiege = isBuildingUnderSiege(state, building);
+  const siegePlan =
+    underSiege || order?.siegeIntent || order?.repairPlan
+      ? recordSiegePlan(state, tribeId, {
+          kind: "repair",
+          targetBuildingId: building.id,
+          siegeIntent: order?.siegeIntent ?? (underSiege ? "repair under fire" : undefined),
+          repairPlan: order?.repairPlan,
+          assignedUnitIds: peons.map((peon) => peon.id),
+          reason: order?.reason ?? "AI repair order"
+        })
+      : undefined;
   for (const peon of peons) {
     const repairPosition = findBuildingRepairPosition(state, peon, building);
-    peon.task = { kind: "repair", targetBuildingId: building.id, path: findPath(state, peon, repairPosition) };
+    peon.task = {
+      kind: "repair",
+      targetBuildingId: building.id,
+      path: findPath(state, peon, repairPosition),
+      siegePlanId: siegePlan?.id,
+      siegeIntent: siegePlan?.siegeIntent
+    };
   }
   addEvent(
     state,
     "AI_REPAIR_ORDER",
     `${state.tribes[tribeId].name} repairs ${labelBuildingType(building.type)}`,
     `${peons.length} peon${peons.length === 1 ? "" : "s"} repair ${building.id} at ${building.x},${building.y}. Cost: ${formatResourceCost(cost)}.${
-      isBuildingUnderSiege(state, building) ? " The work crew is repairing under hostile pressure." : ""
-    }`,
-    "all"
+      underSiege ? " The work crew is repairing under hostile pressure." : ""
+    }${siegePlan?.repairPlan ? ` Repair plan: ${siegePlan.repairPlan}.` : ""}`,
+    [tribeId]
   );
   return { ok: true, summary: `sent ${peons.length} peon${peons.length === 1 ? "" : "s"} to repair ${building.type} ${building.id}` };
 }
@@ -1890,7 +3182,7 @@ function declareWar(state: GameState, attacker: TribeId, defender: TribeId, reas
     "WAR_DECLARED",
     `${state.tribes[attacker].name} declares war on ${state.tribes[defender].name}`,
     clampText(reason || "War has been declared.", 220),
-    "all"
+    [attacker, defender]
   );
 }
 
@@ -1915,7 +3207,7 @@ export function applyTribeIdentity(
   if (defaultIdentity) {
     return {
       ok: false,
-      reason: `${realmName} or ${sovereignName} reuses the default placeholder identity for ${state.tribes[defaultIdentity].defaultName}`
+      reason: `${realmName} or ${sovereignName} reuses a reserved placeholder identity`
     };
   }
   const duplicate = tribeIds.find(
@@ -1925,7 +3217,7 @@ export function applyTribeIdentity(
       (identityNameKey(state.tribes[otherId].name) === realmKey || identityNameKey(state.tribes[otherId].sovereignName) === sovereignKey)
   );
   if (duplicate) {
-    return { ok: false, reason: `${realmName} or ${sovereignName} duplicates ${state.tribes[duplicate].name}'s identity` };
+    return { ok: false, reason: `${realmName} or ${sovereignName} duplicates an existing hidden identity` };
   }
   tribe.name = realmName;
   tribe.sovereignName = sovereignName;
@@ -1934,7 +3226,7 @@ export function applyTribeIdentity(
   tribe.identityChosen = true;
   const sovereign = Object.values(state.units).find((unit) => unit.tribeId === tribeId && unit.type === "sovereign" && unit.hp > 0);
   if (sovereign) sovereign.name = sovereignName;
-  addEvent(state, "AI_IDENTITY_CHOSEN", `${realmName} names its sovereign`, `${sovereignName} rules under a naming style inspired by ${inspiration}.`, "all");
+  addEvent(state, "AI_IDENTITY_CHOSEN", `${realmName} names its sovereign`, `${sovereignName} rules under a naming style inspired by ${inspiration}.`, [tribeId]);
   return { ok: true, summary: `${realmName} led by ${sovereignName}` };
 }
 
@@ -1956,7 +3248,7 @@ export function renameUnits(
     accepted.push(`${previous} -> ${unit.name}`);
   }
   if (accepted.length > 0) {
-    addEvent(state, "AI_UNIT_NAMES", `${state.tribes[tribeId].name} names its people`, accepted.slice(0, 5).join("; "), "all");
+    addEvent(state, "AI_UNIT_NAMES", `${state.tribes[tribeId].name} names its people`, accepted.slice(0, 5).join("; "), [tribeId]);
   }
   return { accepted, rejected };
 }
@@ -1985,7 +3277,7 @@ export function recordAiDecision(
   addEvent(
     state,
     "LLM_DECISION",
-    `${state.tribes[stored.tribeId].name} makes an AI decision`,
+    `${state.tribes[stored.tribeId].name} makes a sovereign decision`,
     `${stored.strategySummary} Accepted: ${stored.accepted.join(", ") || "none"}.`,
     [stored.tribeId]
   );
@@ -2040,7 +3332,8 @@ export function trainUnit(
 ): { ok: true; unitId: string } | { ok: false; reason: string } {
   const tribe = state.tribes[tribeId];
   const population = Object.values(state.units).filter((unit) => unit.tribeId === tribeId && unit.hp > 0).length;
-  if (population >= tribe.populationCap) return { ok: false, reason: "Population cap reached. Build more houses later; this slice starts with a cap of 20." };
+  const populationCap = getPopulationCap(state, tribeId);
+  if (population >= populationCap) return { ok: false, reason: `Population cap reached (${population}/${populationCap}). Build houses or choose settlement developments to grow further.` };
   const missingDevelopments = getMissingUnitDevelopments(state, tribeId, unitType);
   if (missingDevelopments.length > 0) return { ok: false, reason: `${unitType} requires ${formatDevelopmentList(missingDevelopments)}` };
   const cost = getUnitCost(unitType);
@@ -2049,7 +3342,7 @@ export function trainUnit(
   if (!source) return { ok: false, reason: `No production building for ${unitType}.` };
   spendResources(tribe.resources, cost);
   const unit = addUnit(state, tribeId, unitType, source.x + 1, source.y + 1);
-  addEvent(state, "UNIT_TRAINED", `${tribe.name} trains ${unitType}`, `${unit.name} is ready for orders.`, "all");
+  addEvent(state, "UNIT_TRAINED", `${tribe.name} trains ${unitType}`, `${unit.name} is ready for orders.`, [tribeId]);
   updateVisibility(state);
   return { ok: true, unitId: unit.id };
 }
@@ -2095,6 +3388,10 @@ export function getDevelopment(developmentId: DevelopmentId): Development {
     cost: { ...development.cost },
     prerequisites: [...development.prerequisites],
     unlocks: [...development.unlocks],
+    aliases: [...development.aliases],
+    tradeoffs: [...development.tradeoffs],
+    synergies: [...development.synergies],
+    socialCosts: [...development.socialCosts],
     effects: development.effects.map((effect) => ({ ...effect }))
   };
 }
@@ -2109,6 +3406,121 @@ export function hasDevelopment(state: GameState, tribeId: TribeId, developmentId
 
 export function getMissingBuildingDevelopments(state: GameState, tribeId: TribeId, buildingType: BuildableBuildingType): DevelopmentId[] {
   return buildingDevelopmentRequirements[buildingType].filter((developmentId) => !hasDevelopment(state, tribeId, developmentId));
+}
+
+type PerimeterBuildSegment = {
+  type: BuildableBuildingType;
+  target: Position;
+  index: number;
+};
+
+type PerimeterBuildResult = { ok: true; buildingIds: string[]; summary: string } | { ok: false; reason: string };
+
+function buildPerimeterFromOrder(
+  state: GameState,
+  tribeId: TribeId,
+  order: AiStrategicOrder,
+  buildingType: BuildableBuildingType,
+  target: Position
+): PerimeterBuildResult | undefined {
+  const length = optionalOrderNumber(order.perimeterLength, 12) ?? 1;
+  const pattern = order.perimeterPattern ?? "single";
+  if (length <= 1 || pattern === "single") return undefined;
+  if (buildingType !== "wall" && buildingType !== "gate") return { ok: false, reason: "perimeter builds currently support wall and gate structures only" };
+  if (buildingType === "gate" && pattern === "line") {
+    return { ok: false, reason: "Use perimeterPattern gate_line when a perimeter should include a commanded gate segment." };
+  }
+  const direction = order.perimeterDirection ?? "east_west";
+  const segments = perimeterSegments(pattern, direction, length, order.perimeterGateIndex, target);
+  if (segments.length <= 1) return undefined;
+  const uniqueTypes = Array.from(new Set(segments.map((segment) => segment.type)));
+  for (const type of uniqueTypes) {
+    const missingDevelopments = getMissingBuildingDevelopments(state, tribeId, type);
+    if (missingDevelopments.length > 0) return { ok: false, reason: `${labelBuildingType(type)} requires development ${formatDevelopmentList(missingDevelopments)}.` };
+  }
+  const reserved = new Set<string>();
+  const sites = segments.map((segment) => {
+    const site = findBuildSite(state, segment.target, reserved);
+    if (site) reserved.add(positionKey(site));
+    return site ? { ...segment, site } : undefined;
+  });
+  if (sites.some((site) => !site)) return { ok: false, reason: "No clear build sites for the requested perimeter." };
+  const planned = sites.filter((site): site is PerimeterBuildSegment & { site: Position } => Boolean(site));
+  const totalCost = planned.reduce<ResourceCost>((sum, segment) => addResourceCosts(sum, getEffectiveBuildingCost(state, tribeId, segment.type)), {});
+  if (!canAfford(state.tribes[tribeId].resources, totalCost)) {
+    return { ok: false, reason: `Not enough resources to build perimeter. Need ${formatResourceCost(totalCost)}.` };
+  }
+  spendResources(state.tribes[tribeId].resources, totalCost);
+  const groupId = nextId(state, "perimeter");
+  const gateSegmentIndex = normalizedPerimeterGateIndex(pattern, length, order.perimeterGateIndex);
+  const buildingIds: string[] = [];
+  for (const segment of planned) {
+    const building = addBuilding(state, tribeId, segment.type, segment.site.x, segment.site.y);
+    buildingIds.push(building.id);
+    addEvent(
+      state,
+      "STRUCTURE_BUILT",
+      `${state.tribes[tribeId].name} builds ${labelBuildingType(segment.type)}`,
+      `A new ${labelBuildingType(segment.type)} stands at ${segment.site.x},${segment.site.y}.`,
+      [tribeId]
+    );
+    recordFortificationPlanFromOrder(state, tribeId, order, building.id, segment.type, {
+      groupId,
+      index: segment.index,
+      count: planned.length,
+      pattern,
+      direction,
+      length,
+      gateIndex: gateSegmentIndex === undefined ? undefined : gateSegmentIndex + 1
+    });
+  }
+  refreshFortificationGroupPlacementPreview(state, tribeId, groupId);
+  addEvent(
+    state,
+    "FORTIFICATION_PERIMETER_BUILT",
+    `${state.tribes[tribeId].name} builds a perimeter`,
+    `${planned.length} structures form a ${pattern} ${direction} perimeter near ${Math.round(target.x)},${Math.round(target.y)}. ${
+      order.perimeterStrategy ? `Plan: ${clampText(order.perimeterStrategy, 180)}` : clampText(order.reason, 180)
+    }`,
+    [tribeId]
+  );
+  updateVisibility(state);
+  return { ok: true, buildingIds, summary: `built perimeter ${groupId} with ${buildingIds.length} structures` };
+}
+
+function perimeterSegments(
+  pattern: PerimeterPattern,
+  direction: PerimeterDirection,
+  length: number,
+  requestedGateIndex: number | undefined,
+  target: Position
+): PerimeterBuildSegment[] {
+  const segmentCount = clamp(optionalOrderNumber(length, 12) ?? 1, 1, 12);
+  const vector = perimeterDirectionVector(direction);
+  const centerOffset = Math.floor(segmentCount / 2);
+  const gateIndex = normalizedPerimeterGateIndex(pattern, segmentCount, requestedGateIndex);
+  const segments: PerimeterBuildSegment[] = [];
+  for (let index = 0; index < segmentCount; index += 1) {
+    const offset = index - centerOffset;
+    const x = clamp(Math.round(target.x + vector.x * offset), 1, MAP_SIZE - 2);
+    const y = clamp(Math.round(target.y + vector.y * offset), 1, MAP_SIZE - 2);
+    segments.push({ type: gateIndex === index ? "gate" : "wall", target: { x, y }, index });
+  }
+  return segments;
+}
+
+function normalizedPerimeterGateIndex(pattern: PerimeterPattern, length: number, requestedGateIndex: number | undefined): number | undefined {
+  if (pattern !== "gate_line") return undefined;
+  const fallback = Math.floor(length / 2);
+  const value = optionalOrderNumber(requestedGateIndex, length) ?? fallback + 1;
+  return clamp(value - 1, 0, Math.max(0, length - 1));
+}
+
+function perimeterDirectionVector(direction: PerimeterDirection): Position {
+  if (direction === "north_south") return { x: 0, y: 1 };
+  if (direction === "northeast_southwest") return { x: 1, y: -1 };
+  if (direction === "northwest_southeast") return { x: 1, y: 1 };
+  return { x: 1, y: 0 };
 }
 
 export function canChooseDevelopment(state: GameState, tribeId: TribeId, developmentId: DevelopmentId): { ok: true } | { ok: false; reason: string } {
@@ -2142,7 +3554,7 @@ export function chooseDevelopment(
     "DEVELOPMENT_CHOSEN",
     `${state.tribes[tribeId].name} develops ${development.name}`,
     `${development.description} Unlocks: ${development.unlocks.join(", ")}.`,
-    "all"
+    [tribeId]
   );
   return { ok: true, summary: `developed ${development.name}` };
 }
@@ -2204,7 +3616,7 @@ export function buildStructure(
   if (!site) return { ok: false, reason: "No clear build site nearby." };
   spendResources(tribe.resources, cost);
   const building = addBuilding(state, tribeId, buildingType, site.x, site.y);
-  addEvent(state, "STRUCTURE_BUILT", `${tribe.name} builds ${labelBuildingType(buildingType)}`, `A new ${labelBuildingType(buildingType)} stands at ${site.x},${site.y}.`, "all");
+  addEvent(state, "STRUCTURE_BUILT", `${tribe.name} builds ${labelBuildingType(buildingType)}`, `A new ${labelBuildingType(buildingType)} stands at ${site.x},${site.y}.`, [tribeId]);
   updateVisibility(state);
   return { ok: true, buildingId: building.id };
 }
@@ -2234,7 +3646,7 @@ export function setGateState(
     `Gate at ${gate.x},${gate.y} is now ${gateState} with access ${formatGateAccessPolicy(accessPolicy)}. ${
       gateState === "open" ? "It follows that access policy." : "It blocks movement."
     }`,
-    "all"
+    directVisionVisibleTo(state, gate, [tribeId])
   );
   updateVisibility(state);
   return { ok: true, buildingId: gate.id, summary: `set gate ${gate.id} ${gateState} ${accessPolicy}` };
@@ -2355,7 +3767,8 @@ export function getCombatStatCoverageReport(state: GameState): CombatStatCoverag
     unit: 0,
     building: 0,
     resource: 0,
-    packet: 0
+    packet: 0,
+    projectile: 0
   };
   const check = (
     kind: Exclude<CombatStatCoverageIssue["kind"], "map">,
@@ -2409,6 +3822,10 @@ export function getCombatStatCoverageReport(state: GameState): CombatStatCoverag
     check("packet", packet.id, packet, { requireHp: packet.state !== "KILLED_WITH_PACKET", attackMustBeZero: true });
     if (packet.itemType !== "packet") issues.push({ kind: "packet", id: packet.id, reason: "packet itemType must be packet" });
   }
+  for (const projectile of Object.values(state.projectiles)) {
+    check("projectile", projectile.id, projectile);
+    if (projectile.projectileType !== "stone_shot") issues.push({ kind: "projectile", id: projectile.id, reason: "unknown projectile type" });
+  }
   return {
     ok: issues.length === 0,
     checked: Object.values(byKind).reduce((sum, count) => sum + count, 0),
@@ -2447,6 +3864,15 @@ function spendResources(resources: Resources, cost: ResourceCost): void {
   for (const type of resourceTypes) resources[type] -= cost[type] ?? 0;
 }
 
+function addResourceCosts(left: ResourceCost, right: ResourceCost): ResourceCost {
+  const sum: ResourceCost = { ...left };
+  for (const type of resourceTypes) {
+    const amount = (sum[type] ?? 0) + (right[type] ?? 0);
+    if (amount > 0) sum[type] = amount;
+  }
+  return sum;
+}
+
 function scaleResourceCost(cost: ResourceCost, scale: number): ResourceCost {
   const scaled: ResourceCost = {};
   for (const type of resourceTypes) {
@@ -2462,6 +3888,10 @@ function formatResourceCost(cost: ResourceCost): string {
     return amount > 0 ? [`${amount} ${type}`] : [];
   });
   return parts.join(", ") || "free";
+}
+
+function positionKey(position: Position): string {
+  return `${Math.round(position.x)},${Math.round(position.y)}`;
 }
 
 function formatDevelopmentList(developmentIds: DevelopmentId[]): string {
@@ -2496,7 +3926,7 @@ export function issueMove(state: GameState, unitId: string, target: Position): b
 
 export function computeWealth(state: GameState, tribeId: TribeId): number {
   const tribe = state.tribes[tribeId];
-  if (tribe.eliminated) return 0;
+  if (tribe.eliminated || tribe.mergedIntoTribeId) return 0;
   const banked =
     tribe.resources.gold +
     tribe.resources.food * 0.18 +
@@ -2519,7 +3949,7 @@ export function getVictoryPressure(state: GameState): VictoryPressureStatus {
     .map((tribeId) => survivalScoreEntry(state, tribeId))
     .sort(
       (left, right) =>
-        Number(left.eliminated) - Number(right.eliminated) ||
+        Number(!isTribeActive(state, left.tribeId)) - Number(!isTribeActive(state, right.tribeId)) ||
         right.survivalScore - left.survivalScore ||
         right.wealthPerCapita - left.wealthPerCapita ||
         tribeIds.indexOf(left.tribeId) - tribeIds.indexOf(right.tribeId)
@@ -2527,7 +3957,7 @@ export function getVictoryPressure(state: GameState): VictoryPressureStatus {
     .map((entry, index) => ({ ...entry, rank: index + 1 }));
   const leader = ranked[0];
   const runnerUp = ranked[1];
-  const surviving = ranked.filter((entry) => !entry.eliminated);
+  const surviving = ranked.filter((entry) => isTribeActive(state, entry.tribeId));
   const poorest = surviving.slice().sort((left, right) => left.survivalScore - right.survivalScore || left.wealthPerCapita - right.wealthPerCapita)[0] ?? leader;
   const config = state.victoryPressure;
   const winnerTribeId = config.winnerTribeId;
@@ -2555,7 +3985,8 @@ export function getVictoryPressure(state: GameState): VictoryPressureStatus {
     finalYear: config.finalYear,
     yearsUntilReview,
     survivingTribes: surviving.length,
-    eliminatedTribes: tribeIds.length - surviving.length,
+    eliminatedTribes: ranked.filter((entry) => entry.eliminated).length,
+    mergedTribes: ranked.filter((entry) => entry.mergedIntoTribeId).length,
     goldTarget: 0,
     wealthTarget: 0,
     deadlineTick: finalTick,
@@ -2592,7 +4023,7 @@ export function getCurrentYear(state: GameState): number {
 
 export function getTribeSafetyScore(state: GameState, tribeId: TribeId): number {
   const population = countLivingPopulation(state, tribeId);
-  if (state.tribes[tribeId].eliminated || population === 0) return 0;
+  if (!isTribeActive(state, tribeId) || population === 0) return 0;
   const ownUnits = Object.values(state.units).filter((unit) => unit.tribeId === tribeId && unit.hp > 0);
   const military = ownUnits.filter((unit) => isSiegeCapableUnit(unit)).length;
   const siegeEngines = ownUnits.filter((unit) => unit.type === "siege_engine").length;
@@ -2630,7 +4061,7 @@ function survivalScoreEntry(state: GameState, tribeId: TribeId): VictoryScoreEnt
   const wealthPerCapita = population > 0 ? Math.round(wealth / population) : 0;
   const safety = getTribeSafetyScore(state, tribeId);
   const happiness = Math.round(tribe.happiness);
-  const survivalScore = tribe.eliminated
+  const survivalScore = !isTribeActive(state, tribeId)
     ? 0
     : Math.round(wealthPerCapita * 0.72 + happiness * 3.2 + safety * 2.4 + Math.min(120, population * 5));
   return {
@@ -2645,12 +4076,22 @@ function survivalScoreEntry(state: GameState, tribeId: TribeId): VictoryScoreEnt
     survivalScore,
     eliminated: tribe.eliminated,
     eliminatedYear: tribe.eliminatedYear,
+    mergedIntoTribeId: tribe.mergedIntoTribeId,
+    mergedLeaderTribeId: tribe.mergedLeaderTribeId,
+    mergedYear: tribe.mergedYear,
     rank: 0
   };
 }
 
 function countLivingPopulation(state: GameState, tribeId: TribeId): number {
   return Object.values(state.units).filter((unit) => unit.tribeId === tribeId && unit.hp > 0).length;
+}
+
+export function getPopulationCap(state: GameState, tribeId: TribeId): number {
+  const tribe = state.tribes[tribeId];
+  const houses = Object.values(state.buildings).filter((building) => building.tribeId === tribeId && building.type === "house" && building.hp > 0).length;
+  const developmentCapacity = Math.max(0, Math.round(developmentEffectAmount(state, tribeId, "population_cap")));
+  return tribe.populationCap + houses * 8 + developmentCapacity;
 }
 
 function yearToTick(year: number): number {
@@ -2826,7 +4267,7 @@ function collectResourceInfluenceSubjects(state: GameState, perspectiveTribeId: 
   const subjects: ResourceInfluenceSubject[] = [];
   const visible = state.visibility[perspectiveTribeId];
   for (const unit of Object.values(state.units)) {
-    if (unit.hp <= 0 || state.tribes[unit.tribeId].eliminated) continue;
+    if (unit.hp <= 0 || !isTribeActive(state, unit.tribeId)) continue;
     if (knowledge === "visible" && unit.tribeId !== perspectiveTribeId && !isPositionVisible(visible, Math.round(unit.x), Math.round(unit.y))) continue;
     subjects.push({
       tribeId: unit.tribeId,
@@ -2839,7 +4280,7 @@ function collectResourceInfluenceSubjects(state: GameState, perspectiveTribeId: 
     });
   }
   for (const building of Object.values(state.buildings)) {
-    if (building.hp <= 0 || state.tribes[building.tribeId].eliminated) continue;
+    if (building.hp <= 0 || !isTribeActive(state, building.tribeId)) continue;
     if (knowledge === "visible" && building.tribeId !== perspectiveTribeId && !isPositionVisible(visible, building.x, building.y)) continue;
     subjects.push({
       tribeId: building.tribeId,
@@ -2967,10 +4408,21 @@ function getRecentResourceDenials(state: GameState): ResourceDenialRecord[] {
   return denials.filter((denial) => state.tick - denial.tick <= RESOURCE_DENIAL_LOOKBACK_TICKS);
 }
 
+export function getRecentResourceDepletions(state: GameState): ResourceDepletionRecord[] {
+  const depletions = (state as GameState & { resourceDepletions?: ResourceDepletionRecord[] }).resourceDepletions ?? [];
+  return depletions.filter((depletion) => state.tick - depletion.tick <= RESOURCE_DENIAL_LOOKBACK_TICKS);
+}
+
 function ensureResourceDenials(state: GameState): ResourceDenialRecord[] {
   const mutable = state as GameState & { resourceDenials?: ResourceDenialRecord[] };
   if (!mutable.resourceDenials) mutable.resourceDenials = [];
   return mutable.resourceDenials;
+}
+
+function ensureResourceDepletions(state: GameState): ResourceDepletionRecord[] {
+  const mutable = state as GameState & { resourceDepletions?: ResourceDepletionRecord[] };
+  if (!mutable.resourceDepletions) mutable.resourceDepletions = [];
+  return mutable.resourceDepletions;
 }
 
 function invalidateResourceControlCache(state: GameState): void {
@@ -2983,6 +4435,29 @@ function resourceEventVisibleTo(state: GameState, target: Position, extraTribes:
   const index = tileIndex(target.x, target.y);
   for (const tribeId of tribeIds) {
     if (state.visibility[tribeId]?.[index] === 2) visible.add(tribeId);
+  }
+  return Array.from(visible);
+}
+
+function directVisionVisibleTo(state: GameState, target: Position, extraTribes: Array<TribeId | undefined>): TribeId[] {
+  const visible = new Set<TribeId>();
+  for (const tribeId of extraTribes) if (tribeId) visible.add(tribeId);
+  for (const tribeId of tribeIds) {
+    if (!isTribeActive(state, tribeId)) continue;
+    const unitSees = Object.values(state.units).some(
+      (unit) => unit.tribeId === tribeId && unit.hp > 0 && distance(unit, target) <= unit.visionRadius
+    );
+    if (unitSees) {
+      visible.add(tribeId);
+      continue;
+    }
+    const buildingSees = Object.values(state.buildings).some(
+      (building) =>
+        building.tribeId === tribeId &&
+        building.hp > 0 &&
+        distance(building, target) <= (buildingStats[building.type]?.visionRadius ?? 0)
+    );
+    if (buildingSees) visible.add(tribeId);
   }
   return Array.from(visible);
 }
@@ -3022,8 +4497,33 @@ function recordResourceDenial(
   invalidateResourceControlCache(state);
 }
 
+function recordResourceDepletion(
+  state: GameState,
+  target: Position,
+  resource: ResourceDeposit,
+  depletedByTribeId: TribeId | undefined,
+  controlledBy: TribeId | undefined,
+  visibleTo: TribeId[]
+): void {
+  const depletions = ensureResourceDepletions(state);
+  depletions.push({
+    id: nextId(state, "resource_depletion"),
+    tick: state.tick,
+    type: resource.type,
+    x: target.x,
+    y: target.y,
+    amount: Math.max(1, Math.round(resource.amount)),
+    maxHp: resource.maxHp,
+    depletedByTribeId,
+    controlledBy,
+    visibleTo
+  });
+  while (depletions.length > 120) depletions.shift();
+  invalidateResourceControlCache(state);
+}
+
 function unitResourceControlPower(type: UnitType): number {
-  if (type === "siege_engine") return 3;
+  if (type === "siege_engine" || type === "battering_ram" || type === "catapult") return 3;
   if (type === "militia" || type === "archer") return 5;
   if (type === "sentinel") return 4;
   if (type === "sovereign") return 3.5;
@@ -3032,7 +4532,7 @@ function unitResourceControlPower(type: UnitType): number {
 }
 
 function unitResourceDefensePower(type: UnitType): number {
-  if (type === "siege_engine") return 3;
+  if (type === "siege_engine" || type === "battering_ram" || type === "catapult") return 3;
   if (type === "militia" || type === "archer") return 5;
   if (type === "sentinel") return 2.5;
   if (type === "sovereign") return 2;
@@ -3045,6 +4545,7 @@ function buildingResourceControlPower(type: BuildingType): number {
   if (type === "watchtower") return 7;
   if (type === "barracks" || type === "market") return 4;
   if (type === "farm") return 3;
+  if (type === "house") return 2;
   if (type === "gate") return 2.5;
   if (type === "wall") return 1.5;
   return 1;
@@ -3055,6 +4556,7 @@ function buildingResourceControlRadius(type: BuildingType): number {
   if (type === "turret" || type === "watchtower") return 13;
   if (type === "barracks" || type === "market") return 10;
   if (type === "farm") return 8;
+  if (type === "house") return 7;
   if (type === "gate" || type === "wall") return 5;
   return 7;
 }
@@ -3226,12 +4728,46 @@ export function worldSignature(state: GameState): string {
     .sort((a, b) => a.id.localeCompare(b.id))
     .map((p) => `${p.id}:${p.state}:${p.carrierUnitId ?? "none"}:${p.messageIds.length}`)
     .join("|");
-  return `${state.tick};${units};${packets}`;
+  const projectiles = Object.values(state.projectiles)
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map((p) => `${p.id}:${p.projectileType}:${p.tribeId}:${p.targetBuildingId}:${p.x.toFixed(2)},${p.y.toFixed(2)}:${p.impactTick}`)
+    .join("|");
+  const gates = Object.values(state.buildings)
+    .filter((building) => building.type === "gate" && building.hp > 0)
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map(
+      (gate) =>
+        `${gate.id}:${gate.tribeId}:${gate.gateState ?? "open"}:${gate.gateAccessPolicy ?? "owner_allies"}:${gate.gateOperation?.id ?? "none"}:${
+          gate.gateSabotage?.action ?? "none"
+        }`
+    )
+    .join("|");
+  const gateTreaties = state.gateAccessTreaties
+    .slice(-20)
+    .map((treaty) => `${treaty.id}:${treaty.buildingId}:${treaty.targetTribeId}:${treaty.action}:${treaty.expiresAtTick ?? "never"}`)
+    .join("|");
+  const gateSabotage = state.gateSabotageHistory
+    .slice(-20)
+    .map((record) => `${record.id}:${record.buildingId}:${record.tribeId}:${record.action}:${record.expiresAtTick ?? "none"}`)
+    .join("|");
+  const gateTreatyIncidents = state.gateTreatyIncidents
+    .slice(-20)
+    .map(
+      (record) =>
+        `${record.id}:${record.treatyId}:${record.buildingId}:${record.affectedTribeId}:${record.packetId}:${record.action}:w${record.witnessTribeIds.join(",")}`
+    )
+    .join("|");
+  const resourceDepletions = (state.resourceDepletions ?? [])
+    .slice(-20)
+    .map((record) => `${record.id}:${record.type}:${record.x},${record.y}:${record.depletedByTribeId ?? "none"}`)
+    .join("|");
+  return `${state.tick};${units};${packets};${projectiles};${gates};${gateTreaties};${gateSabotage};${gateTreatyIncidents};${resourceDepletions}`;
 }
 
 function spawnTribe(state: GameState, tribeId: TribeId, start: Position): void {
   addBuilding(state, tribeId, "townHall", start.x, start.y);
   addBuilding(state, tribeId, "farm", start.x - 4, start.y + 2);
+  addBuilding(state, tribeId, "house", start.x - 2, start.y - 3);
   addBuilding(state, tribeId, "barracks", start.x + 3, start.y + 3);
   addBuilding(state, tribeId, "market", start.x + 5, start.y - 2);
   addBuilding(state, tribeId, "watchtower", start.x - 5, start.y - 3);
@@ -3287,7 +4823,7 @@ function addBuilding(state: GameState, tribeId: TribeId, type: BuildingType, x: 
 function updateScriptedAi(state: GameState): void {
   for (const tribeId of tribeIds) {
     const tribe = state.tribes[tribeId];
-    if (tribe.eliminated) continue;
+    if (!isTribeActive(state, tribeId)) continue;
     if (state.tick - tribe.lastDecisionTick >= 80) {
       tribe.lastDecisionTick = state.tick;
       assignIdleWorkers(state, tribeId);
@@ -3353,8 +4889,9 @@ function assignScouts(state: GameState, tribeId: TribeId): void {
 function trainIfPossible(state: GameState, tribeId: TribeId): void {
   const tribe = state.tribes[tribeId];
   const population = Object.values(state.units).filter((u) => u.tribeId === tribeId && u.hp > 0).length;
-  if (population >= tribe.populationCap) return;
+  if (population >= getPopulationCap(state, tribeId)) return;
   const townHall = findTownHall(state, tribeId);
+  if (!townHall) return;
   const barracks = Object.values(state.buildings).find((b) => b.tribeId === tribeId && b.type === "barracks");
   if (townHall && tribe.resources.food >= 55 && state.tick % 240 === 0) {
     tribe.resources.food -= 50;
@@ -3375,7 +4912,8 @@ function trainSpecialUnit(
 ): { ok: true; summary: string } | { ok: false; reason: string } {
   const tribe = state.tribes[tribeId];
   const population = Object.values(state.units).filter((unit) => unit.tribeId === tribeId && unit.hp > 0).length;
-  if (population >= tribe.populationCap) return { ok: false, reason: "population cap reached" };
+  const populationCap = getPopulationCap(state, tribeId);
+  if (population >= populationCap) return { ok: false, reason: `population cap reached (${population}/${populationCap}); build houses or settlement developments` };
   const cost = unitType === "messenger" ? { food: 40, gold: 10 } : { food: 30, gold: 20 };
   if (tribe.resources.food < cost.food || tribe.resources.gold < cost.gold) return { ok: false, reason: `not enough resources for ${unitType}` };
   const townHall = findTownHall(state, tribeId);
@@ -3383,7 +4921,7 @@ function trainSpecialUnit(
   tribe.resources.food -= cost.food;
   tribe.resources.gold -= cost.gold;
   const unit = addUnit(state, tribeId, unitType, townHall.x + 2, townHall.y + 1);
-  addEvent(state, "UNIT_TRAINED", `${tribe.name} trains ${unitType}`, `${unit.name} is ready for orders.`, "all");
+  addEvent(state, "UNIT_TRAINED", `${tribe.name} trains ${unitType}`, `${unit.name} is ready for orders.`, [tribeId]);
   updateVisibility(state);
   return { ok: true, summary: `trained ${unitType}` };
 }
@@ -3400,12 +4938,13 @@ function chooseScoutTarget(state: GameState, tribeId: TribeId): Position {
   };
 }
 
-function findBuildSite(state: GameState, near: Position): Position | undefined {
+function findBuildSite(state: GameState, near: Position, reserved: Set<string> = new Set()): Position | undefined {
   const origin = { x: Math.round(near.x), y: Math.round(near.y) };
-  for (let radius = 1; radius <= 5; radius += 1) {
+  for (let radius = 0; radius <= 5; radius += 1) {
     for (let y = origin.y - radius; y <= origin.y + radius; y += 1) {
       for (let x = origin.x - radius; x <= origin.x + radius; x += 1) {
         if (x <= 0 || y <= 0 || x >= MAP_SIZE - 1 || y >= MAP_SIZE - 1) continue;
+        if (reserved.has(`${x},${y}`)) continue;
         if (!isWalkable(state, x, y)) continue;
         if (state.map[tileIndex(x, y)].resource) continue;
         if (Object.values(state.buildings).some((building) => building.x === x && building.y === y)) continue;
@@ -3429,6 +4968,118 @@ function formatGateAccessPolicy(policy: GateAccessPolicy): string {
   if (policy === "all") return "all tribes";
   if (policy === "owner_only") return "owner only";
   return "owner and allies";
+}
+
+function updateGateOperations(state: GameState): void {
+  for (const building of Object.values(state.buildings)) {
+    const operation = building.gateOperation;
+    if (!operation?.expiresAtTick || operation.expiresAtTick > state.tick) continue;
+    delete building.gateOperation;
+    addEvent(
+      state,
+      "GATE_OPERATION_EXPIRED",
+      `${state.tribes[building.tribeId].name}'s gate operation expires`,
+      `Gate ${building.id} at ${building.x},${building.y} no longer applies operation ${operation.gateOperationIntent ?? operation.id}.`,
+      [building.tribeId]
+    );
+  }
+}
+
+export function getActiveGateAccessTreaties(state: GameState, buildingId: string): GateAccessTreatyRecord[] {
+  const latestByTarget = new Map<TribeId, GateAccessTreatyRecord>();
+  for (const treaty of state.gateAccessTreaties) {
+    if (treaty.buildingId !== buildingId) continue;
+    const current = latestByTarget.get(treaty.targetTribeId);
+    if (!current || treaty.tick > current.tick || (treaty.tick === current.tick && treaty.id.localeCompare(current.id) > 0)) {
+      latestByTarget.set(treaty.targetTribeId, treaty);
+    }
+  }
+  return [...latestByTarget.values()]
+    .filter((treaty) => treaty.action === "grant" && (!treaty.expiresAtTick || treaty.expiresAtTick > state.tick))
+    .sort((left, right) => left.targetTribeId.localeCompare(right.targetTribeId));
+}
+
+function hasActiveGateAccessTreaty(state: GameState, building: Building, tribeId: TribeId): boolean {
+  return getActiveGateAccessTreaties(state, building.id).some((treaty) => treaty.targetTribeId === tribeId);
+}
+
+function activeGateAccessTreatyForTribe(state: GameState, buildingId: string, tribeId: TribeId): GateAccessTreatyRecord | undefined {
+  return getActiveGateAccessTreaties(state, buildingId).find((treaty) => treaty.targetTribeId === tribeId);
+}
+
+function recordGateTreatyIncident(state: GameState, packet: Packet, operation: GateOperationState, resolution: GatePacketResolution): GateTreatyIncidentRecord | undefined {
+  if (resolution.action !== "refuse" && resolution.action !== "detain" && resolution.action !== "ambush") return undefined;
+  const treaty = activeGateAccessTreatyForTribe(state, operation.buildingId, packet.originTribeId);
+  if (!treaty) return undefined;
+  const gate = state.buildings[operation.buildingId];
+  const gatePosition = gate ? { x: gate.x, y: gate.y } : packet.destination;
+  const participantTribeIds = Array.from(new Set<TribeId>([treaty.tribeId, packet.originTribeId]));
+  const visibleTribes = directVisionVisibleTo(state, gatePosition, participantTribeIds);
+  const witnessTribeIds = visibleTribes.filter((tribeId) => !participantTribeIds.includes(tribeId));
+  const treatyName = treaty.treatyName ? ` "${treaty.treatyName}"` : "";
+  const tollText = resolution.tollUnpaid ? ` after unpaid required toll ${resolution.tollGold}` : "";
+  const summary = `Active gate treaty ${treaty.id}${treatyName} covered ${state.tribes[packet.originTribeId].name}'s packet ${packet.id}, but gate operation ${operation.id} applied ${resolution.action}${tollText} at ${state.tribes[treaty.tribeId].name} gate ${operation.buildingId}${gate ? ` at ${gate.x},${gate.y}` : ""}.`;
+  const incident: GateTreatyIncidentRecord = {
+    id: nextId(state, "gateincident"),
+    tick: state.tick,
+    treatyId: treaty.id,
+    treatyName: treaty.treatyName,
+    buildingId: operation.buildingId,
+    gateOwnerTribeId: treaty.tribeId,
+    affectedTribeId: packet.originTribeId,
+    packetId: packet.id,
+    gateOperationId: operation.id,
+    action: resolution.action,
+    participantTribeIds,
+    witnessTribeIds,
+    tollGold: resolution.tollGold > 0 ? resolution.tollGold : undefined,
+    tollUnpaid: resolution.tollUnpaid || undefined,
+    summary
+  };
+  pushBoundedRecord(state.gateTreatyIncidents, incident, 160);
+  packet.routeMemory.push(`Gate treaty incident ${incident.id}: ${summary}`);
+  if (packet.routeMemory.length > 12) packet.routeMemory.splice(0, packet.routeMemory.length - 12);
+  addEvent(state, "GATE_TREATY_INCIDENT_RECORDED", "Gate treaty incident recorded", summary, participantTribeIds);
+  return incident;
+}
+
+function updateGateAccessTreaties(state: GameState): void {
+  for (const treaty of state.gateAccessTreaties) {
+    if (treaty.action !== "grant" || !treaty.expiresAtTick || treaty.expiresAtTick > state.tick || treaty.expiredAnnounced) continue;
+    const latestForTarget = state.gateAccessTreaties
+      .filter((candidate) => candidate.buildingId === treaty.buildingId && candidate.targetTribeId === treaty.targetTribeId)
+      .sort((left, right) => right.tick - left.tick || right.id.localeCompare(left.id))[0];
+    if (latestForTarget?.id !== treaty.id) {
+      treaty.expiredAnnounced = true;
+      continue;
+    }
+    treaty.expiredAnnounced = true;
+    const gate = state.buildings[treaty.buildingId];
+    addEvent(
+      state,
+      "GATE_ACCESS_TREATY_EXPIRED",
+      `${state.tribes[treaty.tribeId].name}'s gate access treaty expires`,
+      `Gate ${treaty.buildingId}${gate ? ` at ${gate.x},${gate.y}` : ""} no longer grants passage to ${state.tribes[treaty.targetTribeId].name}.`,
+      [treaty.tribeId, treaty.targetTribeId]
+    );
+  }
+}
+
+function updateGateSabotage(state: GameState): void {
+  for (const building of Object.values(state.buildings)) {
+    if (building.type !== "gate" || !building.gateSabotage) continue;
+    const sabotage = building.gateSabotage;
+    if (!sabotage.expiresAtTick || sabotage.expiresAtTick > state.tick) continue;
+    building.gateState = sabotage.previousGateState ?? building.gateState ?? "open";
+    delete building.gateSabotage;
+    addEvent(
+      state,
+      "GATE_SABOTAGE_EXPIRED",
+      `${state.tribes[building.tribeId].name}'s gate is no longer sabotaged`,
+      `Gate ${building.id} at ${building.x},${building.y} recovers from ${sabotage.action} and returns to ${building.gateState ?? "open"}.`,
+      [building.tribeId, sabotage.tribeId]
+    );
+  }
 }
 
 function updateUnits(state: GameState): void {
@@ -3475,6 +5126,10 @@ function updateGatherer(state: GameState, unit: Unit): void {
   if (unit.task.kind !== "gather") return;
   const task = unit.task;
   const targetTile = state.map[tileIndex(task.target.x, task.target.y)];
+  const targetResourceAvailable =
+    task.resource === "wood"
+      ? targetTile.resource?.type === "wood" && targetTile.resource.amount > 0 && targetTile.resource.hp > 0
+      : targetTile.resource?.type === task.resource && targetTile.resource.amount > 0 && targetTile.resource.hp > 0;
   if (task.cargo >= 10) {
     if (distance(unit, task.dropoff) > 0.45) {
       if (task.path.length === 0) task.path = findPath(state, unit, task.dropoff);
@@ -3494,6 +5149,17 @@ function updateGatherer(state: GameState, unit: Unit): void {
     task.path = findPath(state, unit, task.target);
     return;
   }
+  if (task.cargo > 0 && !targetResourceAvailable && !findNearestResource(state, unit, task.resource)) {
+    if (distance(unit, task.dropoff) > 0.45) {
+      if (task.path.length === 0) task.path = findPath(state, unit, task.dropoff);
+      moveAlongPath(state, unit, task.path);
+      return;
+    }
+    state.tribes[unit.tribeId].resources[task.resource] += task.cargo;
+    task.cargo = 0;
+    unit.task = { kind: "idle" };
+    return;
+  }
   if (distance(unit, task.target) > 0.45) {
     moveAlongPath(state, unit, task.path);
     if (task.path.length === 0 && distance(unit, task.target) > 0.45) {
@@ -3508,18 +5174,18 @@ function updateGatherer(state: GameState, unit: Unit): void {
   }
   if (task.resource === "wood" && targetTile.terrain === "forest") {
     if (targetTile.resource?.type === "wood") {
-      if (targetTile.resource.amount <= 0) {
-        targetTile.terrain = "grass";
-        delete targetTile.resource;
+      if (targetTile.resource.amount <= 0 || targetTile.resource.hp <= 0) {
+        depleteResourceDepositAt(state, task.target, unit.tribeId, { ...targetTile.resource });
         unit.task = { kind: "idle" };
         return;
       }
+      const beforeHarvest = { ...targetTile.resource };
       targetTile.resource.amount = Math.max(0, targetTile.resource.amount - 1);
       targetTile.resource.hp = Math.max(0, targetTile.resource.hp - 1);
+      invalidateResourceControlCache(state);
       task.cargo += 1;
       if (targetTile.resource.amount <= 0 || targetTile.resource.hp <= 0) {
-        targetTile.terrain = "grass";
-        delete targetTile.resource;
+        depleteResourceDepositAt(state, task.target, unit.tribeId, beforeHarvest);
       }
       return;
     }
@@ -3533,7 +5199,10 @@ function updateGatherer(state: GameState, unit: Unit): void {
     task.path = findPath(state, unit, next);
     return;
   }
-  if (!targetTile.resource || targetTile.resource.amount <= 0) {
+  if (targetTile.resource && (targetTile.resource.amount <= 0 || targetTile.resource.hp <= 0)) {
+    depleteResourceDepositAt(state, task.target, unit.tribeId, { ...targetTile.resource });
+  }
+  if (!targetTile.resource || targetTile.resource.amount <= 0 || targetTile.resource.hp <= 0) {
     const next = findNearestResource(state, unit, task.resource);
     if (!next) {
       unit.task = { kind: "idle" };
@@ -3543,12 +5212,295 @@ function updateGatherer(state: GameState, unit: Unit): void {
     task.path = findPath(state, unit, next);
     return;
   }
+  const beforeHarvest = { ...targetTile.resource };
   targetTile.resource.amount = Math.max(0, targetTile.resource.amount - 1);
   targetTile.resource.hp = Math.max(0, targetTile.resource.hp - 1);
+  invalidateResourceControlCache(state);
   task.cargo += 1;
   if (targetTile.resource.amount <= 0 || targetTile.resource.hp <= 0) {
-    delete targetTile.resource;
+    depleteResourceDepositAt(state, task.target, unit.tribeId, beforeHarvest);
   }
+}
+
+function activeGateOperationForPacket(state: GameState, packet: Packet): GateOperationState | undefined {
+  const candidateIds = packet.outboundGateBuildingIds?.length
+    ? packet.outboundGateBuildingIds
+    : recipientGateOperationCandidateIds(state, packet.recipientTribeId, [], packet.destination);
+  for (const gateId of candidateIds) {
+    const building = state.buildings[gateId];
+    const operation = building?.type === "gate" && building.hp > 0 ? building.gateOperation : undefined;
+    if (!operation) continue;
+    if (operation.expiresAtTick && operation.expiresAtTick <= state.tick) continue;
+    if (operation.targetTribeId && operation.targetTribeId !== packet.originTribeId) continue;
+    return operation;
+  }
+  return undefined;
+}
+
+const GATE_OPERATION_PATH_RADIUS = 1.25;
+const GATE_OPERATION_DESTINATION_RADIUS = 8;
+
+function recipientGateOperationCandidateIds(state: GameState, recipientTribeId: TribeId, path: Position[], destination: Position): string[] {
+  const gates = Object.values(state.buildings)
+    .filter((building) => building.type === "gate" && building.hp > 0 && building.tribeId === recipientTribeId)
+    .sort((left, right) => left.id.localeCompare(right.id));
+  const pathCandidates = gates
+    .map((gate) => {
+      let bestPathIndex = Number.POSITIVE_INFINITY;
+      let bestPathDistance = Number.POSITIVE_INFINITY;
+      for (let index = 0; index < path.length; index += 1) {
+        const stepDistance = distance(gate, path[index]);
+        if (stepDistance < bestPathDistance) {
+          bestPathDistance = stepDistance;
+          bestPathIndex = index;
+        }
+      }
+      return { gate, bestPathIndex, bestPathDistance };
+    })
+    .filter((candidate) => candidate.bestPathDistance <= GATE_OPERATION_PATH_RADIUS)
+    .sort((left, right) => left.bestPathIndex - right.bestPathIndex || left.bestPathDistance - right.bestPathDistance || left.gate.id.localeCompare(right.gate.id))
+    .map((candidate) => candidate.gate.id);
+  const ids = new Set(pathCandidates);
+  const nearestDestinationGate = gates
+    .map((gate) => ({ gate, distanceToDestination: distance(gate, destination) }))
+    .filter((candidate) => candidate.distanceToDestination <= GATE_OPERATION_DESTINATION_RADIUS)
+    .sort((left, right) => left.distanceToDestination - right.distanceToDestination || left.gate.id.localeCompare(right.gate.id))[0]?.gate.id;
+  if (nearestDestinationGate) ids.add(nearestDestinationGate);
+  return [...ids];
+}
+
+type GatePacketResolution = {
+  action: GatePassageAction;
+  tollGold: number;
+  tollMode: GateTollMode;
+  tollUnpaid: boolean;
+};
+
+function resolveGatePacketResolution(state: GameState, packet: Packet, operation: GateOperationState | undefined): GatePacketResolution {
+  if (!operation) return { action: "allow", tollGold: 0, tollMode: "none", tollUnpaid: false };
+  const tollGold = operation.tollGold ?? 0;
+  const tollMode = operation.tollMode ?? (tollGold > 0 ? "optional" : "none");
+  const tollUnpaid = tollGold > 0 && tollMode === "required" && state.tribes[packet.originTribeId].resources.gold < tollGold;
+  if (tollUnpaid) {
+    return {
+      action: operation.unpaidAction ?? "refuse",
+      tollGold,
+      tollMode,
+      tollUnpaid
+    };
+  }
+  return {
+    action: operation.entryAction ?? (tollGold > 0 && tollMode !== "none" ? "delay" : "allow"),
+    tollGold,
+    tollMode,
+    tollUnpaid: false
+  };
+}
+
+function payGateTollIfPossible(state: GameState, packet: Packet, operation: GateOperationState, resolution: GatePacketResolution): boolean {
+  if (resolution.tollGold <= 0 || resolution.tollMode === "none" || resolution.tollUnpaid) return false;
+  if (state.tribes[packet.originTribeId].resources.gold < resolution.tollGold) {
+    packet.routeMemory.push(`Could not pay ${resolution.tollGold} gold requested by gate operation ${operation.id}.`);
+    return false;
+  }
+  state.tribes[packet.originTribeId].resources.gold -= resolution.tollGold;
+  state.tribes[packet.recipientTribeId].resources.gold += resolution.tollGold;
+  packet.routeMemory.push(`Paid ${resolution.tollGold} gold at gate operation ${operation.id}.`);
+  addEvent(
+    state,
+    "GATE_TOLL_PAID",
+    `${state.tribes[packet.originTribeId].name} pays a gate toll`,
+    `${resolution.tollGold} gold passes to ${state.tribes[packet.recipientTribeId].name} under gate operation ${operation.id}.`,
+    [packet.originTribeId, packet.recipientTribeId]
+  );
+  return true;
+}
+
+function packetCanBeHandledByGate(packet: Packet, gateId: string): boolean {
+  return !packet.outboundGateBuildingIds || packet.outboundGateBuildingIds.length === 0 || packet.outboundGateBuildingIds.includes(gateId);
+}
+
+function findDetainedPacketForGateOperation(
+  state: GameState,
+  tribeId: TribeId,
+  gateId: string,
+  record: GateOperationRecord
+): { ok: true; packet: Packet } | { ok: false; reason: string } {
+  const packet = record.detainedPacketId ? state.packets[record.detainedPacketId] : undefined;
+  if (packet) {
+    if (packet.recipientTribeId !== tribeId) return { ok: false, reason: "detained packet belongs to another recipient" };
+    if (packet.state !== "DETAINED") return { ok: false, reason: `packet is ${packet.state.toLowerCase().replaceAll("_", " ")}` };
+    if (record.targetTribeId && packet.originTribeId !== record.targetTribeId) return { ok: false, reason: "detained packet origin does not match counterparty" };
+    if (!packetCanBeHandledByGate(packet, gateId)) return { ok: false, reason: "detained packet is not associated with this gate" };
+    return { ok: true, packet };
+  }
+
+  const candidates = Object.values(state.packets)
+    .filter(
+      (candidate) =>
+        candidate.recipientTribeId === tribeId &&
+        candidate.state === "DETAINED" &&
+        (!record.targetTribeId || candidate.originTribeId === record.targetTribeId) &&
+        packetCanBeHandledByGate(candidate, gateId)
+    )
+    .sort((left, right) => right.lastStateChangeTick - left.lastStateChangeTick || right.createdTick - left.createdTick || right.id.localeCompare(left.id));
+  const latest = candidates[0];
+  return latest ? { ok: true, packet: latest } : { ok: false, reason: "no detained packet matched this gate operation" };
+}
+
+function attachGateReleaseMessageToPacket(state: GameState, packet: Packet, record: GateOperationRecord): string | undefined {
+  if (!record.releaseSubject && !record.releaseMessage) return undefined;
+  if (packet.messageIds.length > 1) return undefined;
+  const original = state.messages[packet.messageIds[0]];
+  const message: Message = {
+    id: nextId(state, "msg"),
+    type: "REPLY",
+    originTribeId: packet.recipientTribeId,
+    recipientTribeId: packet.originTribeId,
+    replyToMessageId: original?.id,
+    subject: clampText(record.releaseSubject || `Released: ${original?.subject ?? packet.id}`, 80),
+    body: clampText(record.releaseMessage || "Your detained messenger is released under gate terms.", 1200),
+    diplomacyIntent: "NONE",
+    requiresReply: false,
+    createdTick: state.tick
+  };
+  state.messages[message.id] = message;
+  packet.messageIds.push(message.id);
+  recordMessageIntelForOwner(state, message, packet.recipientTribeId, "sent");
+  return message.id;
+}
+
+function applyDetainedPacketGateOperation(
+  state: GameState,
+  tribeId: TribeId,
+  gate: Building,
+  record: GateOperationRecord
+): { ok: true; summary: string } | { ok: false; reason: string } {
+  if (!record.detainedPacketAction) return { ok: true, summary: "no detained packet action" };
+  const resolved = findDetainedPacketForGateOperation(state, tribeId, gate.id, record);
+  if (!resolved.ok) return resolved;
+  const packet = resolved.packet;
+  const carrier = packet.carrierUnitId ? state.units[packet.carrierUnitId] : undefined;
+  if (!carrier || carrier.hp <= 0) return { ok: false, reason: "detained packet has no living carrier" };
+
+  if (record.detainedPacketAction === "hold") {
+    packet.routeMemory.push(`Gate operation ${record.id} keeps packet ${packet.id} detained.`);
+    addEvent(
+      state,
+      "MESSENGER_HELD_AT_GATE",
+      `${state.tribes[tribeId].name} keeps a messenger detained`,
+      `${carrier.name} remains detained at gate ${gate.id} under operation ${record.id}.`,
+      [packet.originTribeId, tribeId]
+    );
+    return { ok: true, summary: `kept ${packet.id} detained` };
+  }
+
+  if (record.detainedPacketAction === "ransom") {
+    const ransomGold = record.ransomGold ?? 0;
+    if (ransomGold <= 0) return { ok: false, reason: "ransom requires positive gateRansomGold" };
+    if (state.tribes[packet.originTribeId].resources.gold < ransomGold) {
+      packet.routeMemory.push(`Ransom ${ransomGold} gold under gate operation ${record.id} was unpaid; detention continues.`);
+      addEvent(
+        state,
+        "GATE_RANSOM_UNPAID",
+        `${state.tribes[packet.originTribeId].name} cannot pay a gate ransom`,
+        `${state.tribes[packet.originTribeId].name} lacks ${ransomGold} gold to release ${carrier.name} from gate ${gate.id}.`,
+        [packet.originTribeId, tribeId]
+      );
+      return { ok: true, summary: `ransom unpaid for ${packet.id}; detention continues` };
+    }
+    state.tribes[packet.originTribeId].resources.gold -= ransomGold;
+    state.tribes[tribeId].resources.gold += ransomGold;
+    packet.routeMemory.push(`Paid ${ransomGold} gold ransom under gate operation ${record.id}.`);
+    addEvent(
+      state,
+      "GATE_RANSOM_PAID",
+      `${state.tribes[packet.originTribeId].name} pays a gate ransom`,
+      `${ransomGold} gold is paid to ${state.tribes[tribeId].name} to release ${carrier.name} from gate ${gate.id}.`,
+      [packet.originTribeId, tribeId]
+    );
+  }
+
+  const path = findPath(state, carrier, packet.returnTo);
+  if (!pathArrives(path, packet.returnTo)) {
+    markMessengerRouteBlocked(state, carrier, packet, "return route blocked after gate release");
+    return { ok: false, reason: "released messenger has no passable return route" };
+  }
+  const releaseMessageId = attachGateReleaseMessageToPacket(state, packet, record);
+  carrier.carriedPacketId = packet.id;
+  carrier.task = {
+    kind: "deliver",
+    packetId: packet.id,
+    phase: "returning",
+    destination: { ...packet.destination },
+    returnTo: { ...packet.returnTo },
+    path
+  };
+  packet.carrierUnitId = carrier.id;
+  packet.state = "IN_TRANSIT_RETURN";
+  packet.lastStateChangeTick = state.tick;
+  packet.routeMemory.push(
+    `Released by gate operation ${record.id}${releaseMessageId ? ` with release message ${releaseMessageId}` : ""}; returning home.`
+  );
+  addEvent(
+    state,
+    "MESSENGER_RELEASED_AT_GATE",
+    `${state.tribes[tribeId].name} releases a detained messenger`,
+    `${carrier.name} carrying packet ${packet.id} is released from gate ${gate.id}${releaseMessageId ? " with a written reply" : ""}.`,
+    [packet.originTribeId, tribeId]
+  );
+  return { ok: true, summary: `${record.detainedPacketAction} processed for ${packet.id}` };
+}
+
+function applyGateOperationPacketOutcome(state: GameState, unit: Unit, packet: Packet): boolean {
+  const operation = activeGateOperationForPacket(state, packet);
+  const resolution = resolveGatePacketResolution(state, packet, operation);
+  if (!operation || resolution.action === "allow" || resolution.action === "delay") return false;
+  packet.lastStateChangeTick = state.tick;
+  packet.routeMemory.push(`Gate operation ${operation.id}: ${operation.gateOperationIntent ?? operation.reason}; action ${resolution.action}.`);
+  if (resolution.tollUnpaid) packet.routeMemory.push(`Required toll ${resolution.tollGold} gold was unpaid.`);
+  else payGateTollIfPossible(state, packet, operation, resolution);
+  recordGateTreatyIncident(state, packet, operation, resolution);
+  if (resolution.action === "ambush") {
+    unit.hp = 0;
+    unit.task = { kind: "idle" };
+    unit.carriedPacketId = undefined;
+    packet.hp = 0;
+    packet.state = "KILLED_WITH_PACKET";
+    packet.carrierUnitId = undefined;
+    addEvent(
+      state,
+      "MESSENGER_AMBUSHED_AT_GATE",
+      `${state.tribes[packet.recipientTribeId].name} ambushes a messenger`,
+      `${unit.name} carrying a packet from ${state.tribes[packet.originTribeId].name} is killed at gate ${operation.buildingId}.`,
+      [packet.originTribeId, packet.recipientTribeId]
+	    );
+    return true;
+  }
+  if (resolution.action === "detain") {
+    packet.state = "DETAINED";
+    unit.task = { kind: "idle" };
+    addEvent(
+      state,
+      "MESSENGER_DETAINED_AT_GATE",
+      `${state.tribes[packet.recipientTribeId].name} detains a messenger`,
+      `${unit.name} carrying a packet from ${state.tribes[packet.originTribeId].name} is detained under gate operation ${operation.id}.`,
+      [packet.originTribeId, packet.recipientTribeId]
+	    );
+    return true;
+  }
+  packet.state = "REFUSED_AT_GATE";
+  packet.carrierUnitId = undefined;
+  unit.carriedPacketId = undefined;
+  unit.task = { kind: "idle" };
+  addEvent(
+    state,
+    "MESSENGER_REFUSED_AT_GATE",
+    `${state.tribes[packet.recipientTribeId].name} refuses a messenger`,
+    `${unit.name}'s packet from ${state.tribes[packet.originTribeId].name} is refused at gate ${operation.buildingId}.`,
+    [packet.originTribeId, packet.recipientTribeId]
+  );
+  return true;
 }
 
 function updateMessenger(state: GameState, unit: Unit, task: Extract<UnitTask, { kind: "deliver" }>): void {
@@ -3564,11 +5516,14 @@ function updateMessenger(state: GameState, unit: Unit, task: Extract<UnitTask, {
         markMessengerRouteBlocked(state, unit, packet, "outbound route blocked");
         return;
       }
+      packet.outboundGateBuildingIds = recipientGateOperationCandidateIds(state, packet.recipientTribeId, path, task.destination);
+      recordGateAccessTreatyRouteMemory(state, packet);
       task.path = path;
     }
     moveAlongPath(state, unit, task.path);
     recordRouteMemory(state, unit, packet);
     if (distance(unit, task.destination) < 0.45) {
+      if (applyGateOperationPacketOutcome(state, unit, packet)) return;
       packet.state = "AWAITING_REPLY";
       packet.lastStateChangeTick = state.tick;
       for (const messageId of packet.messageIds) {
@@ -3641,23 +5596,29 @@ export function attachReplyToPacket(
     subject: string;
     body: string;
     diplomacyIntent?: DiplomacyIntent;
+    mergerLeaderTribeId?: TribeId;
+    mergerTerms?: string;
   }
-): { ok: true; messageId: string; allianceFormed?: boolean } | { ok: false; reason: string } {
+): { ok: true; messageId: string; allianceFormed?: boolean; mergerExecuted?: boolean; mergerRecordId?: string } | { ok: false; reason: string } {
   const packet = state.packets[packetId];
   if (!packet) return { ok: false, reason: "missing packet" };
   if (packet.state !== "AWAITING_REPLY") return { ok: false, reason: `packet is ${packet.state.toLowerCase().replaceAll("_", " ")}` };
   if (packet.messageIds.length > 1) return { ok: false, reason: "packet already has a reply" };
   const original = state.messages[packet.messageIds[0]];
   if (!original) return { ok: false, reason: "missing original message" };
+  const replyOriginTribeId = packet.recipientTribeId;
+  const replyRecipientTribeId = packet.originTribeId;
   const message: Message = {
     id: nextId(state, "msg"),
     type: "REPLY",
-    originTribeId: packet.recipientTribeId,
-    recipientTribeId: packet.originTribeId,
+    originTribeId: replyOriginTribeId,
+    recipientTribeId: replyRecipientTribeId,
     replyToMessageId: original.id,
     subject: clampText(reply.subject || `Re: ${original.subject}`, 80),
     body: clampText(reply.body || "We have received your messenger and will consider your position.", 1200),
     diplomacyIntent: reply.diplomacyIntent ?? "NONE",
+    mergerLeaderTribeId: reply.mergerLeaderTribeId,
+    mergerTerms: reply.mergerTerms ? clampText(reply.mergerTerms, 500) : undefined,
     requiresReply: false,
     createdTick: state.tick
   };
@@ -3665,6 +5626,7 @@ export function attachReplyToPacket(
   packet.messageIds.push(message.id);
   recordMessageIntelForOwner(state, message, packet.recipientTribeId, "sent");
   const allianceFormed = resolveAllianceFromDiscussion(state, original, message);
+  const merger = resolveMergerFromDiscussion(state, original, message);
   const carrier = packet.carrierUnitId ? state.units[packet.carrierUnitId] : undefined;
   if (carrier?.task.kind === "deliver" && carrier.task.packetId === packet.id && carrier.task.phase === "waiting") {
     beginReturnTrip(state, carrier, carrier.task, packet);
@@ -3672,11 +5634,13 @@ export function attachReplyToPacket(
   addEvent(
     state,
     "REPLY_ATTACHED",
-    `${state.tribes[packet.recipientTribeId].name} replies`,
-    `${message.subject} is sealed and given back to the messenger.${allianceFormed ? " The reply accepts an alliance." : ""}`,
-    [packet.originTribeId, packet.recipientTribeId]
+    `${state.tribes[replyOriginTribeId].name} replies`,
+    `${message.subject} is sealed and given back to the messenger.${allianceFormed ? " The reply accepts an alliance." : ""}${
+      merger ? " The reply executes a civilization merger." : ""
+    }`,
+    [replyRecipientTribeId, replyOriginTribeId]
   );
-  return { ok: true, messageId: message.id, allianceFormed };
+  return { ok: true, messageId: message.id, allianceFormed, mergerExecuted: Boolean(merger), mergerRecordId: merger?.id };
 }
 
 function updateAttacker(state: GameState, unit: Unit): void {
@@ -3703,14 +5667,148 @@ function updateAttacker(state: GameState, unit: Unit): void {
     return;
   }
   if (unit.task.kind !== "attackBuilding") return;
+  const task = unit.task;
+  if (shouldRetreatFromSiege(unit, task)) {
+    withdrawSiegeUnit(state, unit, task, "SIEGE_RETREAT_TRIGGERED", `after falling to ${Math.ceil((unit.hp / unit.maxHp) * 100)}% health`);
+    return;
+  }
   const target = state.buildings[unit.task.targetBuildingId];
   if (!target || target.hp <= 0 || target.tribeId === unit.tribeId) {
     unit.task = { kind: "idle" };
     return;
   }
+  if (updateSiegeAssembly(state, unit, task, target)) return;
+  if (updateSiegeWaveRelease(state, unit, task, target)) return;
+  if (shouldWithdrawFromFeint(state, task)) {
+    withdrawSiegeUnit(state, unit, task, "SIEGE_FEINT_WITHDRAWAL", `after ${task.assaultMode} timing completed`);
+    return;
+  }
   if (distance(unit, target) <= unit.range) return;
   if (unit.task.path.length === 0) unit.task.path = findPath(state, unit, findBuildingAttackPosition(state, unit, target));
   moveAlongPath(state, unit, unit.task.path);
+}
+
+function updateSiegeAssembly(state: GameState, unit: Unit, task: Extract<UnitTask, { kind: "attackBuilding" }>, target: Building): boolean {
+  if (task.assaultPhase !== "assembling" || !task.assemblyTarget) return false;
+  if (distance(unit, task.assemblyTarget) > 0.45) {
+    if (task.path.length === 0) task.path = findPath(state, unit, task.assemblyTarget);
+    moveAlongPath(state, unit, task.path);
+    return true;
+  }
+  if (!coordinatedAssaultReady(state, task)) return true;
+  if (task.assaultWaveDelayTicks !== undefined && task.assaultWaveDelayTicks > 0) {
+    const plan = task.siegePlanId ? state.siegePlans.find((candidate) => candidate.id === task.siegePlanId) : undefined;
+    task.assaultPhase = "waiting_wave";
+    task.assaultWaveReleaseTick = (plan?.assaultStartedTick ?? state.tick) + task.assaultWaveDelayTicks;
+    task.path = [];
+    return true;
+  }
+  startSiegeAttackPhase(state, unit, task, target);
+  return false;
+}
+
+function updateSiegeWaveRelease(state: GameState, unit: Unit, task: Extract<UnitTask, { kind: "attackBuilding" }>, target: Building): boolean {
+  if (task.assaultPhase !== "waiting_wave") return false;
+  if (task.assaultWaveReleaseTick !== undefined && state.tick < task.assaultWaveReleaseTick) {
+    if (task.assemblyTarget && distance(unit, task.assemblyTarget) > 0.45) {
+      if (task.path.length === 0) task.path = findPath(state, unit, task.assemblyTarget);
+      moveAlongPath(state, unit, task.path);
+    }
+    return true;
+  }
+  startSiegeAttackPhase(state, unit, task, target);
+  announceSiegeWaveReleased(state, task);
+  return false;
+}
+
+function startSiegeAttackPhase(state: GameState, unit: Unit, task: Extract<UnitTask, { kind: "attackBuilding" }>, target: Building): void {
+  task.assaultPhase = "attacking";
+  task.path = findPath(state, unit, findBuildingAttackPosition(state, unit, target));
+}
+
+function announceSiegeWaveReleased(state: GameState, task: Extract<UnitTask, { kind: "attackBuilding" }>): void {
+  if (task.assaultWaveIndex === undefined || task.assaultWaveIndex <= 0 || !task.siegePlanId) return;
+  const plan = state.siegePlans.find((candidate) => candidate.id === task.siegePlanId);
+  if (!plan) return;
+  const released = plan.releasedWaveIndexes ?? [];
+  if (released.includes(task.assaultWaveIndex)) return;
+  plan.releasedWaveIndexes = [...released, task.assaultWaveIndex].sort((left, right) => left - right);
+  const waveUnits = plan.assignedUnitIds.filter((unitId) => {
+    const assigned = state.units[unitId];
+    return assigned?.task.kind === "attackBuilding" && assigned.task.siegePlanId === plan.id && assigned.task.assaultWaveIndex === task.assaultWaveIndex;
+  });
+  const target = plan.targetBuildingId ? state.buildings[plan.targetBuildingId] : undefined;
+  addEvent(
+    state,
+    "SIEGE_WAVE_RELEASED",
+    `${state.tribes[plan.tribeId].name} commits a siege wave`,
+    `Wave ${task.assaultWaveIndex + 1} sends ${waveUnits.length || "more"} assigned units toward ${plan.targetBuildingId ?? "the target"}.${
+      plan.assaultPlan ? ` Plan: ${plan.assaultPlan}.` : ""
+    }`,
+    target ? directVisionVisibleTo(state, target, [plan.tribeId, plan.targetTribeId, target.tribeId]) : [plan.tribeId]
+  );
+}
+
+function coordinatedAssaultReady(state: GameState, task: Extract<UnitTask, { kind: "attackBuilding" }>): boolean {
+  const plan = task.siegePlanId ? state.siegePlans.find((candidate) => candidate.id === task.siegePlanId) : undefined;
+  if (plan?.assaultStartedTick !== undefined) return true;
+  const holdExpired = task.assemblyHoldUntilTick !== undefined && state.tick >= task.assemblyHoldUntilTick;
+  const allAssembled = plan
+    ? plan.assignedUnitIds.every((unitId) => {
+        const assigned = state.units[unitId];
+        if (!assigned || assigned.hp <= 0) return true;
+        if (assigned.task.kind !== "attackBuilding" || assigned.task.siegePlanId !== plan.id) return false;
+        if (assigned.task.assaultPhase === "attacking") return true;
+        const assemblyTarget = assigned.task.assemblyTarget ?? task.assemblyTarget;
+        return assemblyTarget ? distance(assigned, assemblyTarget) <= 0.75 : true;
+      })
+    : false;
+  if (!holdExpired && !allAssembled) return false;
+  if (plan && plan.assaultStartedTick === undefined) {
+    plan.assaultStartedTick = state.tick;
+    const target = plan.targetBuildingId ? state.buildings[plan.targetBuildingId] : undefined;
+    addEvent(
+      state,
+      "COORDINATED_ASSAULT_STARTED",
+      `${state.tribes[plan.tribeId].name} launches a coordinated assault`,
+      `${plan.assignedUnitIds.length} assigned units leave rally formation for ${plan.targetBuildingId ?? "the target"}.${
+        plan.assaultPlan ? ` Plan: ${plan.assaultPlan}.` : ""
+      }`,
+      target ? directVisionVisibleTo(state, target, [plan.tribeId, plan.targetTribeId, target.tribeId]) : [plan.tribeId]
+    );
+  }
+  return true;
+}
+
+function shouldRetreatFromSiege(unit: Unit, task: Extract<UnitTask, { kind: "attackBuilding" }>): boolean {
+  const threshold = task.retreatHealthPct;
+  if (!threshold || threshold <= 0) return false;
+  if (unit.maxHp <= 0) return false;
+  return Math.ceil((unit.hp / unit.maxHp) * 100) <= threshold;
+}
+
+function shouldWithdrawFromFeint(state: GameState, task: Extract<UnitTask, { kind: "attackBuilding" }>): boolean {
+  if (task.assaultMode !== "feint" && task.assaultMode !== "probe") return false;
+  return task.feintWithdrawTick !== undefined && state.tick >= task.feintWithdrawTick;
+}
+
+function withdrawSiegeUnit(
+  state: GameState,
+  unit: Unit,
+  task: Extract<UnitTask, { kind: "attackBuilding" }>,
+  eventType: "SIEGE_RETREAT_TRIGGERED" | "SIEGE_FEINT_WITHDRAWAL",
+  cause: string
+): void {
+  const retreatTarget = task.retreatTarget ?? findTownHall(state, unit.tribeId) ?? starts[unit.tribeId];
+  const target = state.buildings[task.targetBuildingId];
+  unit.task = { kind: "move", target: retreatTarget, path: findPath(state, unit, retreatTarget) };
+  addEvent(
+    state,
+    eventType,
+    `${state.tribes[unit.tribeId].name} pulls back a siege unit`,
+    `${unit.name} withdraws toward ${retreatTarget.x},${retreatTarget.y} ${cause}.${task.siegeIntent ? ` Intent: ${task.siegeIntent}.` : ""}`,
+    target ? directVisionVisibleTo(state, target, [unit.tribeId, target.tribeId]) : [unit.tribeId]
+  );
 }
 
 function updateRepairer(state: GameState, unit: Unit): void {
@@ -3737,6 +5835,22 @@ function updateRepairer(state: GameState, unit: Unit): void {
     }
     return;
   }
+  const pressure = repairUnderFirePressure(state, unit, building);
+  if (pressure) {
+    if (!unit.task.lastInterruptedTick || state.tick - unit.task.lastInterruptedTick >= TICK_RATE * 4) {
+      unit.task.lastInterruptedTick = state.tick;
+      addEvent(
+        state,
+        "REPAIR_UNDER_FIRE_INTERRUPTED",
+        `${state.tribes[unit.tribeId].name}'s repair crew is under fire`,
+        `${unit.name} cannot safely repair ${building.id} while ${pressure.name} threatens the work site from ${Math.round(pressure.x)},${Math.round(pressure.y)}.${
+          unit.task.siegeIntent ? ` Intent: ${unit.task.siegeIntent}.` : ""
+        }`,
+        directVisionVisibleTo(state, building, [unit.tribeId, pressure.tribeId])
+      );
+    }
+    return;
+  }
   building.hp = Math.min(building.maxHp, building.hp + repairHpPerTick(state, unit.tribeId));
   if (building.hp < building.maxHp) return;
   addEvent(
@@ -3744,10 +5858,24 @@ function updateRepairer(state: GameState, unit: Unit): void {
     "STRUCTURE_REPAIRED",
     `${state.tribes[unit.tribeId].name} repairs ${labelBuildingType(building.type)}`,
     `${building.id} at ${building.x},${building.y} is back to full strength.`,
-    "all"
+    directVisionVisibleTo(state, building, [unit.tribeId])
   );
   unit.task = { kind: "idle" };
   updateVisibility(state);
+}
+
+function repairUnderFirePressure(state: GameState, repairer: Unit, building: Building): Unit | undefined {
+  return Object.values(state.units)
+    .filter(
+      (unit) =>
+        unit.hp > 0 &&
+        unit.tribeId !== repairer.tribeId &&
+        !isProtectedMessenger(unit) &&
+        areHostile(state, unit.tribeId, repairer.tribeId) &&
+        unit.attack > 0 &&
+        (distance(unit, repairer) <= Math.max(unit.range, 1.2) || distance(unit, building) <= Math.max(unit.range, 1.2))
+    )
+    .sort((left, right) => Math.min(distance(left, repairer), distance(left, building)) - Math.min(distance(right, repairer), distance(right, building)))[0];
 }
 
 function updateCombat(state: GameState): void {
@@ -3756,6 +5884,7 @@ function updateCombat(state: GameState): void {
   for (const unit of living) {
     if (unit.attack <= 0 || unit.attackCooldown > 0) continue;
     if (unit.task.kind === "attackBuilding") {
+      if (unit.task.assaultPhase === "assembling" || unit.task.assaultPhase === "waiting_wave") continue;
       const assignedTarget = state.buildings[unit.task.targetBuildingId];
       if (
         assignedTarget &&
@@ -3764,8 +5893,9 @@ function updateCombat(state: GameState): void {
         areHostile(state, unit.tribeId, assignedTarget.tribeId) &&
         distance(unit, assignedTarget) <= unit.range
       ) {
-        applyBuildingDamage(state, assignedTarget, buildingAttackDamage(state, unit, assignedTarget), unit.tribeId);
-        unit.attackCooldown = Math.round(TICK_RATE * 1.2);
+        if (unit.type === "catapult") launchSiegeProjectile(state, unit, assignedTarget, unit.task.siegePlanId);
+        else applyBuildingDamage(state, assignedTarget, buildingAttackDamage(state, unit, assignedTarget), unit.tribeId);
+        unit.attackCooldown = siegeAttackCooldownTicks(unit);
         continue;
       }
     }
@@ -3791,15 +5921,87 @@ function updateCombat(state: GameState): void {
         areHostile(state, unit.tribeId, other.tribeId) &&
         distance(unit, other) <= unit.range
     );
-    if (target && unit.type !== "siege_engine") {
+    if (target && !isDedicatedSiegeUnit(unit)) {
       applyUnitDamage(state, target, unit.attack, unit.tribeId);
       unit.attackCooldown = Math.round(TICK_RATE * 1.2);
       continue;
     }
+    if (unit.task.kind === "move") continue;
     const buildingTarget = findHostileBuildingInRange(state, unit);
     if (!buildingTarget) continue;
-    applyBuildingDamage(state, buildingTarget, buildingAttackDamage(state, unit, buildingTarget), unit.tribeId);
-    unit.attackCooldown = Math.round(TICK_RATE * 1.2);
+    if (unit.type === "catapult") launchSiegeProjectile(state, unit, buildingTarget);
+    else applyBuildingDamage(state, buildingTarget, buildingAttackDamage(state, unit, buildingTarget), unit.tribeId);
+    unit.attackCooldown = siegeAttackCooldownTicks(unit);
+  }
+}
+
+function siegeAttackCooldownTicks(unit: Unit): number {
+  if (unit.type === "catapult") return Math.round(TICK_RATE * 2.6);
+  if (unit.type === "battering_ram") return Math.round(TICK_RATE * 1.6);
+  return Math.round(TICK_RATE * 1.2);
+}
+
+function siegeProjectileTravelTicks(unit: Position, target: Position): number {
+  return Math.max(5, Math.round(distance(unit, target) * 2.2));
+}
+
+function launchSiegeProjectile(state: GameState, unit: Unit, target: Building, siegePlanId?: string): SiegeProjectile {
+  const travelTicks = siegeProjectileTravelTicks(unit, target);
+  const damage = buildingAttackDamage(state, unit, target);
+  const projectile: SiegeProjectile = {
+    id: nextId(state, "projectile"),
+    projectileType: "stone_shot",
+    tribeId: unit.tribeId,
+    originUnitId: unit.id,
+    targetBuildingId: target.id,
+    x: unit.x,
+    y: unit.y,
+    startX: unit.x,
+    startY: unit.y,
+    targetX: target.x,
+    targetY: target.y,
+    launchedTick: state.tick,
+    impactTick: state.tick + travelTicks,
+    siegePlanId,
+    hp: 1,
+    maxHp: 1,
+    armor: 0,
+    attack: damage,
+    range: unit.range,
+    attackCooldown: 0
+  };
+  state.projectiles[projectile.id] = projectile;
+  addEvent(
+    state,
+    "SIEGE_PROJECTILE_LAUNCHED",
+    `${state.tribes[unit.tribeId].name} launches artillery`,
+    `${unit.name} fires a stone shot at ${target.type} ${target.id}.`,
+    directVisionVisibleTo(state, target, [unit.tribeId, target.tribeId])
+  );
+  return projectile;
+}
+
+function updateProjectiles(state: GameState): void {
+  for (const projectile of Object.values(state.projectiles)) {
+    const target = state.buildings[projectile.targetBuildingId];
+    if (!target || target.hp <= 0) {
+      delete state.projectiles[projectile.id];
+      continue;
+    }
+    const totalTicks = Math.max(1, projectile.impactTick - projectile.launchedTick);
+    const progress = clamp((state.tick - projectile.launchedTick) / totalTicks, 0, 1);
+    projectile.x = projectile.startX + (projectile.targetX - projectile.startX) * progress;
+    projectile.y = projectile.startY + (projectile.targetY - projectile.startY) * progress;
+    if (state.tick < projectile.impactTick) continue;
+    const destroyed = applyBuildingDamage(state, target, projectile.attack, projectile.tribeId);
+    addEvent(
+      state,
+      "SIEGE_PROJECTILE_IMPACT",
+      `${state.tribes[projectile.tribeId].name}'s artillery lands`,
+      `Stone shot ${projectile.id} hits ${target.type} ${target.id} at ${target.x},${target.y}${destroyed ? " and destroys it" : ""}.`,
+      directVisionVisibleTo(state, target, [projectile.tribeId, target.tribeId])
+    );
+    delete state.projectiles[projectile.id];
   }
 }
 
@@ -3826,10 +6028,16 @@ function updateTurrets(state: GameState): void {
 }
 
 function targetPriority(unit: Unit): number {
+  if (unit.type === "catapult") return 6;
+  if (unit.type === "battering_ram") return 5;
   if (unit.type === "siege_engine") return 4;
   if (unit.type === "archer" || unit.type === "militia") return 3;
   if (unit.type === "sovereign") return 2;
   return 1;
+}
+
+function isDedicatedSiegeUnit(unit: Unit): boolean {
+  return unit.type === "siege_engine" || unit.type === "battering_ram" || unit.type === "catapult";
 }
 
 function isFieldCombatUnit(unit: Unit): boolean {
@@ -3837,10 +6045,12 @@ function isFieldCombatUnit(unit: Unit): boolean {
 }
 
 function isSiegeCapableUnit(unit: Unit): boolean {
-  return isFieldCombatUnit(unit) || unit.type === "siege_engine";
+  return isFieldCombatUnit(unit) || isDedicatedSiegeUnit(unit);
 }
 
 function siegeUnitPriority(unit: Unit): number {
+  if (unit.type === "catapult") return 6;
+  if (unit.type === "battering_ram") return 5;
   if (unit.type === "siege_engine") return 4;
   if (unit.type === "archer") return 2;
   if (unit.type === "militia") return 1;
@@ -3876,6 +6086,12 @@ function buildingAttackDamage(state: GameState, unit: Unit, building: Building):
   if (unit.type === "siege_engine") {
     amount += building.type === "wall" || building.type === "gate" ? 10 : isFortificationBuilding(building.type) ? 6 : 2;
   }
+  if (unit.type === "battering_ram") {
+    amount += building.type === "wall" || building.type === "gate" ? 18 : isFortificationBuilding(building.type) ? 8 : 3;
+  }
+  if (unit.type === "catapult") {
+    amount += isFortificationBuilding(building.type) ? 10 : 6;
+  }
   if (isFortificationBuilding(building.type) && hasDevelopment(state, unit.tribeId, "siege_engineering")) amount += 2;
   return amount;
 }
@@ -3888,9 +6104,14 @@ export function estimateBreachTicks(state: GameState, tribeId: TribeId, targetBu
     .sort((left, right) => siegeUnitPriority(right) - siegeUnitPriority(left) || left.id.localeCompare(right.id))
     .slice(0, 5);
   if (attackers.length === 0) return undefined;
-  const volleyDamage = attackers.reduce((sum, unit) => sum + armoredDamage(buildingAttackDamage(state, unit, building), building.armor), 0);
-  if (volleyDamage <= 0) return undefined;
-  return Math.max(Math.round(TICK_RATE * 1.2), Math.ceil(building.hp / volleyDamage) * Math.round(TICK_RATE * 1.2));
+  const damagePerTick = attackers.reduce((sum, unit) => {
+    const damage = armoredDamage(buildingAttackDamage(state, unit, building), building.armor);
+    if (damage <= 0) return sum;
+    return sum + damage / Math.max(1, siegeAttackCooldownTicks(unit));
+  }, 0);
+  if (damagePerTick <= 0) return undefined;
+  const projectileDelay = attackers.reduce((max, unit) => (unit.type === "catapult" ? Math.max(max, siegeProjectileTravelTicks(unit, building)) : max), 0);
+  return Math.max(Math.round(TICK_RATE * 1.2), projectileDelay + Math.ceil(building.hp / damagePerTick));
 }
 
 function applyUnitDamage(state: GameState, target: Unit, amount: number, attackerTribeId: TribeId): void {
@@ -3922,7 +6143,7 @@ function applyBuildingDamage(state: GameState, building: Building, amount: numbe
     "STRUCTURE_DESTROYED",
     `${state.tribes[destroyedTribe].name} loses ${labelBuildingType(destroyedType)}`,
     `${labelBuildingType(destroyedType)} at ${destroyedAt.x},${destroyedAt.y} was destroyed${attackerTribeId ? ` by ${state.tribes[attackerTribeId].name}` : ""}.`,
-    "all"
+    directVisionVisibleTo(state, destroyedAt, [destroyedTribe, attackerTribeId])
   );
   updateVisibility(state);
   return true;
@@ -3966,6 +6187,27 @@ function destroyResourceDepositAt(
   updateVisibility(state);
 }
 
+function depleteResourceDepositAt(state: GameState, target: Position, depletedByTribeId?: TribeId, depletedSnapshot?: ResourceDeposit): void {
+  const tile = state.map[tileIndex(target.x, target.y)];
+  const resource = depletedSnapshot ?? tile.resource;
+  if (!resource) return;
+  const controlledBy = dominantResourceController(state, target, resource);
+  const visibleTo = resourceEventVisibleTo(state, target, [depletedByTribeId, controlledBy]);
+  if (resource.type === "wood" && tile.terrain === "forest") tile.terrain = "grass";
+  delete tile.resource;
+  recordResourceDepletion(state, target, resource, depletedByTribeId, controlledBy, visibleTo);
+  addEvent(
+    state,
+    "RESOURCE_DEPOSIT_DEPLETED",
+    `${labelResourceType(resource.type)} deposit exhausted`,
+    `${labelResourceType(resource.type)} deposit at ${target.x},${target.y} was exhausted${
+      depletedByTribeId ? ` by ${state.tribes[depletedByTribeId].name} harvesters` : ""
+    }.`,
+    visibleTo
+  );
+  updateVisibility(state);
+}
+
 function armoredDamage(amount: number, armor: number): number {
   if (amount <= 0) return 0;
   return Math.max(1, Math.round(amount - armor));
@@ -3999,7 +6241,7 @@ function updateYearlyWellbeing(state: GameState): void {
   for (let year = state.victoryPressure.lastProcessedYear + 1; year <= currentYear; year += 1) {
     for (const tribeId of tribeIds) {
       const tribe = state.tribes[tribeId];
-      if (tribe.eliminated) continue;
+      if (!isTribeActive(state, tribeId)) continue;
       const developmentHappiness = applyYearlyDevelopmentEffects(state, tribeId, year);
       const wealth = computeWealth(state, tribeId);
       const previous = tribe.lastYearWealth || wealth;
@@ -4019,9 +6261,39 @@ function updateYearlyWellbeing(state: GameState): void {
       delta += developmentHappiness;
       tribe.happiness = Math.round(clamp(tribe.happiness + delta, 0, 100));
       tribe.lastYearWealth = wealth;
+      applyYearlyPopulationGrowth(state, tribeId, year);
     }
     state.victoryPressure.lastProcessedYear = year;
   }
+}
+
+function applyYearlyPopulationGrowth(state: GameState, tribeId: TribeId, year: number): void {
+  const tribe = state.tribes[tribeId];
+  if (!isTribeActive(state, tribeId)) return;
+  const population = countLivingPopulation(state, tribeId);
+  const populationCap = getPopulationCap(state, tribeId);
+  if (population >= populationCap) return;
+  const safety = getTribeSafetyScore(state, tribeId);
+  if (tribe.happiness < 56 || safety < 38) return;
+  const foodCost = 38 + Math.max(0, Math.floor(population * 0.6));
+  if (tribe.resources.food < foodCost) return;
+  const townHall = findTownHall(state, tribeId);
+  if (!townHall) return;
+  const houses = Object.values(state.buildings)
+    .filter((building) => building.tribeId === tribeId && building.type === "house" && building.hp > 0)
+    .sort((left, right) => Math.hypot(left.x - townHall.x, left.y - townHall.y) - Math.hypot(right.x - townHall.x, right.y - townHall.y));
+  const source = houses[year % Math.max(1, houses.length)] ?? townHall;
+  const site = findNearestWalkable(state, { x: source.x + 1, y: source.y + 1 }, tribeId) ?? { x: source.x + 1, y: source.y + 1 };
+  tribe.resources.food -= foodCost;
+  const unit = addUnit(state, tribeId, "peon", site.x, site.y);
+  addEvent(
+    state,
+    "POPULATION_GROWTH",
+    `${tribe.name} population grows`,
+    `${unit.name} joins the working population in year ${year}. Capacity ${population + 1}/${populationCap}; food spent ${foodCost}.`,
+    [tribeId]
+  );
+  updateVisibility(state);
 }
 
 function applyYearlyDevelopmentEffects(state: GameState, tribeId: TribeId, year: number): number {
@@ -4060,7 +6332,7 @@ function updateVictoryPressure(state: GameState): void {
 }
 
 function runCenturyReview(state: GameState, reviewYear: number): void {
-  const surviving = getVictoryPressure(state).scoreByTribe.filter((score) => !score.eliminated);
+  const surviving = getVictoryPressure(state).scoreByTribe.filter((score) => isTribeActive(state, score.tribeId));
   if (surviving.length <= 1) {
     claimSurvivalWinner(state, surviving[0], reviewYear);
     return;
@@ -4070,7 +6342,7 @@ function runCenturyReview(state: GameState, reviewYear: number): void {
     .sort((left, right) => left.survivalScore - right.survivalScore || left.wealthPerCapita - right.wealthPerCapita || tribeIds.indexOf(left.tribeId) - tribeIds.indexOf(right.tribeId))[0];
   eliminateTribeAtReview(state, eliminated.tribeId, reviewYear, eliminated);
   const refreshed = getVictoryPressure(state);
-  const remaining = refreshed.scoreByTribe.filter((score) => !score.eliminated);
+  const remaining = refreshed.scoreByTribe.filter((score) => isTribeActive(state, score.tribeId));
   recordSurvivalReviewLearning(state, refreshed, eliminated, reviewYear, remaining.length === 1 ? remaining[0] : undefined);
   if (remaining.length === 1) claimSurvivalWinner(state, remaining[0], reviewYear);
 }
@@ -4170,7 +6442,7 @@ function recordSurvivalReviewLearning(
     state,
     "AI_LEARNING_APPLIED",
     "Sovereigns learn from the century review",
-    `Each AI wrote a private memory note after the year ${reviewYear} survival review.`,
+    `Each surviving court preserves a private lesson after the year ${reviewYear} survival review.`,
     "all"
   );
 }
@@ -4220,10 +6492,13 @@ function sendMessage(
   subject: string,
   body: string,
   requiresReply: boolean,
-  diplomacyIntent: DiplomacyIntent = inferDiplomacyIntent(type, body)
+  diplomacyIntent: DiplomacyIntent = inferDiplomacyIntent(type, body),
+  terms: { mergerLeaderTribeId?: TribeId; mergerTerms?: string } = {}
 ): { ok: true; packetId: string } | { ok: false; reason: string } {
-  if (state.tribes[originTribeId].eliminated) return { ok: false, reason: `${state.tribes[originTribeId].name} has been eliminated.` };
-  if (state.tribes[recipientTribeId].eliminated) return { ok: false, reason: `${state.tribes[recipientTribeId].name} has been eliminated.` };
+  const originInactiveReason = inactiveSeparateCivilizationReason(state, originTribeId);
+  if (originInactiveReason) return { ok: false, reason: originInactiveReason };
+  const recipientInactiveReason = inactiveSeparateCivilizationReason(state, recipientTribeId);
+  if (recipientInactiveReason) return { ok: false, reason: recipientInactiveReason };
   const messenger = Object.values(state.units).find(
     (unit) => unit.tribeId === originTribeId && unit.type === "messenger" && unit.hp > 0 && unit.task.kind === "idle"
   );
@@ -4245,10 +6520,13 @@ function sendMessage(
     subject,
     body,
     diplomacyIntent,
+    mergerLeaderTribeId: terms.mergerLeaderTribeId,
+    mergerTerms: terms.mergerTerms ? clampText(terms.mergerTerms, 500) : undefined,
     requiresReply,
     createdTick: state.tick
   };
   const estimatedTicks = Math.max(150, Math.round(path.length / messenger.speed * TICK_RATE * 2.6));
+  const outboundGateBuildingIds = recipientGateOperationCandidateIds(state, recipientTribeId, path, destinationPosition);
   const packet: Packet = {
     id: packetId,
     itemType: "packet",
@@ -4260,6 +6538,7 @@ function sendMessage(
     state: "IN_TRANSIT_OUTBOUND",
     destination: { x: destination.x, y: destination.y },
     returnTo: { x: origin.x, y: origin.y },
+    outboundGateBuildingIds,
     createdTick: state.tick,
     expectedReturnTick: state.tick + estimatedTicks,
     lastStateChangeTick: state.tick,
@@ -4268,6 +6547,7 @@ function sendMessage(
   };
   state.messages[messageId] = message;
   state.packets[packetId] = packet;
+  recordGateAccessTreatyRouteMemory(state, packet);
   recordMessageIntelForOwner(state, message, originTribeId, "sent");
   messenger.carriedPacketId = packetId;
   messenger.task = {
@@ -4288,8 +6568,36 @@ function sendMessage(
   return { ok: true, packetId };
 }
 
+function inactiveSeparateCivilizationReason(state: GameState, tribeId: TribeId): string | undefined {
+  const tribe = state.tribes[tribeId];
+  if (!tribe) return "Unknown civilization.";
+  if (tribe.eliminated) return `${tribe.name} has been eliminated.`;
+  if (tribe.mergedIntoTribeId) return `${tribe.name} has merged into ${state.tribes[tribe.mergedIntoTribeId].name}.`;
+  return undefined;
+}
+
 function recipientDecision(state: GameState, packet: Packet): { delayTicks: number; eventText: string } {
-  const delay = packet.recipientTribeId === "purple" ? 90 : packet.recipientTribeId === "yellow" ? 35 : 55;
+  let delay = packet.recipientTribeId === "purple" ? 90 : packet.recipientTribeId === "yellow" ? 35 : 55;
+  const gateOperation = activeGateOperationForPacket(state, packet);
+  const gateResolution = resolveGatePacketResolution(state, packet, gateOperation);
+  if (gateOperation && (gateResolution.action === "delay" || gateResolution.tollGold > 0)) {
+    const tollPaid = payGateTollIfPossible(state, packet, gateOperation, gateResolution);
+    if (gateResolution.action === "delay") delay += gateResolution.tollGold > 0 ? 45 : 70;
+    packet.routeMemory.push(`Gate operation ${gateOperation.id} admits messenger with action ${gateResolution.action}.`);
+    const tollText =
+      gateResolution.tollGold > 0
+        ? tollPaid
+          ? ` after a ${gateResolution.tollGold} gold toll`
+          : gateResolution.tollMode === "required"
+            ? ` despite an unpaid required toll`
+            : ` without collecting the optional ${gateResolution.tollGold} gold toll`
+        : "";
+    const delayText = gateResolution.action === "delay" ? " after gate delay" : "";
+    return {
+      delayTicks: delay,
+      eventText: `The messenger is admitted under gate operation ${gateOperation.id}${tollText}${delayText} and waits for an answer.`
+    };
+  }
   if (packet.recipientTribeId === "yellow" && random(state) < 0.2) {
     packet.routeMemory.push("The gate guards searched the packet and kept the messenger waiting.");
     return { delayTicks: delay + 90, eventText: "The messenger is searched and delayed at the gate." };
@@ -4371,8 +6679,173 @@ function resolveAllianceFromDiscussion(state: GameState, original: Message, repl
   return result.ok;
 }
 
+function resolveMergerFromDiscussion(state: GameState, original: Message, reply: Message): CivilizationMergerRecord | undefined {
+  if (original.diplomacyIntent !== "MERGER_OFFER" || reply.diplomacyIntent !== "MERGER_ACCEPT") return undefined;
+  const leaderTribeId = original.mergerLeaderTribeId;
+  if (!leaderTribeId || reply.mergerLeaderTribeId !== leaderTribeId) return undefined;
+  if (leaderTribeId !== original.originTribeId && leaderTribeId !== original.recipientTribeId) return undefined;
+  const mergedTribeId = leaderTribeId === original.originTribeId ? original.recipientTribeId : original.originTribeId;
+  const terms = clampText(
+    [original.mergerTerms, reply.mergerTerms, `Proposal: ${original.body}`, `Acceptance: ${reply.body}`].filter(Boolean).join(" | "),
+    900
+  );
+  const result = completeCivilizationMerger(state, {
+    leaderTribeId,
+    mergedTribeId,
+    proposerTribeId: original.originTribeId,
+    accepterTribeId: reply.originTribeId,
+    proposalMessageId: original.id,
+    acceptanceMessageId: reply.id,
+    terms
+  });
+  return result.ok ? result.record : undefined;
+}
+
+export function completeCivilizationMerger(
+  state: GameState,
+  input: {
+    leaderTribeId: TribeId;
+    mergedTribeId: TribeId;
+    proposerTribeId: TribeId;
+    accepterTribeId: TribeId;
+    proposalMessageId: string;
+    acceptanceMessageId: string;
+    terms: string;
+  }
+): { ok: true; record: CivilizationMergerRecord } | { ok: false; reason: string } {
+  const { leaderTribeId, mergedTribeId } = input;
+  if (leaderTribeId === mergedTribeId) return { ok: false, reason: "a civilization cannot merge into itself" };
+  if (!isTribeActive(state, leaderTribeId)) return { ok: false, reason: `${state.tribes[leaderTribeId].name} is not an active leader civilization` };
+  if (!isTribeActive(state, mergedTribeId)) return { ok: false, reason: `${state.tribes[mergedTribeId].name} is not an active civilization to merge` };
+
+  const leader = state.tribes[leaderTribeId];
+  const merged = state.tribes[mergedTribeId];
+  const leaderPopulation = countLivingPopulation(state, leaderTribeId);
+  const mergedPopulation = countLivingPopulation(state, mergedTribeId);
+  const transferredResources = Object.fromEntries(resourceTypes.map((type) => [type, Math.round(merged.resources[type])])) as Resources;
+  for (const type of resourceTypes) {
+    leader.resources[type] += merged.resources[type];
+    merged.resources[type] = 0;
+  }
+
+  leader.developments = Array.from(new Set([...leader.developments, ...merged.developments]));
+  merged.developments = [];
+  leader.happiness =
+    leaderPopulation + mergedPopulation > 0
+      ? Math.round((leader.happiness * leaderPopulation + merged.happiness * mergedPopulation) / (leaderPopulation + mergedPopulation))
+      : Math.round((leader.happiness + merged.happiness) / 2);
+  leader.populationCap += merged.populationCap;
+  merged.populationCap = 0;
+  merged.lastYearWealth = 0;
+
+  let transferredUnits = 0;
+  let retiredSovereignUnitId: string | undefined;
+  for (const unit of Object.values(state.units)) {
+    if (unit.tribeId !== mergedTribeId || unit.hp <= 0) continue;
+    transferredUnits += 1;
+    unit.tribeId = leaderTribeId;
+    unit.task = { kind: "idle" };
+    if (unit.type === "sovereign") {
+      retiredSovereignUnitId = unit.id;
+      unit.type = "sentinel";
+      const stats = effectiveUnitStats(state, leaderTribeId, "sentinel");
+      Object.assign(unit, stats);
+      unit.name = clampText(`Retired sovereign ${merged.sovereignName}`, 80);
+    }
+  }
+
+  let transferredBuildings = 0;
+  for (const building of Object.values(state.buildings)) {
+    if (building.tribeId !== mergedTribeId || building.hp <= 0) continue;
+    transferredBuildings += 1;
+    building.tribeId = leaderTribeId;
+  }
+
+  mergeDiplomacyState(state, leaderTribeId, mergedTribeId);
+  for (const packet of Object.values(state.packets)) {
+    if (packet.originTribeId === mergedTribeId) packet.originTribeId = leaderTribeId;
+    if (packet.recipientTribeId === mergedTribeId) packet.recipientTribeId = leaderTribeId;
+  }
+
+  merged.mergedIntoTribeId = leaderTribeId;
+  merged.mergedLeaderTribeId = leaderTribeId;
+  merged.mergedTick = state.tick;
+  merged.mergedYear = getCurrentYear(state);
+  merged.mergedTerms = clampText(input.terms, 900);
+  merged.nextMessageTick = Number.POSITIVE_INFINITY;
+  state.sovereignDecisionCursors[mergedTribeId] = { updatedTick: state.tick };
+  leader.lastYearWealth = computeWealth(state, leaderTribeId);
+  invalidateResourceControlCache(state);
+
+  const record: CivilizationMergerRecord = {
+    id: nextId(state, "civilization_merger"),
+    tick: state.tick,
+    year: getCurrentYear(state),
+    leaderTribeId,
+    mergedTribeId,
+    proposerTribeId: input.proposerTribeId,
+    accepterTribeId: input.accepterTribeId,
+    proposalMessageId: input.proposalMessageId,
+    acceptanceMessageId: input.acceptanceMessageId,
+    terms: clampText(input.terms, 900),
+    transferredUnits,
+    transferredBuildings,
+    transferredResources,
+    retiredSovereignUnitId,
+    visibleTo: [leaderTribeId, mergedTribeId]
+  };
+  pushBoundedRecord(state.civilizationMergers, record, 40);
+  appendSovereignMemory(state, leaderTribeId, `Merger executed: ${merged.name} joined under ${leader.sovereignName}. Terms: ${record.terms}`);
+  appendSovereignMemory(state, mergedTribeId, `Merger executed: your people joined ${leader.name} under ${leader.sovereignName}. Terms: ${record.terms}`);
+  addEvent(
+    state,
+    "CIVILIZATION_MERGED",
+    `${merged.name} merges into ${leader.name}`,
+    `${merged.name} joins ${leader.name} under ${leader.sovereignName}. Population transferred ${transferredUnits}; buildings transferred ${transferredBuildings}. Terms: ${record.terms}`,
+    [leaderTribeId, mergedTribeId]
+  );
+  updateVisibility(state);
+  return { ok: true, record };
+}
+
+function mergeDiplomacyState(state: GameState, leaderTribeId: TribeId, mergedTribeId: TribeId): void {
+  const inheritedAlly = state.alliances[mergedTribeId];
+  delete state.alliances[mergedTribeId];
+  if (state.alliances[leaderTribeId] === mergedTribeId) delete state.alliances[leaderTribeId];
+  for (const tribeId of tribeIds) {
+    if (state.alliances[tribeId] === mergedTribeId) {
+      if (tribeId !== leaderTribeId && !state.alliances[leaderTribeId]) {
+        state.alliances[tribeId] = leaderTribeId;
+        state.alliances[leaderTribeId] = tribeId;
+      } else {
+        delete state.alliances[tribeId];
+      }
+    }
+  }
+  if (inheritedAlly && inheritedAlly !== leaderTribeId && isTribeActive(state, inheritedAlly) && !state.alliances[leaderTribeId] && !state.alliances[inheritedAlly]) {
+    state.alliances[leaderTribeId] = inheritedAlly;
+    state.alliances[inheritedAlly] = leaderTribeId;
+  }
+
+  for (const other of tribeIds) {
+    if (other === leaderTribeId || other === mergedTribeId) continue;
+    const inheritedWar = state.wars[mergedTribeId]?.[other] || state.wars[other]?.[mergedTribeId];
+    delete state.wars[mergedTribeId][other];
+    delete state.wars[other][mergedTribeId];
+    if (inheritedWar && isTribeActive(state, other)) {
+      state.wars[leaderTribeId][other] = true;
+      state.wars[other][leaderTribeId] = true;
+    }
+  }
+  delete state.wars[leaderTribeId][mergedTribeId];
+  delete state.wars[mergedTribeId][leaderTribeId];
+}
+
 function inferDiplomacyIntent(type: MessageType, body: string | undefined): DiplomacyIntent {
   const normalized = (body ?? "").toLowerCase();
+  if (type === "MERGER_PROPOSAL" || /\b(merge|merger|unite our civilizations|one civilization|one people)\b/.test(normalized)) {
+    return type === "REPLY" ? "MERGER_ACCEPT" : "MERGER_OFFER";
+  }
   if (normalized.includes("alliance") || normalized.includes("ally")) return type === "REPLY" ? "ALLIANCE_ACCEPT" : "ALLIANCE_OFFER";
   if (type === "THREAT" || normalized.includes("warn") || normalized.includes("demand")) return "WARNING";
   if (type === "TREATY_PROPOSAL" || normalized.includes("peace") || normalized.includes("safe passage")) return "PEACE_OFFER";
@@ -4387,6 +6860,22 @@ function recordRouteMemory(state: GameState, unit: Unit, packet: Packet): void {
   if (nearby.length > 0) {
     packet.routeMemory.push(`Route report: armed ${state.tribes[nearby[0].tribeId].name} units seen near ${Math.round(unit.x)},${Math.round(unit.y)}.`);
   }
+}
+
+function recordGateAccessTreatyRouteMemory(state: GameState, packet: Packet): void {
+  const gateIds = packet.outboundGateBuildingIds ?? [];
+  for (const gateId of gateIds) {
+    const treaty = activeGateAccessTreatyForTribe(state, gateId, packet.originTribeId);
+    if (!treaty) continue;
+    const gate = state.buildings[gateId];
+    const treatyName = treaty.treatyName ? ` "${treaty.treatyName}"` : "";
+    const expiry = treaty.expiresAtTick ? ` until turn ${treaty.expiresAtTick}` : "";
+    const note = `Safe-passage treaty ${treaty.id}${treatyName} let ${state.tribes[packet.originTribeId].name}'s courier route through ${state.tribes[treaty.tribeId].name} gate ${gateId}${gate ? ` at ${gate.x},${gate.y}` : ""}${expiry}.`;
+    if (!packet.routeMemory.some((entry) => entry.includes(`Safe-passage treaty ${treaty.id}`))) {
+      packet.routeMemory.push(note);
+    }
+  }
+  if (packet.routeMemory.length > 12) packet.routeMemory.splice(0, packet.routeMemory.length - 12);
 }
 
 function updateVisibility(state: GameState): void {
@@ -4602,60 +7091,48 @@ function generateMap(seed: number): Tile[] {
       map.push(terrain === "forest" ? { terrain, resource: createResourceDeposit("wood", 90 + Math.floor(next() * 90)) } : { terrain });
     }
   }
-  const center = { x: 64, y: 64 };
+  const center = mapCenter();
   for (const start of Object.values(starts)) drawRoad(map, start, center);
   for (const [tribeId, start] of Object.entries(starts) as [TribeId, Position][]) {
     clearArea(map, start, 8);
-    addResourcePatch(map, jitter({ x: start.x + 7, y: start.y - 5 }, 3, next), "gold", 360 + Math.floor(next() * 120));
-    addResourcePatch(map, jitter({ x: start.x - 7, y: start.y + 7 }, 3, next), "stone", 340 + Math.floor(next() * 100));
-    addResourcePatch(map, jitter({ x: start.x + 1, y: start.y + 8 }, 3, next), "food", 400 + Math.floor(next() * 140));
-    addResourcePatch(map, jitter({ x: start.x - 8, y: start.y - 7 }, 4, next), "clay", 220 + Math.floor(next() * 100), 1);
-    addResourcePatch(map, jitter({ x: start.x + 8, y: start.y + 6 }, 4, next), "limestone", 160 + Math.floor(next() * 80), 1);
+    if (resourceScarcityPolicy.gold.localStarterPatch) addResourcePatch(map, jitter({ x: start.x + 7, y: start.y - 5 }, 3, next), "gold", 360 + Math.floor(next() * 120));
+    if (resourceScarcityPolicy.stone.localStarterPatch) addResourcePatch(map, jitter({ x: start.x - 7, y: start.y + 7 }, 3, next), "stone", 340 + Math.floor(next() * 100));
+    if (resourceScarcityPolicy.food.localStarterPatch) addResourcePatch(map, jitter({ x: start.x + 1, y: start.y + 8 }, 3, next), "food", 400 + Math.floor(next() * 140));
+    if (resourceScarcityPolicy.clay.localStarterPatch) addResourcePatch(map, jitter({ x: start.x - 8, y: start.y - 7 }, 4, next), "clay", 220 + Math.floor(next() * 100), 1);
+    if (resourceScarcityPolicy.limestone.localStarterPatch) {
+      addResourcePatch(map, jitter({ x: start.x + 8, y: start.y + 6 }, 4, next), "limestone", 160 + Math.floor(next() * 80), 1);
+    }
     addForestRing(map, jitter(tribeId === "purple" ? { x: start.x - 12, y: start.y - 10 } : { x: start.x - 10, y: start.y - 4 }, 3, next));
   }
   const contestedDeposits: { center: Position; type: ResourceType; amount: number; spread: number; radius?: number }[] = [
-    { center: { x: 61, y: 61 }, type: "coal", amount: 180, spread: 8 },
-    { center: { x: 67, y: 67 }, type: "coal", amount: 180, spread: 8 },
-    { center: { x: 52, y: 64 }, type: "coal", amount: 150, spread: 9 },
-    { center: { x: 76, y: 64 }, type: "coal", amount: 150, spread: 9 },
+    { center: fromMapCenter(-3, -3), type: "coal", amount: 180, spread: scaledMapOffset(8) },
+    { center: fromMapCenter(3, 3), type: "coal", amount: 180, spread: scaledMapOffset(8) },
+    { center: fromMapCenter(-12, 0), type: "coal", amount: 150, spread: scaledMapOffset(9) },
+    { center: fromMapCenter(12, 0), type: "coal", amount: 150, spread: scaledMapOffset(9) },
     { center, type: "iron", amount: 300, spread: 7, radius: 1 },
-    { center: { x: 64, y: 39 }, type: "iron", amount: 230, spread: 6 },
-    { center: { x: 64, y: 90 }, type: "iron", amount: 230, spread: 6 },
-    { center: { x: 39, y: 64 }, type: "iron", amount: 230, spread: 6 },
-    { center: { x: 90, y: 64 }, type: "iron", amount: 230, spread: 6 },
-    { center: { x: 43, y: 54 }, type: "limestone", amount: 300, spread: 10, radius: 1 },
-    { center: { x: 85, y: 54 }, type: "limestone", amount: 300, spread: 10, radius: 1 },
-    { center: { x: 43, y: 74 }, type: "limestone", amount: 300, spread: 10, radius: 1 },
-    { center: { x: 85, y: 74 }, type: "limestone", amount: 300, spread: 10, radius: 1 },
-    { center: { x: 52, y: 52 }, type: "clay", amount: 360, spread: 9, radius: 1 },
-    { center: { x: 76, y: 52 }, type: "clay", amount: 360, spread: 9, radius: 1 },
-    { center: { x: 52, y: 76 }, type: "clay", amount: 360, spread: 9, radius: 1 },
-    { center: { x: 76, y: 76 }, type: "clay", amount: 360, spread: 9, radius: 1 },
-    { center: { x: 64, y: 64 }, type: "gold", amount: 420, spread: 14, radius: 1 },
-    { center: { x: 47, y: 47 }, type: "stone", amount: 420, spread: 8 },
-    { center: { x: 81, y: 81 }, type: "stone", amount: 420, spread: 8 }
+    { center: fromMapCenter(0, -25), type: "iron", amount: 230, spread: scaledMapOffset(6) },
+    { center: fromMapCenter(0, 26), type: "iron", amount: 230, spread: scaledMapOffset(6) },
+    { center: fromMapCenter(-25, 0), type: "iron", amount: 230, spread: scaledMapOffset(6) },
+    { center: fromMapCenter(26, 0), type: "iron", amount: 230, spread: scaledMapOffset(6) },
+    { center: fromMapCenter(-21, -10), type: "limestone", amount: 300, spread: scaledMapOffset(10), radius: 1 },
+    { center: fromMapCenter(21, -10), type: "limestone", amount: 300, spread: scaledMapOffset(10), radius: 1 },
+    { center: fromMapCenter(-21, 10), type: "limestone", amount: 300, spread: scaledMapOffset(10), radius: 1 },
+    { center: fromMapCenter(21, 10), type: "limestone", amount: 300, spread: scaledMapOffset(10), radius: 1 },
+    { center: fromMapCenter(-12, -12), type: "clay", amount: 360, spread: scaledMapOffset(9), radius: 1 },
+    { center: fromMapCenter(12, -12), type: "clay", amount: 360, spread: scaledMapOffset(9), radius: 1 },
+    { center: fromMapCenter(-12, 12), type: "clay", amount: 360, spread: scaledMapOffset(9), radius: 1 },
+    { center: fromMapCenter(12, 12), type: "clay", amount: 360, spread: scaledMapOffset(9), radius: 1 },
+    { center, type: "gold", amount: 420, spread: scaledMapOffset(14), radius: 1 },
+    { center: fromMapCenter(-17, -17), type: "stone", amount: 420, spread: scaledMapOffset(8) },
+    { center: fromMapCenter(17, 17), type: "stone", amount: 420, spread: scaledMapOffset(8) }
   ];
   for (const deposit of contestedDeposits) {
     addResourcePatch(map, jitter(deposit.center, deposit.spread, next), deposit.type, deposit.amount + Math.floor(next() * 80), deposit.radius ?? 0);
   }
   for (let i = 0; i < 28; i += 1) {
     const angle = next() * Math.PI * 2;
-    const radius = 18 + next() * 42;
-    const roll = next();
-    const type: ResourceType =
-      roll < 0.12
-        ? "coal"
-        : roll < 0.27
-          ? "iron"
-          : roll < 0.44
-            ? "limestone"
-            : roll < 0.6
-              ? "clay"
-              : roll < 0.76
-                ? "stone"
-                : roll < 0.9
-                  ? "gold"
-                  : "food";
+    const radius = scaledMapOffset(18 + next() * 42);
+    const type = pickWildResourceType(next);
     const amount =
       type === "coal"
         ? 80 + Math.floor(next() * 60)
@@ -4671,6 +7148,17 @@ function generateMap(seed: number): Tile[] {
     );
   }
   return map;
+}
+
+function pickWildResourceType(next: () => number): ResourceType {
+  const wildTypes = resourceTypes.filter((type) => resourceScarcityPolicy[type].wildWeight > 0);
+  const totalWeight = wildTypes.reduce((sum, type) => sum + resourceScarcityPolicy[type].wildWeight, 0);
+  let roll = next() * totalWeight;
+  for (const type of wildTypes) {
+    roll -= resourceScarcityPolicy[type].wildWeight;
+    if (roll <= 0) return type;
+  }
+  return wildTypes[wildTypes.length - 1] ?? "food";
 }
 
 function drawRoad(map: Tile[], from: Position, to: Position): void {
@@ -4776,6 +7264,8 @@ function isBlockingBuildingAt(state: GameState, x: number, y: number, tribeId?: 
 
 export function isBuildingMovementBlocking(building: Building): boolean {
   if (building.hp <= 0) return false;
+  if (building.type === "gate" && building.gateSabotage?.action === "force_open") return false;
+  if (building.type === "gate" && building.gateSabotage?.action === "jam_closed") return true;
   if (building.type === "gate") return building.gateState !== "open";
   return buildingStats[building.type].blocksMovement;
 }
@@ -4783,8 +7273,11 @@ export function isBuildingMovementBlocking(building: Building): boolean {
 function isBuildingMovementBlockingForTribe(state: GameState, building: Building, tribeId?: TribeId): boolean {
   if (building.hp <= 0) return false;
   if (building.type !== "gate") return buildingStats[building.type].blocksMovement;
+  if (building.gateSabotage?.action === "force_open") return false;
+  if (building.gateSabotage?.action === "jam_closed") return true;
   if (building.gateState !== "open") return true;
   if (!tribeId) return false;
+  if (hasActiveGateAccessTreaty(state, building, tribeId)) return false;
   const policy = building.gateAccessPolicy ?? "owner_allies";
   if (policy === "all") return false;
   if (policy === "owner_only") return tribeId !== building.tribeId;

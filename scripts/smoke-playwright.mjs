@@ -99,6 +99,7 @@ await page.route("**/api/ai-bug-report", async (route, request) => {
 await page.goto(url, { waitUntil: "domcontentloaded" });
 await page.waitForSelector("canvas", { timeout: 15_000 });
 await page.click("#pauseButton");
+await assertFreshAndSeededResourceStarts(page);
 const hookCheck = await page.evaluate(() => {
   if (typeof window.render_game_to_text !== "function" || typeof window.advanceTime !== "function") {
     return { ok: false, reason: "missing hooks" };
@@ -152,15 +153,19 @@ if (
 ) {
   throw new Error(`render_game_to_text did not expose compact AI status: ${JSON.stringify(hookCheck.compactAiStatus)}`);
 }
-if (!hookCheck.combatStatCoverage?.ok || hookCheck.combatStatCoverage?.byKind?.unitType !== 8 || hookCheck.combatStatCoverage?.byKind?.buildingType !== 8) {
+if (!hookCheck.combatStatCoverage?.ok || hookCheck.combatStatCoverage?.byKind?.unitType < 10 || hookCheck.combatStatCoverage?.byKind?.buildingType < 9) {
   throw new Error(`render_game_to_text did not expose complete combat stat coverage: ${JSON.stringify(hookCheck.combatStatCoverage)}`);
 }
 if (
   hookCheck.developmentCatalog?.total < 100 ||
   hookCheck.developmentCatalog?.sampleCount > 16 ||
   hookCheck.developmentCatalog?.omittedCount < 1 ||
+  !Array.isArray(hookCheck.developmentCatalog?.filters?.categories) ||
+  !hookCheck.developmentCatalog?.filters?.textFields?.includes("aliases") ||
+  !hookCheck.developmentCatalog?.sample?.some((entry) => Array.isArray(entry.aliases) && entry.aliases.length > 0 && Array.isArray(entry.tradeoffs) && entry.tradeoffs.length > 0) ||
   hookCheck.blueDevelopmentSummary?.total !== hookCheck.developmentCatalog?.total ||
-  hookCheck.blueDevelopmentSummary?.availableSample?.length > 16
+  hookCheck.blueDevelopmentSummary?.availableSample?.length > 16 ||
+  !hookCheck.blueDevelopmentSummary?.availableSample?.some((entry) => Array.isArray(entry.synergies) && entry.synergies.length > 0 && Array.isArray(entry.socialCosts) && entry.socialCosts.length > 0)
 ) {
   throw new Error(`render_game_to_text did not expose bounded 100+ development telemetry: ${JSON.stringify({
     catalog: hookCheck.developmentCatalog,
@@ -518,21 +523,21 @@ if (!selfReportResult.ok) {
 if (selfReportResult.issue?.saveState !== "saved") {
   throw new Error(`Successful AI self-report did not return a saved issue: ${JSON.stringify(selfReportResult)}`);
 }
-if (!selfReportResult.memoryIncludesReport) {
+if (!reportEnteredSovereignMemory(selfReportResult.memory, "Smoke explicit AI self-report")) {
   throw new Error(`Explicit AI self-report did not enter sovereign memory for the next prompt: ${JSON.stringify(selfReportResult)}`);
 }
 const savedSelfReportState = await readSelfReportState(page, smokeSelfReportBody);
 if (savedSelfReportState.issue?.saveState !== "saved") {
   throw new Error(`render_game_to_text did not expose the saved self-report issue: ${JSON.stringify(savedSelfReportState)}`);
 }
-if (!savedSelfReportState.memory.some((note) => note.includes("AI iteration report filed") && note.includes("Smoke verified"))) {
+if (!reportEnteredSovereignMemory(savedSelfReportState.memory, "Smoke explicit AI self-report")) {
   throw new Error(`Successful self-report did not enter sovereign memory with the report text: ${JSON.stringify(savedSelfReportState.memory)}`);
 }
 const selfReportMemory = await page.evaluate(() => {
   const blue = JSON.parse(window.render_game_to_text()).tribes?.find((tribe) => tribe.id === "blue");
   return blue?.memory ?? [];
 });
-if (!selfReportMemory.some((note) => String(note).includes("AI iteration report filed"))) {
+if (!reportEnteredSovereignMemory(selfReportMemory, "Smoke explicit AI self-report")) {
   throw new Error(`render_game_to_text did not expose AI report memory feedback: ${JSON.stringify(selfReportMemory)}`);
 }
 let iterationPromptContext = await page.evaluate(() => JSON.parse(window.render_game_to_text()).aiIterationPromptContext);
@@ -838,7 +843,7 @@ const fixedMemory = await page.evaluate(() => {
   const blue = JSON.parse(window.render_game_to_text()).tribes?.find((tribe) => tribe.id === "blue");
   return blue?.memory ?? [];
 });
-if (!fixedMemory.some((note) => String(note).includes("AI iteration report fixed"))) {
+if (!reportFixedInSovereignMemory(fixedMemory, "Smoke explicit AI self-report")) {
   throw new Error(`Fixed AI report triage did not feed back into sovereign memory: ${JSON.stringify(fixedMemory)}`);
 }
 iterationPromptContext = await page.evaluate(() => JSON.parse(window.render_game_to_text()).aiIterationPromptContext);
@@ -1098,20 +1103,36 @@ if (
 ) {
   throw new Error(`render_game_to_text did not expose the smoke information request: ${JSON.stringify(infoRequestState)}`);
 }
+const diplomacyAlreadyVisible = await page.evaluate(() => document.querySelector("#diplomacyPanel")?.textContent?.includes("Reply intent") ?? false);
+if (!diplomacyAlreadyVisible) {
+  const forcedDiplomacy = await page.evaluate(() => {
+    if (typeof window.force_diplomacy_for_test !== "function") return { ok: false, reason: "missing diplomacy hook" };
+    return window.force_diplomacy_for_test("red", "peace");
+  });
+  if (!forcedDiplomacy.ok) throw new Error(`Could not force smoke diplomacy before reply wait: ${JSON.stringify(forcedDiplomacy)}`);
+}
 for (let i = 0; i < 3; i += 1) await page.click("#speedButton");
 let diplomacyReplyText = "";
-	try {
-	  await page.waitForFunction(
-	    () => document.querySelector("#diplomacyPanel")?.textContent?.includes("Reply intent"),
-	    null,
-	    { timeout: 90_000 }
-	  );
+try {
+  await page.waitForFunction(
+    () => {
+      if (document.querySelector("#diplomacyPanel")?.textContent?.includes("Reply intent")) return true;
+      window.advanceTime?.(5_000);
+      return false;
+    },
+    null,
+    { timeout: 90_000, polling: 500 }
+  );
   diplomacyReplyText = await page.locator("#diplomacyPanel").innerText();
 } catch (error) {
   const currentLlmText = await page.locator("#llmPanel").innerText().catch(() => "");
   const currentDiplomacyText = await page.locator("#diplomacyPanel").innerText().catch(() => "");
   const currentHookText = await page.evaluate(() => (typeof window.render_game_to_text === "function" ? window.render_game_to_text() : "{}")).catch(() => "{}");
+  if (currentDiplomacyText.includes("Reply intent")) {
+    diplomacyReplyText = currentDiplomacyText;
+  } else {
   throw new Error(`Diplomacy reply did not complete before survival fast-forward. LLM panel: ${currentLlmText}\nDiplomacy: ${currentDiplomacyText}\nHook: ${currentHookText}`);
+  }
 }
 let hoverText = "";
 const hoverTargets = await page.evaluate(() => {
@@ -1566,6 +1587,20 @@ async function readSelfReportState(page, reportMarker) {
   }, reportMarker);
 }
 
+function reportEnteredSovereignMemory(memory, reportTitle) {
+  return (memory ?? []).some((note) => {
+    const text = String(note ?? "");
+    return text.includes("report filed") && text.includes("self_report") && text.includes(reportTitle);
+  });
+}
+
+function reportFixedInSovereignMemory(memory, reportTitle) {
+  return (memory ?? []).some((note) => {
+    const text = String(note ?? "");
+    return text.includes("report fixed") && text.includes(reportTitle);
+  });
+}
+
 async function setReportReviewFilters(page, filters = {}) {
   await page.evaluate((nextFilters) => {
     const setSelect = (id, value) => {
@@ -1589,6 +1624,104 @@ async function setReportReviewFilters(page, filters = {}) {
       }
     }
   }, filters);
+}
+
+async function assertFreshAndSeededResourceStarts(page) {
+  const defaultUrl = new URL(url);
+  defaultUrl.searchParams.delete("seed");
+  const firstFresh = await loadSeedAuditGame(page, defaultUrl.href);
+  const secondFresh = await loadSeedAuditGame(page, defaultUrl.href);
+  if (!Number.isInteger(firstFresh.seed) || !Number.isInteger(secondFresh.seed) || firstFresh.seed === secondFresh.seed) {
+    throw new Error(`Default browser starts did not use fresh seeds: ${JSON.stringify({ firstFresh, secondFresh })}`);
+  }
+  if (firstFresh.resourcePlacementSignature === secondFresh.resourcePlacementSignature) {
+    throw new Error(`Default browser starts reused the same resource placement: ${JSON.stringify({ firstFresh, secondFresh })}`);
+  }
+  assertScarcityTelemetry(firstFresh);
+  assertScarcityTelemetry(secondFresh);
+
+  const seededUrl = new URL(defaultUrl.href);
+  seededUrl.searchParams.set("seed", "4242");
+  const firstSeeded = await loadSeedAuditGame(page, seededUrl.href);
+  const secondSeeded = await loadSeedAuditGame(page, seededUrl.href);
+  if (firstSeeded.seed !== 4242 || secondSeeded.seed !== 4242) {
+    throw new Error(`Explicit seed override was not honored: ${JSON.stringify({ firstSeeded, secondSeeded })}`);
+  }
+  if (firstSeeded.resourcePlacementSignature !== secondSeeded.resourcePlacementSignature) {
+    throw new Error(`Explicit seeded browser starts did not replay resource placement: ${JSON.stringify({ firstSeeded, secondSeeded })}`);
+  }
+  assertScarcityTelemetry(firstSeeded);
+
+  await loadSeedAuditGame(page, defaultUrl.href);
+}
+
+async function loadSeedAuditGame(page, targetUrl) {
+  await page.goto(targetUrl, { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("canvas", { timeout: 15_000 });
+  await page.waitForFunction(() => typeof window.render_game_to_text === "function", null, { timeout: 15_000 });
+  await page.click("#pauseButton");
+  return await page.evaluate(() => {
+    const parsed = JSON.parse(window.render_game_to_text());
+    const resourceTiles = (parsed.resourceTiles ?? [])
+      .map((entry) => ({
+        type: String(entry.type),
+        tiles: Number(entry.tiles ?? 0),
+        amount: Number(entry.amount ?? 0)
+      }))
+      .sort((left, right) => left.type.localeCompare(right.type));
+    const contestedResourceSites = (parsed.contestedResourceSites ?? [])
+      .map((site) => ({
+        type: String(site.type),
+        x: Number(site.x),
+        y: Number(site.y),
+        amount: Number(site.amount ?? 0),
+        scarce: site.scarce === true,
+        contested: site.contested === true
+      }))
+      .sort((left, right) => left.type.localeCompare(right.type) || left.x - right.x || left.y - right.y);
+    return {
+      seed: parsed.seed,
+      resourceTiles,
+      contestedResourceSites,
+      resourcePlacementSignature:
+        parsed.resourceLayoutFingerprint ||
+        JSON.stringify({
+          resourceTiles: resourceTiles.map((entry) => ({
+            ...entry,
+            samples: Array.isArray(entry.samples)
+              ? entry.samples.map((sample) => ({
+                  x: Number(sample.x),
+                  y: Number(sample.y),
+                  amount: Number(sample.amount ?? 0),
+                  hp: Number(sample.hp ?? 0)
+                }))
+              : []
+          })),
+          contestedResourceSites
+        })
+    };
+  });
+}
+
+function assertScarcityTelemetry(snapshot) {
+  const byType = new Map(snapshot.resourceTiles.map((entry) => [entry.type, entry]));
+  const iron = byType.get("iron");
+  const coal = byType.get("coal");
+  const food = byType.get("food");
+  const stone = byType.get("stone");
+  const clay = byType.get("clay");
+  if (!iron?.tiles || !coal?.tiles || !food?.tiles || !stone?.tiles || !clay?.tiles) {
+    throw new Error(`Seeded map did not expose required resource tiles: ${JSON.stringify(snapshot)}`);
+  }
+  if (iron.tiles >= food.tiles || coal.tiles >= food.tiles || coal.tiles >= stone.tiles || coal.tiles >= clay.tiles) {
+    throw new Error(`Scarce resources were not bounded relative to common resources: ${JSON.stringify(snapshot)}`);
+  }
+  if (!snapshot.contestedResourceSites.some((site) => site.type === "iron" && site.scarce && site.contested)) {
+    throw new Error(`No contested scarce iron site was exposed: ${JSON.stringify(snapshot)}`);
+  }
+  if (!snapshot.contestedResourceSites.some((site) => site.type === "coal" && site.scarce && site.contested)) {
+    throw new Error(`No contested scarce coal site was exposed: ${JSON.stringify(snapshot)}`);
+  }
 }
 
 async function installDeterministicOllamaRoutes(page) {
