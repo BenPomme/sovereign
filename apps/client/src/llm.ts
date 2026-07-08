@@ -1731,7 +1731,7 @@ function summarizeAccessiblePlans(state: GameState, tribeId: TribeId, sinceTick:
         `turn ${plan.tick} fortification ${plan.buildingId} ${plan.buildingType} at ${plan.x},${plan.y}: ${cleanText(
           plan.perimeterStrategy || plan.fortificationIntent || plan.reason,
           textLimit
-        )}`
+        )}${plan.placementPreview ? `; placement preview ${cleanText(plan.placementPreview.summary, textLimit)}` : ""}`
     );
   const gates = state.gateOperations
     .filter((operation) => operation.tick > sinceTick && operation.tribeId === tribeId)

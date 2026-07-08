@@ -620,7 +620,10 @@ async function assertPerimeterBuild(page) {
     result.length !== 5 ||
     result.gateIndex !== 3 ||
     result.wallBlocks !== true ||
-    result.gatePassable !== true
+    result.gatePassable !== true ||
+    result.placementPreview?.blockingTileCount !== 4 ||
+    result.placementPreview?.ownerGatePassableCount !== 1 ||
+    result.placementPreview?.routeChecks?.length < 2
   ) {
     throw new Error(`Perimeter hook did not build a visible blocking wall/gate line: ${JSON.stringify(result)}`);
   }
@@ -640,6 +643,7 @@ async function assertPerimeterBuild(page) {
       group,
       panel,
       planCount: plans?.length ?? 0,
+      planPlacementPreview: plans?.[0]?.placementPreview,
       matchingVisibleBuildings: parsed.visibleBuildings.filter((building) => buildingIds.includes(building.id)).length
     };
   }, { buildingIds: result.buildingIds ?? [], groupId: result.groupId });
@@ -663,7 +667,11 @@ async function assertPerimeterBuild(page) {
 	    state.overlay?.visualOverlayMarkers?.perimeterCenterMarkers < 1 ||
 	    !state.overlay?.visualOverlayMarkers?.perimeterGroupIds?.includes(result.groupId) ||
 	    state.overlay?.visualOverlayMarkers?.blockedRouteMarkers < 4 ||
-	    state.overlay?.visualOverlayMarkers?.safePassageMarkers < 1
+	    state.overlay?.visualOverlayMarkers?.safePassageMarkers < 1 ||
+	    state.group?.placementPreview?.blockingTileCount !== 4 ||
+	    state.group?.placementPreview?.ownerGatePassableCount !== 1 ||
+	    state.group?.placementPreview?.routeChecks?.length < 2 ||
+	    state.planPlacementPreview?.blockingTileCount !== 4
 	  ) {
     throw new Error(`Fortification overlay did not expose the authored perimeter group: ${JSON.stringify({ result, state })}`);
   }

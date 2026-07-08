@@ -1024,6 +1024,12 @@ describe("Sovereign Worlds vertical slice simulation", () => {
       perimeterShape: "two-segment crescent around the road",
       perimeterStrategy: "Leave the south road visibly open while making the east approach expensive to breach."
     });
+    const preview = state.fortificationPlans.at(-1)?.placementPreview;
+    expect(preview?.resolvedTiles).toEqual([{ buildingId: wall.id, buildingType: "wall", x: wall.x, y: wall.y }]);
+    expect(preview?.blockingTileCount).toBe(1);
+    expect(preview?.blockingBuildingIds).toContain(wall.id);
+    expect(preview?.routeChecks.some((check) => check.label === "owner_to_fortification")).toBe(true);
+    expect(preview?.summary).toContain("1 blocking");
   });
 
   it("builds explicit multi-tile perimeter lines with a commanded gate segment", () => {
@@ -1075,6 +1081,16 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     expect(plans.every((plan) => plan.perimeterPattern === "gate_line" && plan.perimeterDirection === "east_west" && plan.perimeterLength === 5)).toBe(true);
     expect(plans.every((plan) => plan.perimeterGateIndex === 3)).toBe(true);
     expect(plans.map((plan) => plan.perimeterSegmentIndex).sort((left, right) => (left ?? 0) - (right ?? 0))).toEqual([0, 1, 2, 3, 4]);
+    expect(plans.every((plan) => plan.placementPreview)).toBe(true);
+    const preview = plans[0].placementPreview;
+    expect(preview?.resolvedTiles).toHaveLength(5);
+    expect(preview?.blockingTileCount).toBe(4);
+    expect(preview?.gateCount).toBe(1);
+    expect(preview?.ownerGatePassableCount).toBe(1);
+    expect(preview?.gatePassageBuildingIds).toContain(gate?.id);
+    expect(preview?.nearestForeignTribeId).toBeDefined();
+    expect(preview?.routeChecks.length).toBeGreaterThanOrEqual(2);
+    expect(preview?.summary).toContain("4 blocking");
     expect(state.events.some((event) => event.type === "FORTIFICATION_PERIMETER_BUILT" && event.body.includes("5 structures"))).toBe(true);
   });
 
