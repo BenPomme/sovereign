@@ -427,6 +427,60 @@ describe("Ollama JSON recovery", () => {
     expect(decision.orders[0].buildingType).toBeUndefined();
   });
 
+  it("includes factual fortification placement previews in sovereign catch-up context", async () => {
+    const game = createGame(2026070201);
+    game.tribes.blue.resources = { gold: 800, food: 800, wood: 800, stone: 800, clay: 800, limestone: 800, iron: 800, coal: 800 };
+    expect(issueSovereignOrder(game, "blue", { type: "DEVELOP", priority: 1, developmentId: "masonry", reason: "Unlock perimeter walls." }).ok).toBe(true);
+    expect(issueSovereignOrder(game, "blue", { type: "DEVELOP", priority: 1, developmentId: "ironworking", reason: "Unlock perimeter gates." }).ok).toBe(true);
+    const townHall = getTownHall(game, "blue");
+    const target = { x: townHall.x + 12, y: townHall.y + 3 };
+    for (let x = target.x - 3; x <= target.x + 3; x += 1) {
+      game.map[tileIndex(x, target.y)].terrain = "grass";
+      delete game.map[tileIndex(x, target.y)].resource;
+    }
+    advanceGameTicks(game, 1);
+    const built = issueSovereignOrder(game, "blue", {
+      type: "BUILD",
+      priority: 1,
+      buildingType: "wall",
+      targetX: target.x,
+      targetY: target.y,
+      perimeterPattern: "gate_line",
+      perimeterDirection: "east_west",
+      perimeterLength: 5,
+      perimeterGateIndex: 3,
+      perimeterStrategy: "Keep one owned gate open while blocking four road tiles.",
+      reason: "Build a factual preview perimeter."
+    });
+    expect(built.ok).toBe(true);
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        response: JSON.stringify({
+          freeformStrategy: "Review the new wall facts before deciding.",
+          strategySummary: "Read placement preview.",
+          memoryNote: "",
+          orders: [],
+          unitNames: [],
+          bugReport: "",
+          bugSeverity: "low"
+        })
+      })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("window", {
+      setTimeout: globalThis.setTimeout,
+      clearTimeout: globalThis.clearTimeout
+    });
+
+    await requestSovereignDecision(game, "blue", "qwen3.5:9b-mlx");
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.prompt).toContain("placement preview");
+    expect(body.prompt).toContain("4 blocking");
+    expect(body.prompt).toContain("gates passable to owner");
+  });
+
   it("does not convert gate policy prose into a placed build order", async () => {
     const game = createGame(20260703);
     game.tribes.blue.resources = { gold: 500, food: 500, wood: 500, stone: 500, clay: 500, limestone: 500, iron: 500, coal: 500 };
