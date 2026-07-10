@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAP_SIZE, TICKS_PER_GAME_YEAR, TICK_RATE, advanceGame, advanceGameTicks, appendSovereignMemory, applyTribeIdentity, assignGathering, attachReplyToPacket, buildStructure, buildingTypes, createGame, createResourceDeposit, damageBuilding, damageResourceDeposit, developmentCatalog, developmentIds, estimateBreachTicks, formAlliance, getBuildingCombatStats, getBuildingTypeCombatStats, getCombatStatCoverageReport, getCurrentYear, getBuildingCost, getBuildingRepairCost, getDevelopment, getEffectiveBuildingCost, getPacketItemCombatStats, getPacketItemTypeCombatStats, getPopulationCap, getRecentResourceDepletions, getRecentVisibleEvents, getResourceControlSummary, getResourceDepositCombatStats, getResourceDepositPosturesForTribe, getResourceTypeCombatStats, getTownHall, getTribeBuildingRepairCost, getUnitCombatStats, getUnitTypeCombatStats, getVictoryPressure, getVisibleBuildings, getVisibleUnits, isTileWalkable, isTribeActive, issueSovereignOrder, recordAiDecision, renameUnits, resourceScarcityPolicy, resourceTypes, scarceMapResourceTypes, sendPlayerMessage, setAllControllers, setGateState, summarizeDiplomaticIntel, summarizeSovereignMemory, tileIndex, unitTypes, worldSignature } from "./index";
+import { MAP_SIZE, TICKS_PER_GAME_YEAR, TICK_RATE, advanceGame, advanceGameTicks, appendSovereignMemory, applyTribeIdentity, assignGathering, attachReplyToPacket, buildStructure, buildingTypes, createGame, createResourceDeposit, damageBuilding, damageResourceDeposit, developmentCatalog, developmentIds, estimateBreachTicks, formAlliance, getBuildingCombatStats, getBuildingTypeCombatStats, getCombatStatCoverageReport, getCurrentYear, getBuildingCost, getBuildingRepairCost, getDevelopment, getEffectiveBuildingCost, getPacketItemCombatStats, getPacketItemTypeCombatStats, getPopulationCap, getProjectileTypeCombatStats, getRecentResourceDepletions, getRecentVisibleEvents, getResourceControlSummary, getResourceDepositCombatStats, getResourceDepositPosturesForTribe, getResourceTypeCombatStats, getTownHall, getTribeBuildingRepairCost, getUnitCombatStats, getUnitTypeCombatStats, getVictoryPressure, getVisibleBuildings, getVisibleUnits, isTileWalkable, isTribeActive, issueSovereignOrder, previewFortificationBuild, projectileTypes, recordAiDecision, renameUnits, resourceScarcityPolicy, resourceTypes, scarceMapResourceTypes, sendPlayerMessage, setAllControllers, setGateState, summarizeDiplomaticIntel, summarizeSovereignMemory, tileIndex, unitTypes, worldSignature } from "./index";
 
 describe("Sovereign Worlds vertical slice simulation", () => {
   it("is deterministic for the same seed and elapsed time", () => {
@@ -77,6 +77,25 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     expect(getDevelopment("masonry").tradeoffs[0]).not.toBe("mutated tradeoff");
     expect(getDevelopment("masonry").synergies[0]).not.toBe("mutated synergy");
     expect(getDevelopment("masonry").socialCosts[0]).not.toBe("mutated social cost");
+  });
+
+  it("specializes generated roadmap effects by institution semantics", () => {
+    const signature = (developmentId: string) =>
+      getDevelopment(developmentId)
+        .effects.map((effect) => `${effect.kind}:${effect.target ?? "all"}:${effect.amount}:${effect.description}`)
+        .sort();
+
+    const fixedTaxation = getDevelopment("sw_042_fixed_taxation");
+    const tradeCorridor = getDevelopment("sw_045_trade_tariff_corridor");
+    const slaveryRegistration = getDevelopment("sw_059_slavery_registration");
+
+    expect(signature(fixedTaxation.id)).not.toEqual(signature(tradeCorridor.id));
+    expect(signature(fixedTaxation.id)).not.toEqual(signature(slaveryRegistration.id));
+    expect(fixedTaxation.effects.some((effect) => effect.kind === "yearly_gold_per_population" && /Tax design/.test(effect.description))).toBe(true);
+    expect(tradeCorridor.effects.some((effect) => effect.kind === "unit_speed" && effect.target === "courier")).toBe(true);
+    expect(tradeCorridor.effects.some((effect) => effect.kind === "resource_control")).toBe(true);
+    expect(slaveryRegistration.effects.some((effect) => effect.kind === "construction_cost_multiplier" && effect.amount < 0)).toBe(true);
+    expect(slaveryRegistration.effects.some((effect) => effect.kind === "yearly_happiness" && effect.amount < 0)).toBe(true);
   });
 
   it("keeps distant enemy units out of the player visibility projection", () => {
@@ -238,6 +257,16 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     expect(packetTypeStats.attack).toBe(0);
     expect(packetTypeStats.range).toBe(0);
     expect(packetTypeStats.attackCooldown).toBe(0);
+    for (const projectileType of projectileTypes) {
+      const stats = getProjectileTypeCombatStats(projectileType);
+      expect(stats.maxHp).toBeGreaterThan(0);
+      expect(stats.hp).toBe(stats.maxHp);
+      expect(stats.armor).toBeGreaterThanOrEqual(0);
+      expect(stats.attack).toBeGreaterThanOrEqual(0);
+      expect(stats.range).toBeGreaterThanOrEqual(0);
+      expect(stats.attackCooldown).toBeGreaterThanOrEqual(0);
+      if (stats.attack > 0) expect(stats.range).toBeGreaterThan(0);
+    }
     for (const unit of Object.values(state.units)) {
       const stats = getUnitCombatStats(unit);
       expect(stats.maxHp).toBeGreaterThan(0);
@@ -284,6 +313,7 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     expect(coverage.byKind.unitType).toBe(unitTypes.length);
     expect(coverage.byKind.buildingType).toBe(buildingTypes.length);
     expect(coverage.byKind.resourceType).toBe(resourceTypes.length);
+    expect(coverage.byKind.projectileType).toBe(projectileTypes.length);
     expect(coverage.byKind.packet).toBeGreaterThanOrEqual(2);
     const defensiveTypes = new Set(Object.values(state.buildings).filter((building) => building.tribeId === "blue").map((building) => building.type));
     expect(defensiveTypes.has("wall")).toBe(true);
@@ -769,6 +799,98 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     expect(repairers.some((unit) => unit.task.kind === "repair" && unit.task.lastInterruptedTick !== undefined)).toBe(true);
     expect(state.events.some((event) => event.type === "REPAIR_UNDER_FIRE_INTERRUPTED" && event.body.includes(wall.id))).toBe(true);
     expect(state.events.some((event) => event.type === "STRUCTURE_REPAIRED" && event.body.includes(wall.id))).toBe(false);
+
+    hostile.hp = 0;
+    const interruptedHp = state.buildings[wall.id].hp;
+    advanceGameTicks(state, 3);
+    expect(state.buildings[wall.id].hp).toBeGreaterThan(interruptedHp);
+  });
+
+  it("lets an authored siege interdict hostile repair crews on the exact target", () => {
+    const state = createGame(2026070902);
+    state.tribes.red.resources = { gold: 500, food: 500, wood: 500, stone: 500, clay: 500, limestone: 500, iron: 500, coal: 500 };
+    expect(issueSovereignOrder(state, "red", { type: "DEVELOP", priority: 1, developmentId: "masonry", reason: "Unlock wall repair test structure." }).ok).toBe(true);
+    const built = buildStructure(state, "red", "wall", getTownHall(state, "red"));
+    expect(built.ok).toBe(true);
+    if (!built.ok) throw new Error("Wall unexpectedly failed to build");
+    const wall = state.buildings[built.buildingId];
+    wall.x = 70;
+    wall.y = 70;
+    wall.hp = wall.maxHp - 100;
+    for (const pos of [
+      { x: 68, y: 70 },
+      { x: 69, y: 70 },
+      { x: 69, y: 71 },
+      { x: 70, y: 70 },
+      { x: 70, y: 71 },
+      { x: 71, y: 70 },
+      { x: 71, y: 71 }
+    ]) {
+      state.map[tileIndex(pos.x, pos.y)].terrain = "grass";
+      delete state.map[tileIndex(pos.x, pos.y)].resource;
+    }
+    const repairers = Object.values(state.units).filter((unit) => unit.tribeId === "red" && unit.type === "peon").slice(0, 2);
+    expect(repairers.length).toBe(2);
+    for (const [index, peon] of repairers.entries()) {
+      peon.x = 70;
+      peon.y = 71 + index * 0.2;
+      peon.hp = peon.maxHp;
+      peon.task = { kind: "idle" };
+    }
+    const repairOrder = issueSovereignOrder(state, "red", {
+      type: "REPAIR",
+      priority: 1,
+      targetBuildingId: wall.id,
+      repairPlan: "Keep workers on the breach until Blue is forced away.",
+      reason: "Test contested repair target."
+    });
+    expect(repairOrder.ok).toBe(true);
+    const firstRepairer = repairers[0];
+    const beforeRepairerHp = firstRepairer.hp;
+    const blueMilitia = Object.values(state.units)
+      .filter((unit) => unit.tribeId === "blue" && unit.type === "militia")
+      .sort((left, right) => left.id.localeCompare(right.id))[0];
+    if (!blueMilitia) throw new Error("Expected a blue militia");
+    blueMilitia.x = 69;
+    blueMilitia.y = 71;
+    blueMilitia.hp = blueMilitia.maxHp;
+    blueMilitia.attackCooldown = 0;
+    blueMilitia.task = { kind: "idle" };
+
+    const attack = issueSovereignOrder(state, "blue", {
+      type: "ATTACK",
+      priority: 1,
+      recipientTribeId: "red",
+      targetBuildingId: wall.id,
+      interdictRepairs: true,
+      repairInterdictionRadius: 4,
+      repairInterdictionPlan: "Stop the repair crew at the breach before returning to the wall.",
+      siegeIntent: "counter Red's emergency repairs at the exact breach.",
+      reason: "Test authored repair interdiction."
+    });
+
+    expect(attack.ok).toBe(true);
+    const siegePlan = state.siegePlans.at(-1);
+    expect(siegePlan).toMatchObject({
+      tribeId: "blue",
+      kind: "attack",
+      targetBuildingId: wall.id,
+      interdictRepairs: true,
+      repairInterdictionRadius: 4,
+      repairInterdictionPlan: "Stop the repair crew at the breach before returning to the wall."
+    });
+    expect(blueMilitia.task).toMatchObject({
+      kind: "attackBuilding",
+      targetBuildingId: wall.id,
+      interdictRepairs: true,
+      repairInterdictionPlan: "Stop the repair crew at the breach before returning to the wall."
+    });
+    expect(state.events.some((event) => event.type === "SIEGE_REPAIR_INTERDICTION_ORDERED" && event.body.includes(siegePlan?.id ?? ""))).toBe(true);
+
+    advanceGameTicks(state, 2);
+
+    expect(firstRepairer.hp).toBeLessThan(beforeRepairerHp);
+    expect(state.events.some((event) => event.type === "REPAIR_UNDER_FIRE_INTERRUPTED" && event.body.includes(wall.id))).toBe(true);
   });
 
   it("applies development effects as capabilities instead of scripted strategy", () => {
@@ -824,6 +946,31 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     expect(issueSovereignOrder(state, "blue", { type: "DEVELOP", priority: 1, developmentId: "sw_123_code_of_criminal_law", reason: "Codify criminal law." }).ok).toBe(true);
     const safetyAfter = getVictoryPressure(state).scoreByTribe.find((entry) => entry.tribeId === "blue")?.safety ?? 0;
     expect(safetyAfter).toBeGreaterThanOrEqual(safetyBefore);
+  });
+
+  it("applies generated roadmap effects to narrow deterministic target buckets", () => {
+    const state = createGame(2026070902);
+    state.tribes.blue.resources = { gold: 5000, food: 5000, wood: 5000, stone: 5000, clay: 5000, limestone: 5000, iron: 5000, coal: 5000 };
+    const messenger = Object.values(state.units).find((unit) => unit.tribeId === "blue" && unit.type === "messenger");
+    const sentinel = Object.values(state.units).find((unit) => unit.tribeId === "blue" && unit.type === "sentinel");
+    expect(messenger).toBeTruthy();
+    expect(sentinel).toBeTruthy();
+    if (!messenger || !sentinel) throw new Error("Expected starting messenger and sentinel");
+    const messengerSpeedBefore = messenger.speed;
+    const sentinelSpeedBefore = sentinel.speed;
+
+    expect(issueSovereignOrder(state, "blue", { type: "DEVELOP", priority: 1, developmentId: "taxation", reason: "Open trade institutions." }).ok).toBe(true);
+    expect(
+      issueSovereignOrder(state, "blue", {
+        type: "DEVELOP",
+        priority: 1,
+        developmentId: "sw_045_trade_tariff_corridor",
+        reason: "Adopt a commercial corridor without choosing any strategy for the sovereign."
+      }).ok
+    ).toBe(true);
+
+    expect(state.units[messenger.id].speed).toBeGreaterThan(messengerSpeedBefore);
+    expect(state.units[sentinel.id].speed).toBe(sentinelSpeedBefore);
   });
 
   it("rejects repair orders for missing, foreign, destroyed, and full-health buildings", () => {
@@ -1032,6 +1179,58 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     expect(preview?.summary).toContain("1 blocking");
   });
 
+  it("previews fortification placement before spending resources or creating buildings", () => {
+    const state = createGame(2026070904);
+    state.tribes.blue.resources = { gold: 1000, food: 1000, wood: 1000, stone: 1000, clay: 1000, limestone: 1000, iron: 1000, coal: 1000 };
+    const townHall = getTownHall(state, "blue");
+    const target = { x: townHall.x + 14, y: townHall.y + 2 };
+    for (let x = target.x - 2; x <= target.x + 2; x += 1) {
+      state.map[tileIndex(x, target.y)].terrain = "grass";
+      delete state.map[tileIndex(x, target.y)].resource;
+    }
+    expect(issueSovereignOrder(state, "blue", { type: "DEVELOP", priority: 1, developmentId: "masonry", reason: "Unlock perimeter walls." }).ok).toBe(true);
+    expect(issueSovereignOrder(state, "blue", { type: "DEVELOP", priority: 1, developmentId: "ironworking", reason: "Unlock perimeter gates." }).ok).toBe(true);
+
+    const resourcesBefore = { ...state.tribes.blue.resources };
+    const buildingIdsBefore = new Set(Object.keys(state.buildings));
+    const planCountBefore = state.fortificationPlans.length;
+    const preview = previewFortificationBuild(state, "blue", {
+      type: "BUILD",
+      priority: 1,
+      buildingType: "wall",
+      targetX: target.x,
+      targetY: target.y,
+      perimeterPattern: "gate_line",
+      perimeterDirection: "east_west",
+      perimeterLength: 5,
+      perimeterGateIndex: 3,
+      fortificationIntent: "eastern customs wall",
+      perimeterShape: "straight wall line with a central gate",
+      perimeterStrategy: "Preview a visible gate-controlled boundary before committing resources.",
+      reason: "Preview a five-segment controlled perimeter."
+    });
+
+    expect(preview.ok).toBe(true);
+    if (!preview.ok) throw new Error("Pre-build preview unexpectedly failed");
+    expect(state.tribes.blue.resources).toEqual(resourcesBefore);
+    expect(new Set(Object.keys(state.buildings))).toEqual(buildingIdsBefore);
+    expect(state.fortificationPlans).toHaveLength(planCountBefore);
+    expect(preview.preview.planKind).toBe("perimeter");
+    expect(preview.preview.affordable).toBe(true);
+    expect(preview.preview.wouldBuildCount).toBe(5);
+    expect(preview.preview.wouldBuildTypes.wall).toBe(4);
+    expect(preview.preview.wouldBuildTypes.gate).toBe(1);
+    expect(preview.preview.cost.stone).toBeGreaterThan(0);
+    expect(preview.preview.cost.iron).toBeGreaterThan(0);
+    expect(preview.preview.placementPreview.resolvedTiles).toHaveLength(5);
+    expect(preview.preview.placementPreview.blockingTileCount).toBe(4);
+    expect(preview.preview.placementPreview.gateCount).toBe(1);
+    expect(preview.preview.placementPreview.ownerGatePassableCount).toBe(1);
+    expect(preview.preview.placementPreview.routeChecks.length).toBeGreaterThanOrEqual(2);
+    expect(preview.preview.placementPreview.summary).toContain("4 blocking");
+    expect(preview.preview.summary).toContain("pre-build perimeter preview");
+  });
+
   it("builds explicit multi-tile perimeter lines with a commanded gate segment", () => {
     const state = createGame(735);
     state.tribes.blue.resources = { gold: 1000, food: 1000, wood: 1000, stone: 1000, clay: 1000, limestone: 1000, iron: 1000, coal: 1000 };
@@ -1094,6 +1293,92 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     expect(state.events.some((event) => event.type === "FORTIFICATION_PERIMETER_BUILT" && event.body.includes("5 structures"))).toBe(true);
   });
 
+  it("previews and builds explicit corner wall-gate perimeters without parsing prose", () => {
+    const state = createGame(2026070911);
+    state.tribes.blue.resources = { gold: 1200, food: 1200, wood: 1200, stone: 1200, clay: 1200, limestone: 1200, iron: 1200, coal: 1200 };
+    const townHall = getTownHall(state, "blue");
+    const target = { x: townHall.x + 15, y: townHall.y + 7 };
+    for (let y = target.y - 1; y <= target.y + 3; y += 1) {
+      for (let x = target.x - 1; x <= target.x + 4; x += 1) {
+        state.map[tileIndex(x, y)].terrain = "grass";
+        delete state.map[tileIndex(x, y)].resource;
+      }
+    }
+    expect(issueSovereignOrder(state, "blue", { type: "DEVELOP", priority: 1, developmentId: "masonry", reason: "Unlock perimeter walls." }).ok).toBe(true);
+    expect(issueSovereignOrder(state, "blue", { type: "DEVELOP", priority: 1, developmentId: "ironworking", reason: "Unlock perimeter gates." }).ok).toBe(true);
+
+    const order = {
+      type: "BUILD",
+      priority: 1,
+      buildingType: "wall",
+      targetX: target.x,
+      targetY: target.y,
+      perimeterPattern: "gate_corner",
+      perimeterDirection: "east_west",
+      perimeterLength: 5,
+      perimeterGateIndex: 3,
+      fortificationIntent: "bent customs wall",
+      perimeterShape: "L-shaped corner wall with the bend gate at the road elbow",
+      perimeterStrategy: "Use a bend to watch two approaches while preserving one controlled passage.",
+      reason: "Build a five-segment explicit corner perimeter."
+    } as const;
+    const resourcesBefore = { ...state.tribes.blue.resources };
+    const buildingIdsBefore = new Set(Object.keys(state.buildings));
+    const planCountBefore = state.fortificationPlans.length;
+    const preview = previewFortificationBuild(state, "blue", order);
+
+    expect(preview.ok).toBe(true);
+    if (!preview.ok) throw new Error("Corner pre-build preview unexpectedly failed");
+    expect(state.tribes.blue.resources).toEqual(resourcesBefore);
+    expect(new Set(Object.keys(state.buildings))).toEqual(buildingIdsBefore);
+    expect(state.fortificationPlans).toHaveLength(planCountBefore);
+    expect(preview.preview.planKind).toBe("perimeter");
+    expect(preview.preview.perimeterPattern).toBe("gate_corner");
+    expect(preview.preview.perimeterDirection).toBe("east_west");
+    expect(preview.preview.perimeterLength).toBe(5);
+    expect(preview.preview.perimeterGateIndex).toBe(3);
+    expect(preview.preview.wouldBuildCount).toBe(5);
+    expect(preview.preview.wouldBuildTypes.wall).toBe(4);
+    expect(preview.preview.wouldBuildTypes.gate).toBe(1);
+    const previewTiles = preview.preview.placementPreview.resolvedTiles;
+    expect(previewTiles).toHaveLength(5);
+    expect(new Set(previewTiles.map((tile) => tile.x)).size).toBeGreaterThan(1);
+    expect(new Set(previewTiles.map((tile) => tile.y)).size).toBeGreaterThan(1);
+    expect(preview.preview.placementPreview.blockingTileCount).toBe(4);
+    expect(preview.preview.placementPreview.gateCount).toBe(1);
+    expect(preview.preview.placementPreview.ownerGatePassableCount).toBe(1);
+    expect(preview.preview.placementPreview.routeChecks.length).toBeGreaterThanOrEqual(2);
+
+    const built = issueSovereignOrder(state, "blue", order);
+    expect(built.ok).toBe(true);
+    if (!built.ok) throw new Error("Corner perimeter build unexpectedly failed");
+    const plans = state.fortificationPlans.slice(-5);
+    expect(plans).toHaveLength(5);
+    expect(new Set(plans.map((plan) => plan.perimeterGroupId)).size).toBe(1);
+    expect(plans.every((plan) => plan.perimeterPattern === "gate_corner" && plan.perimeterDirection === "east_west" && plan.perimeterLength === 5)).toBe(true);
+    expect(plans.every((plan) => plan.perimeterGateIndex === 3)).toBe(true);
+    expect(plans.map((plan) => plan.perimeterSegmentIndex).sort((left, right) => (left ?? 0) - (right ?? 0))).toEqual([0, 1, 2, 3, 4]);
+    const builtSegments = plans.flatMap((plan) => {
+      const building = state.buildings[plan.buildingId];
+      return building ? [building] : [];
+    });
+    expect(builtSegments).toHaveLength(5);
+    expect(builtSegments.filter((building) => building.type === "wall")).toHaveLength(4);
+    const gate = builtSegments.find((building) => building.type === "gate");
+    expect(gate).toBeDefined();
+    expect(gate?.x).toBe(target.x);
+    expect(gate?.y).toBe(target.y);
+    expect(new Set(builtSegments.map((building) => building.x)).size).toBeGreaterThan(1);
+    expect(new Set(builtSegments.map((building) => building.y)).size).toBeGreaterThan(1);
+    for (const wall of builtSegments.filter((building) => building.type === "wall")) expect(isTileWalkable(state, wall.x, wall.y, "blue")).toBe(false);
+    if (gate) expect(isTileWalkable(state, gate.x, gate.y, "blue")).toBe(true);
+    expect(plans.every((plan) => plan.perimeterShape === "L-shaped corner wall with the bend gate at the road elbow")).toBe(true);
+    expect(plans[0].placementPreview?.resolvedTiles).toHaveLength(5);
+    expect(plans[0].placementPreview?.blockingTileCount).toBe(4);
+    expect(plans[0].placementPreview?.ownerGatePassableCount).toBe(1);
+    expect(state.events.some((event) => event.type === "FORTIFICATION_PERIMETER_BUILT" && event.body.includes("gate_corner"))).toBe(true);
+  });
+
   it("does not silently insert gates into plain line perimeters", () => {
     const state = createGame(736);
     state.tribes.blue.resources = { gold: 500, food: 500, wood: 500, stone: 500, clay: 500, limestone: 500, iron: 500, coal: 500 };
@@ -1119,6 +1404,102 @@ describe("Sovereign Worlds vertical slice simulation", () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toContain("gate_line");
+
+    const cornerResult = issueSovereignOrder(state, "blue", {
+      type: "BUILD",
+      priority: 1,
+      buildingType: "gate",
+      targetX: 35,
+      targetY: 32,
+      perimeterPattern: "corner",
+      perimeterDirection: "east_west",
+      perimeterLength: 5,
+      perimeterGateIndex: 3,
+      perimeterShape: "L-shaped gate barrier",
+      reason: "This should not parse prose or silently convert into a gate corner."
+    });
+
+    expect(cornerResult.ok).toBe(false);
+    if (!cornerResult.ok) expect(cornerResult.reason).toContain("gate_corner");
+  });
+
+  it("builds authored turret and watchtower line perimeters without inserting gates", () => {
+    const state = createGame(2026070910);
+    state.tribes.blue.resources = { gold: 1500, food: 1500, wood: 1500, stone: 1500, clay: 1500, limestone: 1500, iron: 1500, coal: 1500 };
+    const townHall = getTownHall(state, "blue");
+    expect(issueSovereignOrder(state, "blue", { type: "DEVELOP", priority: 1, developmentId: "ironworking", reason: "Unlock turret metalwork." }).ok).toBe(true);
+    expect(issueSovereignOrder(state, "blue", { type: "DEVELOP", priority: 1, developmentId: "ballistics", reason: "Unlock turret mechanisms." }).ok).toBe(true);
+    const turretTarget = { x: townHall.x + 16, y: townHall.y + 6 };
+    const towerTarget = { x: townHall.x + 16, y: townHall.y + 10 };
+    for (const target of [turretTarget, towerTarget]) {
+      for (let x = target.x - 2; x <= target.x + 2; x += 1) {
+        state.map[tileIndex(x, target.y)].terrain = "grass";
+        delete state.map[tileIndex(x, target.y)].resource;
+      }
+    }
+
+    const turretLine = issueSovereignOrder(state, "blue", {
+      type: "BUILD",
+      priority: 1,
+      buildingType: "turret",
+      targetX: turretTarget.x,
+      targetY: turretTarget.y,
+      perimeterPattern: "line",
+      perimeterDirection: "east_west",
+      perimeterLength: 3,
+      fortificationIntent: "overlapping anti-raid battery",
+      perimeterShape: "three turret line",
+      perimeterStrategy: "Create three separate fields of fire along the eastern road.",
+      reason: "Build a turret line chosen by the sovereign."
+    });
+    expect(turretLine.ok).toBe(true);
+    if (!turretLine.ok) throw new Error("Turret perimeter unexpectedly failed");
+    const turretPlans = state.fortificationPlans.slice(-3);
+    expect(turretPlans).toHaveLength(3);
+    expect(turretPlans.every((plan) => plan.buildingType === "turret" && plan.perimeterPattern === "line" && plan.perimeterLength === 3)).toBe(true);
+    expect(new Set(turretPlans.map((plan) => plan.perimeterGroupId)).size).toBe(1);
+    expect(turretPlans[0].placementPreview?.resolvedTiles).toHaveLength(3);
+    expect(turretPlans[0].placementPreview?.blockingTileCount).toBe(0);
+    const turrets = turretPlans.map((plan) => state.buildings[plan.buildingId]);
+    expect(turrets.every((building) => building?.type === "turret" && building.attack > 0 && building.range > 0)).toBe(true);
+
+    const watchtowerLine = issueSovereignOrder(state, "blue", {
+      type: "BUILD",
+      priority: 1,
+      buildingType: "watchtower",
+      targetX: towerTarget.x,
+      targetY: towerTarget.y,
+      perimeterPattern: "line",
+      perimeterDirection: "east_west",
+      perimeterLength: 3,
+      fortificationIntent: "lookout chain",
+      perimeterShape: "three watchtower line",
+      perimeterStrategy: "Extend sight along the same frontier without blocking passage.",
+      reason: "Build a watchtower line chosen by the sovereign."
+    });
+    expect(watchtowerLine.ok).toBe(true);
+    if (!watchtowerLine.ok) throw new Error("Watchtower perimeter unexpectedly failed");
+    const watchtowerPlans = state.fortificationPlans.slice(-3);
+    expect(watchtowerPlans).toHaveLength(3);
+    expect(watchtowerPlans.every((plan) => plan.buildingType === "watchtower" && plan.perimeterPattern === "line" && plan.perimeterLength === 3)).toBe(true);
+    expect(new Set(watchtowerPlans.map((plan) => plan.perimeterGroupId)).size).toBe(1);
+    expect(watchtowerPlans[0].placementPreview?.resolvedTiles).toHaveLength(3);
+    expect(watchtowerPlans[0].placementPreview?.blockingTileCount).toBe(0);
+
+    const invalid = issueSovereignOrder(state, "blue", {
+      type: "BUILD",
+      priority: 1,
+      buildingType: "turret",
+      targetX: towerTarget.x,
+      targetY: towerTarget.y + 4,
+      perimeterPattern: "gate_line",
+      perimeterDirection: "east_west",
+      perimeterLength: 3,
+      reason: "This should not create a hidden gate-line turret doctrine."
+    });
+    expect(invalid.ok).toBe(false);
+    if (!invalid.ok) expect(invalid.reason).toContain("line or corner for turret or watchtower");
+    expect(state.events.some((event) => event.type === "FORTIFICATION_PERIMETER_BUILT" && event.body.includes("3 structures"))).toBe(true);
   });
 
   it("records flexible gate operations and expires active gate commands", () => {
@@ -1527,9 +1908,12 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     const gateStats = getBuildingTypeCombatStats("gate");
     const wallStats = getBuildingTypeCombatStats("wall");
     const gateId = "blue_safe_passage_gate";
+    const routeGateId = "blue_safe_passage_route_gate";
     const gatePosition = { x: hall.x - 1, y: hall.y };
+    const routeGatePosition = { x: hall.x - 2, y: hall.y + 1 };
     for (const position of [
       gatePosition,
+      routeGatePosition,
       { x: hall.x + 1, y: hall.y },
       { x: hall.x, y: hall.y - 1 },
       { x: hall.x, y: hall.y + 1 }
@@ -1543,6 +1927,16 @@ describe("Sovereign Worlds vertical slice simulation", () => {
       tribeId: "blue",
       x: gatePosition.x,
       y: gatePosition.y,
+      ...gateStats,
+      gateState: "open",
+      gateAccessPolicy: "owner_only"
+    };
+    state.buildings[routeGateId] = {
+      id: routeGateId,
+      type: "gate",
+      tribeId: "blue",
+      x: routeGatePosition.x,
+      y: routeGatePosition.y,
       ...gateStats,
       gateState: "open",
       gateAccessPolicy: "owner_only"
@@ -1575,6 +1969,8 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     expect(blocked.ok).toBe(false);
     if (blocked.ok) throw new Error("Courier unexpectedly routed through owner-only gate before treaty");
     expect(blocked.reason).toContain("No passable messenger route");
+    expect(isTileWalkable(state, gatePosition.x, gatePosition.y, "red")).toBe(false);
+    expect(isTileWalkable(state, routeGatePosition.x, routeGatePosition.y, "red")).toBe(false);
 
     const grant = issueSovereignOrder(state, "blue", {
       type: "GATE_OPERATION",
@@ -1586,11 +1982,25 @@ describe("Sovereign Worlds vertical slice simulation", () => {
       gateAccessTreatyAction: "grant",
       gateAccessTreatyName: "Red road writ",
       gateAccessTreatyTerms: "Named passage for Red couriers through the western gate.",
+      gateRouteName: "Red two-gate road",
+      gateRouteGateIds: [gateId, routeGateId],
+      gateRouteTerms: "Red couriers may use the western and lower route gates; other gates remain closed.",
       gateAccessTreatyDurationTicks: 200,
       reason: "Create negotiated safe passage without changing alliances."
     });
     expect(grant.ok).toBe(true);
-    const treaty = state.gateAccessTreaties.at(-1);
+    const routeTreaties = state.gateAccessTreaties.filter((treaty) => treaty.routeName === "Red two-gate road" && treaty.targetTribeId === "red");
+    expect(routeTreaties).toHaveLength(2);
+    const routeIds = new Set(routeTreaties.map((treaty) => treaty.routeId));
+    expect(routeIds.size).toBe(1);
+    const routeId = routeTreaties[0]?.routeId;
+    expect(routeId).toBeTruthy();
+    expect(new Set(routeTreaties.map((treaty) => treaty.buildingId))).toEqual(new Set([gateId, routeGateId]));
+    expect(routeTreaties.every((treaty) => treaty.routeTerms === "Red couriers may use the western and lower route gates; other gates remain closed.")).toBe(true);
+    expect(routeTreaties.every((treaty) => JSON.stringify(treaty.routeGateIds) === JSON.stringify([gateId, routeGateId]))).toBe(true);
+    expect(isTileWalkable(state, gatePosition.x, gatePosition.y, "red")).toBe(true);
+    expect(isTileWalkable(state, routeGatePosition.x, routeGatePosition.y, "red")).toBe(true);
+    const treaty = routeTreaties.find((candidate) => candidate.buildingId === gateId);
     expect(treaty?.treatyName).toBe("Red road writ");
 
     const existingPacketIds = new Set(Object.keys(state.packets));
@@ -1614,7 +2024,17 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     if (!courier || courier.task.kind !== "deliver") throw new Error("Expected Red courier delivery task");
     expect(packet.outboundGateBuildingIds).toContain(gateId);
     expect(courier.task.path.some((step) => step.x === gatePosition.x && step.y === gatePosition.y)).toBe(true);
-    expect(packet.routeMemory.some((entry) => entry.includes(treaty?.id ?? "") && entry.includes("Red road writ"))).toBe(true);
+    expect(
+      packet.routeMemory.some(
+        (entry) =>
+          entry.includes(`Safe-passage route ${routeId}`) &&
+          entry.includes("Red two-gate road") &&
+          entry.includes("Red road writ") &&
+          entry.includes(gateId) &&
+          entry.includes(routeGateId) &&
+          entry.includes("western and lower route gates")
+      )
+    ).toBe(true);
     courier.x = packet.destination.x;
     courier.y = packet.destination.y;
     advanceGameTicks(state, 1);
@@ -1626,9 +2046,17 @@ describe("Sovereign Worlds vertical slice simulation", () => {
       buildingId: gateId,
       recipientTribeId: "red",
       gateAccessTreatyAction: "revoke",
+      gateRouteName: "Red two-gate road",
+      gateRouteGateIds: [gateId, routeGateId],
+      gateRouteTerms: "The named two-gate road is closed to Red.",
       reason: "Close the negotiated route."
     });
     expect(revoke.ok).toBe(true);
+    const revokeRouteTreaties = state.gateAccessTreaties.filter((treaty) => treaty.routeName === "Red two-gate road" && treaty.action === "revoke");
+    expect(revokeRouteTreaties).toHaveLength(2);
+    expect(new Set(revokeRouteTreaties.map((treaty) => treaty.routeId)).size).toBe(1);
+    expect(isTileWalkable(state, gatePosition.x, gatePosition.y, "red")).toBe(false);
+    expect(isTileWalkable(state, routeGatePosition.x, routeGatePosition.y, "red")).toBe(false);
     const recruited = issueSovereignOrder(state, "red", { type: "RECRUIT", priority: 1, unitType: "messenger", reason: "Send a fresh courier after revocation." });
     expect(recruited.ok).toBe(true);
     const blockedAfterRevoke = issueSovereignOrder(state, "red", {
@@ -1644,6 +2072,82 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     expect(blockedAfterRevoke.ok).toBe(false);
     if (blockedAfterRevoke.ok) throw new Error("Courier unexpectedly routed after treaty revocation");
     expect(blockedAfterRevoke.reason).toContain("No passable messenger route");
+  });
+
+  it("rejects multi-gate access routes that list non-owned or destroyed gates", () => {
+    const state = createGame(739);
+    state.tribes.blue.resources = { gold: 500, food: 500, wood: 500, stone: 500, clay: 500, limestone: 500, iron: 500, coal: 500 };
+    const hall = getTownHall(state, "blue");
+    const gateStats = getBuildingTypeCombatStats("gate");
+    const blueGateId = "blue_route_gate_primary";
+    const blueDestroyedGateId = "blue_route_gate_destroyed";
+    const redGateId = "red_route_gate_foreign";
+    for (const position of [
+      { x: hall.x - 1, y: hall.y },
+      { x: hall.x - 2, y: hall.y },
+      { x: hall.x - 3, y: hall.y }
+    ]) {
+      state.map[tileIndex(position.x, position.y)].terrain = "grass";
+      delete state.map[tileIndex(position.x, position.y)].resource;
+    }
+    state.buildings[blueGateId] = {
+      id: blueGateId,
+      type: "gate",
+      tribeId: "blue",
+      x: hall.x - 1,
+      y: hall.y,
+      ...gateStats,
+      gateState: "open",
+      gateAccessPolicy: "owner_only"
+    };
+    state.buildings[blueDestroyedGateId] = {
+      id: blueDestroyedGateId,
+      type: "gate",
+      tribeId: "blue",
+      x: hall.x - 2,
+      y: hall.y,
+      ...gateStats,
+      hp: 0,
+      gateState: "open",
+      gateAccessPolicy: "owner_only"
+    };
+    state.buildings[redGateId] = {
+      id: redGateId,
+      type: "gate",
+      tribeId: "red",
+      x: hall.x - 3,
+      y: hall.y,
+      ...gateStats,
+      gateState: "open",
+      gateAccessPolicy: "owner_only"
+    };
+
+    const foreignGate = issueSovereignOrder(state, "blue", {
+      type: "GATE_OPERATION",
+      priority: 1,
+      buildingId: blueGateId,
+      recipientTribeId: "red",
+      gateAccessTreatyAction: "grant",
+      gateRouteName: "Invalid foreign gate route",
+      gateRouteGateIds: [blueGateId, redGateId],
+      reason: "Do not let a sovereign grant passage over another tribe's gate."
+    });
+    expect(foreignGate.ok).toBe(false);
+    if (!foreignGate.ok) expect(foreignGate.reason).toContain("not owned");
+
+    const destroyedGate = issueSovereignOrder(state, "blue", {
+      type: "GATE_OPERATION",
+      priority: 1,
+      buildingId: blueGateId,
+      recipientTribeId: "red",
+      gateAccessTreatyAction: "grant",
+      gateRouteName: "Invalid destroyed gate route",
+      gateRouteGateIds: [blueGateId, blueDestroyedGateId],
+      reason: "Do not let a route grant passage over a destroyed gate."
+    });
+    expect(destroyedGate.ok).toBe(false);
+    if (!destroyedGate.ok) expect(destroyedGate.reason).toContain("missing or destroyed");
+    expect(state.gateAccessTreaties).toHaveLength(0);
   });
 
   it("records factual treaty incident evidence without hardcoding consequences", () => {
@@ -1724,10 +2228,58 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     expect(incident?.participantTribeIds).toEqual(["blue", "red"]);
     expect(incident?.witnessTribeIds).toContain("green");
     expect(incident?.witnessTribeIds).not.toContain("yellow");
-    expect(incident?.summary).toContain("Broken road writ");
-    expect(state.packets[packet.id].routeMemory.some((entry) => entry.includes(incident?.id ?? "") && entry.includes("detain"))).toBe(true);
-    expect(state.events.some((event) => event.type === "GATE_TREATY_INCIDENT_RECORDED")).toBe(true);
-    expect(state.wars.blue.red).not.toBe(true);
+	    expect(incident?.summary).toContain("Broken road writ");
+	    expect(state.packets[packet.id].routeMemory.some((entry) => entry.includes(incident?.id ?? "") && entry.includes("detain"))).toBe(true);
+	    expect(state.events.some((event) => event.type === "GATE_TREATY_INCIDENT_RECORDED")).toBe(true);
+	    const firstWitnessObservation = state.foreignObservations.green.find((observation) => observation.gateTreatyIncidentId === incident?.id);
+	    expect(firstWitnessObservation).toMatchObject({
+	      kind: "gate_treaty_incident_witnessed",
+	      observerTribeId: "green",
+	      subjectKind: "building",
+	      subjectTribeId: "blue",
+	      subjectId: gate.buildingId,
+	      subjectType: "gate",
+	      gateOwnerTribeId: "blue",
+	      affectedTribeId: "red",
+	      packetId: packet.id,
+	      gateIncidentAction: "detain"
+	    });
+	    expect(state.foreignObservations.blue.some((observation) => observation.kind === "gate_treaty_incident_witnessed")).toBe(false);
+	    expect(state.foreignObservations.red.some((observation) => observation.kind === "gate_treaty_incident_witnessed")).toBe(false);
+
+	    expect(issueSovereignOrder(state, "red", { type: "RECRUIT", priority: 1, unitType: "messenger", reason: "Send a second courier under the same writ." }).ok).toBe(true);
+	    const existingPacketIds = new Set(Object.keys(state.packets));
+	    const secondSent = issueSovereignOrder(state, "red", {
+	      type: "SEND_MESSENGER",
+	      priority: 1,
+	      recipientTribeId: "blue",
+	      messageType: "LETTER",
+	      diplomacyIntent: "NONE",
+	      subject: "Second travel under writ",
+	      body: "We again enter under the Broken road writ.",
+	      reason: "Use the treaty route again."
+	    });
+	    expect(secondSent.ok).toBe(true);
+	    const secondPacket = Object.values(state.packets).find((candidate) => !existingPacketIds.has(candidate.id) && candidate.originTribeId === "red" && candidate.recipientTribeId === "blue");
+	    if (!secondPacket) throw new Error("Expected second treaty courier packet");
+	    const secondCourier = secondPacket.carrierUnitId ? state.units[secondPacket.carrierUnitId] : undefined;
+	    if (!secondCourier) throw new Error("Expected second treaty courier carrier");
+	    secondCourier.x = secondPacket.destination.x;
+	    secondCourier.y = secondPacket.destination.y;
+	    advanceGameTicks(state, 1);
+
+	    const secondIncident = state.gateTreatyIncidents.at(-1);
+	    expect(secondIncident?.id).not.toBe(incident?.id);
+	    expect(secondIncident).toMatchObject({
+	      treatyId: treaty.id,
+	      buildingId: gate.buildingId,
+	      affectedTribeId: "red",
+	      packetId: secondPacket.id,
+	      action: "detain"
+	    });
+	    const witnessIncidentObservations = state.foreignObservations.green.filter((observation) => observation.kind === "gate_treaty_incident_witnessed");
+	    expect(witnessIncidentObservations.map((observation) => observation.gateTreatyIncidentId)).toEqual([incident?.id, secondIncident?.id]);
+	    expect(state.wars.blue.red).not.toBe(true);
     expect(state.wars.red.blue).not.toBe(true);
     expect(state.alliances.blue).toBeUndefined();
     expect(state.alliances.red).toBeUndefined();
@@ -1769,8 +2321,29 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     });
     expect(forced.ok).toBe(true);
     expect(state.buildings[gate.buildingId].gateSabotage?.action).toBe("force_open");
+    expect(state.buildings[gate.buildingId].gateSabotage?.saboteurUnitId).toBe(saboteur.id);
+    expect(state.buildings[gate.buildingId].gateSabotage?.targetTribeId).toBe("blue");
     expect(isTileWalkable(state, gateBuilding.x, gateBuilding.y, "red")).toBe(true);
     expect(state.events.some((event) => event.type === "GATE_SABOTAGED_OPEN")).toBe(true);
+    const forcedRecord = state.gateSabotageHistory.at(-1);
+    expect(forcedRecord?.saboteurUnitId).toBe(saboteur.id);
+    expect(forcedRecord?.gateOperationId).toBe(state.gateOperations.at(-1)?.id);
+    expect(forcedRecord?.targetTribeId).toBe("blue");
+    const forcedObservation = state.foreignObservations.blue.find(
+      (observation) =>
+        observation.kind === "gate_sabotage_witnessed" &&
+        observation.gateSabotageId === forcedRecord?.id &&
+        observation.subjectId === saboteur.id &&
+        observation.gateBuildingId === gate.buildingId
+    );
+    expect(forcedObservation).toMatchObject({
+      subjectKind: "unit",
+      subjectTribeId: "red",
+      subjectType: "militia",
+      gateOwnerTribeId: "blue",
+      affectedTribeId: "blue",
+      gateSabotageAction: "force_open"
+    });
 
     advanceGameTicks(state, 4);
     expect(state.buildings[gate.buildingId].gateSabotage).toBeUndefined();
@@ -1789,7 +2362,21 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     expect(damaged.ok).toBe(true);
     expect(state.buildings[gate.buildingId].hp).toBeLessThan(beforeHp);
     expect(state.gateSabotageHistory.at(-1)?.action).toBe("damage");
+    expect(state.gateSabotageHistory.at(-1)?.saboteurUnitId).toBe(saboteur.id);
+    expect(
+      state.foreignObservations.blue.some(
+        (observation) =>
+          observation.kind === "gate_sabotage_witnessed" &&
+          observation.gateSabotageAction === "damage" &&
+          observation.subjectId === saboteur.id &&
+          observation.gateBuildingId === gate.buildingId
+      )
+    ).toBe(true);
     expect(state.events.some((event) => event.type === "GATE_SABOTAGE_DAMAGED")).toBe(true);
+    expect(state.wars.blue.red).not.toBe(true);
+    expect(state.wars.red.blue).not.toBe(true);
+    expect(state.alliances.blue).toBeUndefined();
+    expect(state.alliances.red).toBeUndefined();
   });
 
   it("applies gate toll modes, unpaid actions, and ambush commands explicitly", () => {
@@ -2161,7 +2748,7 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     expect(state.tribes.blue.happiness).toBeLessThan(before);
   });
 
-  it("eliminates the poorest surviving population at a century review", () => {
+  it("eliminates the lowest-total-wealth survivor at a century review", () => {
     const state = createGame(9351);
     const sent = sendPlayerMessage(state, "green", "peace");
     expect(sent.ok).toBe(true);
@@ -2190,6 +2777,46 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     expect(summarizeSovereignMemory(state, "blue")).toContain("total safety failure");
     expect(state.events.some((event) => event.type === "AI_LEARNING_APPLIED")).toBe(true);
     expect(state.events.some((event) => event.type === "CENTURY_POPULATION_ELIMINATED")).toBe(true);
+  });
+
+  it("uses lowest total wealth, not wealth per person, for century elimination", () => {
+    const state = createGame(9352);
+    state.victoryPressure.nextReviewYear = 1;
+    for (const tribeId of ["red", "green", "yellow", "purple"] as const) {
+      state.tribes[tribeId].resources = { gold: 9000, food: 1000, wood: 1000, stone: 1000, clay: 1000, limestone: 1000, iron: 1000, coal: 1000 };
+      state.tribes[tribeId].happiness = 5;
+    }
+    state.tribes.blue.resources = { gold: 700, food: 200, wood: 200, stone: 200, clay: 200, limestone: 200, iron: 200, coal: 200 };
+    state.tribes.blue.happiness = 100;
+    for (const unit of Object.values(state.units).filter((candidate) => candidate.tribeId === "blue").slice(1)) {
+      unit.hp = 0;
+    }
+    const before = getVictoryPressure(state);
+    expect(before.scoreByTribe.at(-1)?.tribeId).toBe("blue");
+    expect(before.scoreByTribe.at(-1)?.wealth).toBeLessThan(before.scoreByTribe[0].wealth);
+    expect((before.scoreByTribe.find((score) => score.tribeId === "blue")?.wealthPerCapita ?? 0)).toBeGreaterThan(0);
+
+    advanceGame(state, 0.2);
+
+    expect(state.tribes.blue.eliminated).toBe(true);
+    expect(state.events.find((event) => event.type === "CENTURY_POPULATION_ELIMINATED")?.body).toContain("lowest total wealth");
+  });
+
+  it("rejects peer-directed questions through private REQUEST_INFO", () => {
+    const state = createGame(9353);
+    const result = issueSovereignOrder(state, "blue", {
+      type: "REQUEST_INFO",
+      priority: 1,
+      recipientTribeId: "red",
+      subject: "Gold reserves inquiry",
+      body: "Please reveal your current gold reserves and total troop count.",
+      reason: "Assess alliance viability."
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("Expected peer-directed REQUEST_INFO to be rejected");
+    expect(result.reason).toContain("SEND_MESSENGER");
+    expect(state.aiInformationRequests).toHaveLength(0);
   });
 
   it("marks an in-flight messenger packet blocked when walls cut off the route", () => {
@@ -2332,6 +2959,181 @@ describe("Sovereign Worlds vertical slice simulation", () => {
     expect(isTileWalkable(state, 50, 50)).toBe(true);
     expect(state.events.some((event) => event.type === "WAR_SIEGE_ORDER" && event.body.includes("test_red_wall"))).toBe(true);
     expect(state.events.some((event) => event.type === "STRUCTURE_DESTROYED" && event.body.includes("50,50"))).toBe(true);
+  });
+
+  it("lets a sovereign split one siege order across multiple authored building targets", () => {
+    const state = createGame(2026070803);
+    const townHall = getTownHall(state, "blue");
+    const targetA = { id: "test_multi_wall_a", x: townHall.x + 5, y: townHall.y };
+    const targetB = { id: "test_multi_wall_b", x: townHall.x + 5, y: townHall.y + 2 };
+    for (const target of [targetA, targetB]) {
+      state.buildings[target.id] = {
+        id: target.id,
+        type: "wall",
+        tribeId: "red",
+        x: target.x,
+        y: target.y,
+        hp: 2,
+        maxHp: 240,
+        armor: 0,
+        attack: 0,
+        range: 0,
+        attackCooldown: 0
+      };
+      for (const pos of [
+        { x: target.x - 2, y: target.y },
+        { x: target.x - 1, y: target.y },
+        { x: target.x, y: target.y }
+      ]) {
+        state.map[tileIndex(pos.x, pos.y)].terrain = "grass";
+        delete state.map[tileIndex(pos.x, pos.y)].resource;
+      }
+    }
+    const attackers = Object.values(state.units)
+      .filter((unit) => unit.tribeId === "blue" && unit.type === "militia")
+      .slice(0, 4);
+    state.tribes.blue.resources = { gold: 1000, food: 1000, wood: 1000, stone: 1000, clay: 1000, limestone: 1000, iron: 1000, coal: 1000 };
+    while (attackers.length < 4) {
+      const recruited = issueSovereignOrder(state, "blue", { type: "RECRUIT", priority: 1, unitType: "militia", reason: "Create enough units to test breach, cover, and escort roles." });
+      expect(recruited.ok).toBe(true);
+      const fresh = Object.values(state.units)
+        .filter((unit) => unit.tribeId === "blue" && unit.type === "militia" && !attackers.some((existing) => existing.id === unit.id))
+        .sort((left, right) => left.id.localeCompare(right.id))[0];
+      if (fresh) attackers.push(fresh);
+    }
+    expect(attackers.length).toBeGreaterThanOrEqual(4);
+    for (const [index, attacker] of attackers.entries()) {
+      attacker.x = targetA.x - 2;
+      attacker.y = targetA.y + index;
+      attacker.attackCooldown = 0;
+      attacker.task = { kind: "idle" };
+    }
+    const [coverUnit, escortUnit] = attackers;
+    const redGuard = Object.values(state.units).find((unit) => unit.tribeId === "red" && unit.type === "militia");
+    if (!redGuard) throw new Error("Expected a red guard militia");
+    redGuard.x = targetA.x - 1;
+    redGuard.y = targetA.y;
+    redGuard.hp = 30;
+
+    const attack = issueSovereignOrder(state, "blue", {
+      type: "ATTACK",
+      priority: 1,
+      recipientTribeId: "red",
+      targetBuildingIds: [targetA.id, targetB.id],
+      coverUnitIds: [coverUnit.id],
+      escortUnitIds: [escortUnit.id],
+      coverX: targetA.x - 1,
+      coverY: targetA.y,
+      coverRadius: 4,
+      coverPlan: "Screen hostile troops near the first breach point.",
+      escortX: targetB.x - 1,
+      escortY: targetB.y,
+      escortRadius: 5,
+      escortPlan: "Escort the second breach team and intercept nearby defenders.",
+      siegeIntent: "split the breach team across two visible weak wall points",
+      assaultPlan: "Pressure both wall segments at once so Red cannot infer a single breach point.",
+      reason: "Test authored multi-target siege execution."
+    });
+
+    expect(attack.ok).toBe(true);
+    expect(attack.ok && attack.summary).toContain("2 targets");
+    const siegePlan = state.siegePlans.at(-1);
+    expect(siegePlan).toMatchObject({
+      tribeId: "blue",
+      kind: "attack",
+      targetBuildingId: targetA.id,
+      targetBuildingIds: [targetA.id, targetB.id],
+      coverUnitIds: [coverUnit.id],
+      escortUnitIds: [escortUnit.id],
+      coverPlan: "Screen hostile troops near the first breach point.",
+      escortPlan: "Escort the second breach team and intercept nearby defenders.",
+      siegeIntent: "split the breach team across two visible weak wall points",
+      assaultPlan: "Pressure both wall segments at once so Red cannot infer a single breach point."
+    });
+    const assigned = Object.values(state.units).filter((unit) => unit.task.kind === "attackBuilding" && unit.task.siegePlanId === siegePlan?.id);
+    expect(new Set(assigned.map((unit) => (unit.task.kind === "attackBuilding" ? unit.task.targetBuildingId : "")))).toEqual(new Set([targetA.id, targetB.id]));
+    expect(assigned.some((unit) => unit.id === coverUnit.id || unit.id === escortUnit.id)).toBe(false);
+    expect(coverUnit.task).toMatchObject({ kind: "guardSiege", siegePlanId: siegePlan?.id, guardRole: "cover" });
+    expect(escortUnit.task).toMatchObject({ kind: "guardSiege", siegePlanId: siegePlan?.id, guardRole: "escort" });
+    expect(
+      state.events.some(
+        (event) => event.type === "WAR_SIEGE_ORDER" && event.body.includes("Multi-target siege group") && event.body.includes(targetA.id) && event.body.includes(targetB.id)
+      )
+    ).toBe(true);
+    expect(state.events.some((event) => event.type === "SIEGE_COVER_ASSIGNED" && event.body.includes(coverUnit.id))).toBe(true);
+    expect(state.events.some((event) => event.type === "SIEGE_ESCORT_ASSIGNED" && event.body.includes(escortUnit.id))).toBe(true);
+
+    advanceGameTicks(state, 2);
+    expect(redGuard.hp).toBeLessThan(30);
+
+    advanceGameTicks(state, 40);
+
+    expect(state.buildings[targetA.id]).toBeUndefined();
+    expect(state.buildings[targetB.id]).toBeUndefined();
+  });
+
+  it("rejects multi-target siege groups with own, missing, or cross-tribe buildings", () => {
+    const state = createGame(2026070804);
+    const blueTownHall = getTownHall(state, "blue");
+    const redTownHall = getTownHall(state, "red");
+    const greenTownHall = getTownHall(state, "green");
+    const addWall = (id: string, tribeId: "blue" | "red" | "green", x: number, y: number): void => {
+      state.buildings[id] = {
+        id,
+        type: "wall",
+        tribeId,
+        x,
+        y,
+        hp: 20,
+        maxHp: 240,
+        armor: 0,
+        attack: 0,
+        range: 0,
+        attackCooldown: 0
+      };
+    };
+    addWall("own_multi_wall", "blue", blueTownHall.x + 3, blueTownHall.y);
+    addWall("red_multi_wall", "red", redTownHall.x - 3, redTownHall.y);
+    addWall("green_multi_wall", "green", greenTownHall.x - 3, greenTownHall.y);
+
+    const ownTarget = issueSovereignOrder(state, "blue", {
+      type: "ATTACK",
+      priority: 1,
+      targetBuildingIds: ["red_multi_wall", "own_multi_wall"],
+      reason: "Invalidly include our own wall."
+    });
+    expect(ownTarget.ok).toBe(false);
+    expect(ownTarget.ok ? ownTarget.summary : ownTarget.reason).toContain("own building");
+
+    const crossTribe = issueSovereignOrder(state, "blue", {
+      type: "ATTACK",
+      priority: 1,
+      recipientTribeId: "red",
+      targetBuildingIds: ["red_multi_wall", "green_multi_wall"],
+      reason: "Invalidly mix target tribes."
+    });
+    expect(crossTribe.ok).toBe(false);
+    expect(crossTribe.ok ? crossTribe.summary : crossTribe.reason).toContain("different tribes");
+
+    const missing = issueSovereignOrder(state, "blue", {
+      type: "ATTACK",
+      priority: 1,
+      targetBuildingIds: ["red_multi_wall", "missing_multi_wall"],
+      reason: "Invalidly include a missing target."
+    });
+    expect(missing.ok).toBe(false);
+    expect(missing.ok ? missing.summary : missing.reason).toContain("missing_multi_wall");
+
+    const overlappingRoles = issueSovereignOrder(state, "blue", {
+      type: "ATTACK",
+      priority: 1,
+      targetBuildingIds: ["red_multi_wall"],
+      coverUnitIds: ["militia_0001"],
+      escortUnitIds: ["militia_0001"],
+      reason: "Invalidly assign the same unit to cover and escort."
+    });
+    expect(overlappingRoles.ok).toBe(false);
+    expect(overlappingRoles.ok ? overlappingRoles.summary : overlappingRoles.reason).toContain("must not overlap");
   });
 
   it("lets a sovereign attach an executable retreat threshold to a siege order", () => {
@@ -2829,22 +3631,204 @@ describe("Sovereign Worlds vertical slice simulation", () => {
 
     const projectile = Object.values(state.projectiles).find((shot) => shot.originUnitId === catapult.id && shot.targetBuildingId === "red_catapult_wall");
     expect(projectile).toBeDefined();
+    const stoneShotStats = getProjectileTypeCombatStats("stone_shot");
     expect(projectile).toMatchObject({
       projectileType: "stone_shot",
       tribeId: "blue",
-      targetBuildingId: "red_catapult_wall"
+      targetBuildingId: "red_catapult_wall",
+      hp: stoneShotStats.hp,
+      maxHp: stoneShotStats.maxHp,
+      armor: stoneShotStats.armor,
+      attackCooldown: stoneShotStats.attackCooldown
     });
+    expect(projectile?.attack).toBe(catapult.attack + 12);
+    expect(projectile?.range).toBe(catapult.range);
     const coverage = getCombatStatCoverageReport(state);
     expect(coverage.ok).toBe(true);
+    expect(coverage.byKind.projectileType).toBe(projectileTypes.length);
     expect(coverage.byKind.projectile).toBeGreaterThan(0);
-    expect(state.events.some((event) => event.type === "SIEGE_PROJECTILE_LAUNCHED" && event.body.includes("red_catapult_wall"))).toBe(true);
+    const launchEvent = state.events.find((event) => event.type === "SIEGE_PROJECTILE_LAUNCHED" && event.body.includes("red_catapult_wall"));
+    expect(launchEvent).toBeDefined();
+    expect(launchEvent?.context).toMatchObject({
+      x: 52,
+      y: 50,
+      actorTribeId: "blue",
+      targetTribeId: "red",
+      subjectId: projectile?.id,
+      targetId: "red_catapult_wall",
+      projectileType: "stone_shot",
+      severity: "skirmish"
+    });
 
     advanceGameTicks(state, 120);
 
     expect(state.buildings.red_catapult_wall).toBeUndefined();
     expect(Object.values(state.projectiles).every((shot) => shot.targetBuildingId !== "red_catapult_wall")).toBe(true);
-    expect(state.events.some((event) => event.type === "SIEGE_PROJECTILE_IMPACT" && event.body.includes("red_catapult_wall"))).toBe(true);
-    expect(state.events.some((event) => event.type === "STRUCTURE_DESTROYED" && event.body.includes("52,50"))).toBe(true);
+    const impactEvent = state.events.find((event) => event.type === "SIEGE_PROJECTILE_IMPACT" && event.body.includes("red_catapult_wall"));
+    expect(impactEvent?.context).toMatchObject({
+      x: 52,
+      y: 50,
+      actorTribeId: "blue",
+      targetTribeId: "red",
+      subjectId: projectile?.id,
+      targetId: "red_catapult_wall",
+      projectileType: "stone_shot",
+      severity: "impact"
+    });
+    const destroyedEvent = state.events.find((event) => event.type === "STRUCTURE_DESTROYED" && event.body.includes("52,50"));
+    expect(destroyedEvent?.context).toMatchObject({
+      x: 52,
+      y: 50,
+      actorTribeId: "blue",
+      targetTribeId: "red",
+      targetId: "red_catapult_wall",
+      severity: "destroyed"
+    });
+  });
+
+  it("renders archer arrows and turret bolts as statted combat projectiles", () => {
+    const state = createGame(2026070905);
+    state.wars.blue.red = true;
+    state.wars.red.blue = true;
+    const archerStats = getUnitTypeCombatStats("archer");
+    const militiaStats = getUnitTypeCombatStats("militia");
+    const turretStats = getBuildingTypeCombatStats("turret");
+    for (const pos of [
+      { x: 40, y: 53 },
+      { x: 43, y: 53 },
+      { x: 50, y: 55 },
+      { x: 56, y: 55 }
+    ]) {
+      state.map[tileIndex(pos.x, pos.y)].terrain = "grass";
+      delete state.map[tileIndex(pos.x, pos.y)].resource;
+    }
+    state.units.blue_visual_archer = {
+      id: "blue_visual_archer",
+      name: "Blue Visual Archer",
+      type: "archer",
+      tribeId: "blue",
+      x: 40,
+      y: 53,
+      speed: 1.0,
+      visionRadius: 6,
+      hp: archerStats.hp,
+      maxHp: archerStats.maxHp,
+      armor: archerStats.armor,
+      attack: archerStats.attack,
+      range: archerStats.range,
+      attackCooldown: 0,
+      task: { kind: "idle" }
+    };
+    state.units.red_arrow_target = {
+      id: "red_arrow_target",
+      name: "Red Arrow Target",
+      type: "militia",
+      tribeId: "red",
+      x: 43,
+      y: 53,
+      speed: 1.05,
+      visionRadius: 5,
+      hp: militiaStats.hp,
+      maxHp: militiaStats.maxHp,
+      armor: militiaStats.armor,
+      attack: militiaStats.attack,
+      range: militiaStats.range,
+      attackCooldown: 0,
+      task: { kind: "idle" }
+    };
+    state.units.red_bolt_target = {
+      ...state.units.red_arrow_target,
+      id: "red_bolt_target",
+      name: "Red Bolt Target",
+      x: 56,
+      y: 55,
+      hp: militiaStats.hp,
+      maxHp: militiaStats.maxHp,
+      task: { kind: "idle" }
+    };
+    state.buildings.blue_visual_turret = {
+      id: "blue_visual_turret",
+      type: "turret",
+      tribeId: "blue",
+      x: 50,
+      y: 55,
+      hp: turretStats.maxHp,
+      maxHp: turretStats.maxHp,
+      armor: turretStats.armor,
+      attack: turretStats.attack,
+      range: turretStats.range,
+      attackCooldown: 0
+    };
+
+    advanceGameTicks(state, 1);
+
+    const arrow = Object.values(state.projectiles).find((projectile) => projectile.projectileType === "arrow" && projectile.targetUnitId === "red_arrow_target");
+    const bolt = Object.values(state.projectiles).find((projectile) => projectile.projectileType === "turret_bolt" && projectile.targetUnitId === "red_bolt_target");
+    if (!arrow || !bolt) throw new Error("Expected arrow and turret-bolt projectiles");
+    expect(arrow).toMatchObject({
+      projectileType: "arrow",
+      tribeId: "blue",
+      originUnitId: "blue_visual_archer",
+      targetKind: "unit",
+      targetUnitId: "red_arrow_target",
+      appliesDamageOnImpact: false,
+      hp: 1,
+      maxHp: 1,
+      armor: 0,
+      attack: archerStats.attack,
+      range: archerStats.range,
+      attackCooldown: 0
+    });
+    expect(bolt).toMatchObject({
+      projectileType: "turret_bolt",
+      tribeId: "blue",
+      originBuildingId: "blue_visual_turret",
+      targetKind: "unit",
+      targetUnitId: "red_bolt_target",
+      appliesDamageOnImpact: false,
+      hp: 1,
+      maxHp: 1,
+      armor: 0,
+      attack: turretStats.attack,
+      range: turretStats.range,
+      attackCooldown: 0
+    });
+    expect(state.units.red_arrow_target.hp).toBeLessThan(militiaStats.hp);
+    expect(state.units.red_bolt_target.hp).toBeLessThan(militiaStats.hp);
+    const coverage = getCombatStatCoverageReport(state);
+    expect(coverage.ok).toBe(true);
+    expect(coverage.byKind.projectileType).toBe(projectileTypes.length);
+    expect(coverage.byKind.projectile).toBeGreaterThanOrEqual(2);
+    expect(state.events.filter((event) => event.type === "COMBAT_PROJECTILE_LAUNCHED")).toHaveLength(2);
+    expect(
+      state.events.find((event) => event.type === "COMBAT_PROJECTILE_LAUNCHED" && event.context?.projectileType === "arrow")?.context
+    ).toMatchObject({
+      x: 43,
+      y: 53,
+      actorTribeId: "blue",
+      targetTribeId: "red",
+      subjectId: arrow.id,
+      targetId: "red_arrow_target",
+      severity: "skirmish"
+    });
+    expect(
+      state.events.find((event) => event.type === "COMBAT_PROJECTILE_LAUNCHED" && event.context?.projectileType === "turret_bolt")?.context
+    ).toMatchObject({
+      x: 56,
+      y: 55,
+      actorTribeId: "blue",
+      targetTribeId: "red",
+      subjectId: bolt.id,
+      targetId: "red_bolt_target",
+      severity: "skirmish"
+    });
+
+    state.units.blue_visual_archer.attack = 0;
+    state.buildings.blue_visual_turret.attack = 0;
+    advanceGameTicks(state, 20);
+
+    expect(state.projectiles[arrow.id]).toBeUndefined();
+    expect(state.projectiles[bolt.id]).toBeUndefined();
   });
 
   it("lets targeted siege orders destroy gates and turrets through normal combat", () => {

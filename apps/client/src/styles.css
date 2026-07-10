@@ -297,6 +297,10 @@ select {
   opacity: 0.62;
 }
 
+.combat-event-row {
+  color: #ffe3a1;
+}
+
 .tribe-rank-header {
   display: flex;
   gap: 6px;

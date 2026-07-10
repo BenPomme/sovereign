@@ -390,11 +390,11 @@ describe("Ollama JSON recovery", () => {
               targetX: 18,
               targetY: 15,
               fortificationIntent: "northern warning wall",
-              perimeterShape: "short diagonal segment",
+              perimeterShape: "L-shaped corner wall with one bend",
               perimeterStrategy: "Signal a border without fully enclosing our own people.",
-              perimeterPattern: "line",
+              perimeterPattern: "corner",
               perimeterDirection: "east_west",
-              perimeterLength: 4,
+              perimeterLength: 5,
               reason: "Build a wall at 18,15 to mark the northern perimeter."
             }
           ],
@@ -417,14 +417,142 @@ describe("Ollama JSON recovery", () => {
       targetX: 18,
       targetY: 15,
       fortificationIntent: "northern warning wall",
-      perimeterShape: "short diagonal segment",
+      perimeterShape: "L-shaped corner wall with one bend",
       perimeterStrategy: "Signal a border without fully enclosing our own people.",
-      perimeterPattern: "line",
+      perimeterPattern: "corner",
       perimeterDirection: "east_west",
-      perimeterLength: 4,
+      perimeterLength: 5,
       reason: "Build a wall at 18,15 to mark the northern perimeter."
     });
     expect(decision.orders[0].buildingType).toBeUndefined();
+  });
+
+  it("preserves LLM-authored turret line perimeter placement", async () => {
+    const game = createGame(2026070904);
+    game.tribes.blue.resources = { gold: 1000, food: 1000, wood: 1000, stone: 1000, clay: 1000, limestone: 1000, iron: 1000, coal: 1000 };
+    expect(issueSovereignOrder(game, "blue", { type: "DEVELOP", priority: 1, developmentId: "ironworking", reason: "Unlock turret metalwork." }).ok).toBe(true);
+    expect(issueSovereignOrder(game, "blue", { type: "DEVELOP", priority: 1, developmentId: "ballistics", reason: "Unlock turret mechanisms." }).ok).toBe(true);
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        response: JSON.stringify({
+          freeformStrategy: "I want a chain of batteries on the east road, but I will choose the spacing myself.",
+          strategySummary: "Build a turret line.",
+          memoryNote: "Three-turret line covers the road.",
+          orders: [
+            {
+              type: "BUILD",
+              priority: 1,
+              buildingType: "turret",
+              targetX: 48,
+              targetY: 34,
+              perimeterPattern: "line",
+              perimeterDirection: "east_west",
+              perimeterLength: 3,
+              fortificationIntent: "overlapping anti-raid battery",
+              perimeterShape: "three turret line",
+              perimeterStrategy: "Create three fields of fire along the road without blocking friendly movement.",
+              reason: "Place the turret line on the road approach."
+            }
+          ],
+          unitNames: [],
+          bugReport: "",
+          bugSeverity: "low"
+        })
+      })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("window", {
+      setTimeout: globalThis.setTimeout,
+      clearTimeout: globalThis.clearTimeout
+    });
+
+    const decision = await requestSovereignDecision(game, "blue", "qwen3.5:9b-mlx");
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+
+    expect(body.prompt).toContain("line or corner perimeters");
+    expect(body.prompt).toContain("turret");
+    expect(body.prompt).toContain("watchtower");
+    expect(body.prompt).toContain("gate_line");
+    expect(body.prompt).toContain("gate_corner");
+    expect(body.format.properties.orders.items.properties.buildingType.enum).toContain("turret");
+    expect(body.format.properties.orders.items.properties.buildingType.enum).toContain("watchtower");
+    expect(body.format.properties.orders.items.properties.perimeterPattern.enum).toContain("corner");
+    expect(body.format.properties.orders.items.properties.perimeterPattern.enum).toContain("gate_corner");
+    expect(decision.orders[0]).toMatchObject({
+      type: "BUILD",
+      buildingType: "turret",
+      targetX: 48,
+      targetY: 34,
+      perimeterPattern: "line",
+      perimeterDirection: "east_west",
+      perimeterLength: 3,
+      fortificationIntent: "overlapping anti-raid battery",
+      perimeterShape: "three turret line",
+      perimeterStrategy: "Create three fields of fire along the road without blocking friendly movement."
+    });
+  });
+
+  it("preserves LLM-authored corner wall-gate perimeter placement", async () => {
+    const game = createGame(2026070912);
+    game.tribes.blue.resources = { gold: 1000, food: 1000, wood: 1000, stone: 1000, clay: 1000, limestone: 1000, iron: 1000, coal: 1000 };
+    expect(issueSovereignOrder(game, "blue", { type: "DEVELOP", priority: 1, developmentId: "masonry", reason: "Unlock wall masonry." }).ok).toBe(true);
+    expect(issueSovereignOrder(game, "blue", { type: "DEVELOP", priority: 1, developmentId: "ironworking", reason: "Unlock gate hardware." }).ok).toBe(true);
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        response: JSON.stringify({
+          freeformStrategy: "I want a bent customs wall that makes arrivals slow down before they enter.",
+          strategySummary: "Build a bent wall with a gate at the corner.",
+          memoryNote: "The eastern road gets a corner gate.",
+          orders: [
+            {
+              type: "BUILD",
+              priority: 1,
+              buildingType: "wall",
+              targetX: 52,
+              targetY: 39,
+              perimeterPattern: "gate_corner",
+              perimeterDirection: "east_west",
+              perimeterLength: 5,
+              perimeterGateIndex: 3,
+              fortificationIntent: "bent customs wall",
+              perimeterShape: "L-shaped corner wall with the gate at the bend",
+              perimeterStrategy: "Watch two approaches while preserving one owned passage.",
+              reason: "Place a gated corner at the road bend."
+            }
+          ],
+          unitNames: [],
+          bugReport: "",
+          bugSeverity: "low"
+        })
+      })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("window", {
+      setTimeout: globalThis.setTimeout,
+      clearTimeout: globalThis.clearTimeout
+    });
+
+    const decision = await requestSovereignDecision(game, "blue", "qwen3.5:9b-mlx");
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+
+    expect(body.prompt).toContain("gate_corner");
+    expect(body.prompt).toContain("the geometry comes from the explicit perimeter fields, not from prose");
+    expect(body.format.properties.orders.items.properties.perimeterPattern.enum).toContain("gate_corner");
+    expect(decision.orders[0]).toMatchObject({
+      type: "BUILD",
+      buildingType: "wall",
+      targetX: 52,
+      targetY: 39,
+      perimeterPattern: "gate_corner",
+      perimeterDirection: "east_west",
+      perimeterLength: 5,
+      perimeterGateIndex: 3,
+      fortificationIntent: "bent customs wall",
+      perimeterShape: "L-shaped corner wall with the gate at the bend",
+      perimeterStrategy: "Watch two approaches while preserving one owned passage."
+    });
   });
 
   it("includes factual fortification placement previews in sovereign catch-up context", async () => {
@@ -654,6 +782,9 @@ describe("Ollama JSON recovery", () => {
               gateAccessTreatyName: "Northern road writ",
               gateAccessTreatyTerms: "Red may pass this gate while escorted, but I can revoke the writ at any time.",
               gateAccessTreatyDurationTicks: 300,
+              gateRouteName: "Northern two-gate road",
+              gateRouteGateIds: [built.buildingId, "blue_second_gate"],
+              gateRouteTerms: "Red couriers may use the north and market gates only.",
               gateSabotageAction: "jam_closed",
               gateSabotageDurationTicks: 80,
               gateSabotageDamage: 7,
@@ -685,6 +816,8 @@ describe("Ollama JSON recovery", () => {
     expect(body.prompt).toContain("1-based perimeterGateIndex");
     expect(body.format.properties.orders.items.properties.type.enum).toContain("GATE_OPERATION");
     expect(body.format.properties.orders.items.properties.perimeterPattern.enum).toContain("gate_line");
+    expect(body.format.properties.orders.items.properties.perimeterPattern.enum).toContain("corner");
+    expect(body.format.properties.orders.items.properties.perimeterPattern.enum).toContain("gate_corner");
     expect(body.format.properties.orders.items.properties.perimeterDirection.enum).toContain("north_south");
     expect(body.format.properties.orders.items.properties.perimeterLength.type).toBe("integer");
     expect(body.format.properties.orders.items.properties.perimeterGateIndex.type).toBe("integer");
@@ -694,9 +827,14 @@ describe("Ollama JSON recovery", () => {
     expect(body.format.properties.orders.items.properties.gateDetainedPacketAction.enum).toContain("ransom");
     expect(body.format.properties.orders.items.properties.gateRansomGold.type).toBe("integer");
     expect(body.format.properties.orders.items.properties.gateAccessTreatyAction.enum).toContain("revoke");
+    expect(body.format.properties.orders.items.properties.gateRouteName.type).toBe("string");
+    expect(body.format.properties.orders.items.properties.gateRouteGateIds.items.type).toBe("string");
+    expect(body.format.properties.orders.items.properties.gateRouteTerms.type).toBe("string");
     expect(body.format.properties.orders.items.properties.gateSabotageAction.enum).toContain("force_open");
     expect(body.prompt).toContain("gateDetainedPacketId");
     expect(body.prompt).toContain("gateAccessTreatyAction");
+    expect(body.prompt).toContain("Multi-gate route rule");
+    expect(body.prompt).toContain("gateRouteGateIds");
     expect(body.prompt).toContain("gateSabotageAction");
     expect(body.prompt).toContain("courier route evidence");
     expect(body.prompt).toContain("treaty incident evidence");
@@ -723,6 +861,9 @@ describe("Ollama JSON recovery", () => {
       gateAccessTreatyName: "Northern road writ",
       gateAccessTreatyTerms: "Red may pass this gate while escorted, but I can revoke the writ at any time.",
       gateAccessTreatyDurationTicks: 300,
+      gateRouteName: "Northern two-gate road",
+      gateRouteGateIds: [built.buildingId, "blue_second_gate"],
+      gateRouteTerms: "Red couriers may use the north and market gates only.",
       gateSabotageAction: "jam_closed",
       gateSabotageDurationTicks: 80,
       gateSabotageDamage: 7,
@@ -1852,6 +1993,132 @@ describe("Ollama JSON recovery", () => {
     });
   });
 
+  it("exposes witnessed gate incidents as unverified scouting observations", async () => {
+    const game = createGame(2026070905);
+    game.foreignObservations.green ??= [];
+    game.foreignObservations.green.push({
+      id: "obs_gate_incident_prompt",
+      tick: game.tick,
+      observerTribeId: "green",
+      kind: "gate_treaty_incident_witnessed",
+      subjectKind: "building",
+      subjectTribeId: "blue",
+      subjectId: "gate_prompt",
+      subjectType: "gate",
+      x: 33,
+      y: 35,
+      hp: 240,
+      gateTreatyIncidentId: "gateincident_prompt",
+      gateTreatyId: "gatetreaty_prompt",
+      gateOperationId: "gateop_prompt",
+      gateOwnerTribeId: "blue",
+      affectedTribeId: "red",
+      packetId: "packet_prompt",
+      gateIncidentAction: "detain"
+    });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        response: JSON.stringify({
+          freeformStrategy: "I witnessed a gate restriction and will decide whether it matters later.",
+          strategySummary: "Record a witnessed gate incident.",
+          memoryNote: "Green observed a gate incident but treaty details are unverified.",
+          orders: [
+            {
+              type: "SET_POLICY",
+              priority: 1,
+              messageType: "LETTER",
+              diplomacyIntent: "NONE",
+              subject: "",
+              body: "",
+              reason: "Treat the observation as evidence, not proof of treaty terms."
+            }
+          ],
+          unitNames: [],
+          bugReport: "",
+          bugSeverity: "low"
+        })
+      })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("window", {
+      setTimeout: globalThis.setTimeout,
+      clearTimeout: globalThis.clearTimeout
+    });
+
+    const decision = await requestSovereignDecision(game, "green", "qwen3.5:9b-mlx");
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+
+    expect(body.prompt).toContain("new scouting observations");
+    expect(body.prompt).toContain("witnessed gate treaty incident incident gateincident_prompt");
+    expect(body.prompt).toContain("Blue Crown gate gate_prompt detain Red Banner packet packet_prompt");
+    expect(body.prompt).toContain("treaty details unverified by witness");
+    expect(decision.orders[0]).toMatchObject({ type: "SET_POLICY" });
+  });
+
+  it("exposes witnessed gate sabotage as factual scouting evidence without consequences", async () => {
+    const game = createGame(2026070913);
+    game.foreignObservations.blue ??= [];
+    game.foreignObservations.blue.push({
+      id: "obs_gate_sabotage_prompt",
+      tick: game.tick,
+      observerTribeId: "blue",
+      kind: "gate_sabotage_witnessed",
+      subjectKind: "unit",
+      subjectTribeId: "red",
+      subjectId: "militia_saboteur_prompt",
+      subjectType: "militia",
+      x: 34,
+      y: 35,
+      hp: 40,
+      gateOperationId: "gateop_sabotage_prompt",
+      gateOwnerTribeId: "blue",
+      affectedTribeId: "blue",
+      gateBuildingId: "gate_prompt",
+      gateSabotageId: "gatesabotage_prompt",
+      gateSabotageAction: "force_open"
+    });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        response: JSON.stringify({
+          freeformStrategy: "I saw a saboteur and will decide whether to investigate, bargain, or retaliate.",
+          strategySummary: "Treat sabotage sighting as evidence.",
+          memoryNote: "Blue saw a Red militia near the gate during sabotage.",
+          orders: [
+            {
+              type: "SET_POLICY",
+              priority: 1,
+              messageType: "LETTER",
+              diplomacyIntent: "NONE",
+              subject: "",
+              body: "",
+              reason: "Record the sighting without assuming an automatic war response."
+            }
+          ],
+          unitNames: [],
+          bugReport: "",
+          bugSeverity: "low"
+        })
+      })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("window", {
+      setTimeout: globalThis.setTimeout,
+      clearTimeout: globalThis.clearTimeout
+    });
+
+    const decision = await requestSovereignDecision(game, "blue", "qwen3.5:9b-mlx");
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+
+    expect(body.prompt).toContain("witnessed gate sabotage sabotage gatesabotage_prompt operation gateop_sabotage_prompt");
+    expect(body.prompt).toContain("Red Banner militia militia_saboteur_prompt force_open Blue Crown gate gate_prompt");
+    expect(body.prompt).toContain("factual sighting only, response is yours to decide");
+    expect(decision.orders[0]).toMatchObject({ type: "SET_POLICY" });
+    expect(game.wars.blue.red).not.toBe(true);
+    expect(game.wars.red.blue).not.toBe(true);
+  });
+
   it("includes world continuity context in normal reply prompts", async () => {
     const game = createGame(20260702);
     const sent = sendPlayerMessage(game, "red", "peace");
@@ -2065,7 +2332,7 @@ describe("Ollama JSON recovery", () => {
 
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(body.prompt).toContain("This is your world, your reign, and your living population");
-    expect(body.prompt).toContain("poorest surviving population is wiped out");
+    expect(body.prompt).toContain("lowest total wealth is wiped out");
     expect(body.prompt).toContain("its people die");
     expect(body.prompt).toContain("opposite of safety");
     expect(body.prompt).not.toContain("You are playing a local RTS prototype");
@@ -2345,6 +2612,25 @@ describe("Ollama JSON recovery", () => {
       range: 0,
       attackCooldown: 0
     };
+    game.buildings.red_test_gate = {
+      id: "red_test_gate",
+      type: "gate",
+      tribeId: "red",
+      x: wallTarget.x,
+      y: wallTarget.y + 1,
+      hp: 80,
+      maxHp: 260,
+      armor: 8,
+      attack: 0,
+      range: 0,
+      attackCooldown: 0,
+      gateState: "locked",
+      gateAccessPolicy: "owner_only"
+    };
+    const ownMilitia = Object.values(game.units)
+      .filter((unit) => unit.tribeId === "blue" && unit.type === "militia")
+      .sort((left, right) => left.id.localeCompare(right.id));
+    expect(ownMilitia.length).toBeGreaterThanOrEqual(2);
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -2358,6 +2644,20 @@ describe("Ollama JSON recovery", () => {
               priority: 1,
               recipientTribeId: "red",
               targetBuildingId: "red_test_wall",
+              targetBuildingIds: ["red_test_wall", "red_test_gate", "red_test_wall"],
+              coverUnitIds: [ownMilitia[0].id],
+              escortUnitIds: [ownMilitia[1].id, ownMilitia[1].id],
+              coverX: wallTarget.x - 1,
+              coverY: wallTarget.y,
+              coverRadius: 4,
+              coverPlan: "Screen the breach team from Red militia.",
+              escortX: wallTarget.x,
+              escortY: wallTarget.y + 1,
+              escortRadius: 5,
+              escortPlan: "Escort the gate pressure group and intercept defenders.",
+              interdictRepairs: "true",
+              repairInterdictionPlan: "If Red sends workers to the breach, stop the repair crew before resuming wall damage.",
+              repairInterdictionRadius: 6,
               siegeIntent: "feint at the road then breach the named wall",
               assaultPlan: "Use the visible wall as the breach target; if Red opens a gate, redirect pressure there.",
               assaultMode: "feint",
@@ -2394,12 +2694,31 @@ describe("Ollama JSON recovery", () => {
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
 
     expect(body.prompt).toContain("Visible foreign buildings:");
+    expect(body.prompt).toContain("Combat opportunity brief:");
+    expect(body.prompt).toContain("known contacts Red Banner(red)");
+    expect(body.prompt).toContain("active wars none");
+    expect(body.prompt).toContain("own military");
+    expect(body.prompt).toContain("visible structure targets");
+    expect(body.prompt).toContain("evidence only: choose independently whether to fight, negotiate, scout, defend, deceive, ignore, or prepare");
     expect(body.prompt).toContain(`red_test_wall: red wall at ${wallTarget.x},${wallTarget.y} hp 50 armor 6`);
-    expect(body.prompt).toContain(`targetBuildingId options red_test_wall:red:wall:${wallTarget.x},${wallTarget.y}`);
+    expect(body.prompt).toContain(`red_test_wall:red:wall:${wallTarget.x},${wallTarget.y}`);
+    expect(body.prompt).toContain(`red_test_gate:red:gate:${wallTarget.x},${wallTarget.y + 1}`);
+    expect(body.prompt).toContain("targetBuildingIds can combine up to five of those exact IDs");
+    expect(body.prompt).toContain("coverUnitIds and escortUnitIds can name exact own militia/archer ids");
+    expect(body.prompt).toContain("interdictRepairs can suppress hostile repair crews on the exact attacked building");
     expect(body.prompt).toContain("breach estimate");
     expect(body.prompt).toContain("retreatHealthPct");
     expect(body.prompt).toContain("assaultMode");
     expect(body.format.properties.orders.items.properties.buildingType.enum).toContain("house");
+    expect(body.format.properties.orders.items.properties.targetBuildingIds.items.type).toBe("string");
+    expect(body.format.properties.orders.items.properties.targetBuildingIds.maxItems).toBe(5);
+    expect(body.format.properties.orders.items.properties.coverUnitIds.items.type).toBe("string");
+    expect(body.format.properties.orders.items.properties.escortUnitIds.items.type).toBe("string");
+    expect(body.format.properties.orders.items.properties.interdictRepairs.type).toBe("boolean");
+    expect(body.format.properties.orders.items.properties.repairInterdictionPlan.type).toBe("string");
+    expect(body.format.properties.orders.items.properties.repairInterdictionRadius.type).toBe("integer");
+    expect(body.format.properties.orders.items.properties.coverX.type).toBe("integer");
+    expect(body.format.properties.orders.items.properties.escortX.type).toBe("integer");
     expect(body.format.properties.orders.items.properties.assaultMode.enum).toContain("coordinated");
     expect(body.format.properties.orders.items.properties.assaultMode.enum).toContain("feint");
     expect(body.format.properties.orders.items.properties.assemblyX.type).toBe("integer");
@@ -2415,6 +2734,20 @@ describe("Ollama JSON recovery", () => {
       type: "ATTACK",
       recipientTribeId: "red",
       targetBuildingId: "red_test_wall",
+      targetBuildingIds: ["red_test_wall", "red_test_gate"],
+      coverUnitIds: [ownMilitia[0].id],
+      escortUnitIds: [ownMilitia[1].id],
+      coverX: wallTarget.x - 1,
+      coverY: wallTarget.y,
+      coverRadius: 4,
+      coverPlan: "Screen the breach team from Red militia.",
+      escortX: wallTarget.x,
+      escortY: wallTarget.y + 1,
+      escortRadius: 5,
+      escortPlan: "Escort the gate pressure group and intercept defenders.",
+      interdictRepairs: true,
+      repairInterdictionPlan: "If Red sends workers to the breach, stop the repair crew before resuming wall damage.",
+      repairInterdictionRadius: 6,
       siegeIntent: "feint at the road then breach the named wall",
       assaultPlan: "Use the visible wall as the breach target; if Red opens a gate, redirect pressure there.",
       assaultMode: "feint",
@@ -2615,6 +2948,9 @@ describe("Ollama JSON recovery", () => {
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
 
     expect(body.prompt).toContain("Visible resource raid targets:");
+    expect(body.prompt).toContain("Combat opportunity brief:");
+    expect(body.prompt).toContain(`visible raid or denial targets iron@${ironTarget.x},${ironTarget.y}`);
+    expect(body.prompt).toContain("evidence only: choose independently whether to fight, negotiate, scout, defend, deceive, ignore, or prepare");
     expect(body.prompt).toContain(`iron at ${ironTarget.x},${ironTarget.y} amount 12 hp 12 armor 3`);
     expect(body.prompt).toContain("Known resource posture:");
     expect(body.prompt).toContain("posture controlled_by_you");

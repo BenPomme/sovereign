@@ -22,6 +22,7 @@ export type GateState = "open" | "closed" | "locked";
 export type GateAccessPolicy = "all" | "owner_allies" | "owner_only";
 export type BuildingType = "townHall" | "farm" | "house" | "barracks" | "market" | "watchtower" | "wall" | "gate" | "turret";
 export type BuildableBuildingType = "farm" | "house" | "watchtower" | "wall" | "gate" | "turret";
+export type ProjectileType = "stone_shot" | "arrow" | "turret_bolt";
 export type DevelopmentId = string;
 export type DevelopmentCategory =
   | "foundational"
@@ -87,7 +88,7 @@ export type GateDetainedPacketAction = "hold" | "release" | "ransom";
 export type GateAccessTreatyAction = "grant" | "revoke";
 export type GateSabotageAction = "force_open" | "jam_closed" | "damage" | "clear";
 export type GateTollMode = "none" | "optional" | "required";
-export type PerimeterPattern = "single" | "line" | "gate_line";
+export type PerimeterPattern = "single" | "line" | "gate_line" | "corner" | "gate_corner";
 export type PerimeterDirection = "east_west" | "north_south" | "northeast_southwest" | "northwest_southeast";
 export type SiegeAssaultMode = "direct" | "coordinated" | "feint" | "probe";
 
@@ -250,6 +251,7 @@ export type AiStrategicOrder = {
   buildingType?: BuildableBuildingType;
   buildingId?: string;
   targetBuildingId?: string;
+  targetBuildingIds?: string[];
   targetResourceType?: ResourceType;
   gateState?: GateState;
   gateAccessPolicy?: GateAccessPolicy;
@@ -276,6 +278,9 @@ export type AiStrategicOrder = {
   gateAccessTreatyName?: string;
   gateAccessTreatyTerms?: string;
   gateAccessTreatyDurationTicks?: number;
+  gateRouteName?: string;
+  gateRouteGateIds?: string[];
+  gateRouteTerms?: string;
   gateSabotageAction?: GateSabotageAction;
   gateSabotageDurationTicks?: number;
   gateSabotageDamage?: number;
@@ -289,6 +294,19 @@ export type AiStrategicOrder = {
   assaultWaveSize?: number;
   assaultWaveIntervalTicks?: number;
   feintDurationTicks?: number;
+  coverPlan?: string;
+  coverUnitIds?: string[];
+  coverX?: number;
+  coverY?: number;
+  coverRadius?: number;
+  escortPlan?: string;
+  escortUnitIds?: string[];
+  escortX?: number;
+  escortY?: number;
+  escortRadius?: number;
+  interdictRepairs?: boolean;
+  repairInterdictionPlan?: string;
+  repairInterdictionRadius?: number;
   retreatCondition?: string;
   retreatHealthPct?: number;
   retreatX?: number;
@@ -389,6 +407,29 @@ export type FortificationPlacementPreview = {
   summary: string;
 };
 
+export type FortificationPrebuildPreview = {
+  planKind: "single" | "perimeter";
+  buildingType: BuildableBuildingType;
+  requestedTarget: Position;
+  perimeterPattern: PerimeterPattern;
+  perimeterDirection?: PerimeterDirection;
+  perimeterLength: number;
+  perimeterGateIndex?: number;
+  missingDevelopments: DevelopmentId[];
+  affordable: boolean;
+  cost: ResourceCost;
+  wouldSpendResources: ResourceCost;
+  wouldBuildCount: number;
+  wouldBuildTypes: Partial<Record<BuildableBuildingType, number>>;
+  wouldCreateBuildingIds: string[];
+  placementPreview: FortificationPlacementPreview;
+  summary: string;
+};
+
+export type FortificationPrebuildPreviewResult =
+  | { ok: true; preview: FortificationPrebuildPreview }
+  | { ok: false; reason: string; missingDevelopments?: DevelopmentId[]; cost?: ResourceCost; affordable?: boolean };
+
 export type FortificationRoutePreview = {
   label: string;
   tribeId: TribeId;
@@ -428,6 +469,10 @@ export type GateOperationRecord = {
   accessTreatyName?: string;
   accessTreatyTerms?: string;
   accessTreatyDurationTicks?: number;
+  routeId?: string;
+  routeName?: string;
+  routeGateIds?: string[];
+  routeTerms?: string;
   sabotageAction?: GateSabotageAction;
   sabotageDurationTicks?: number;
   sabotageDamage?: number;
@@ -446,6 +491,10 @@ export type GateAccessTreatyRecord = {
   action: GateAccessTreatyAction;
   treatyName?: string;
   treatyTerms?: string;
+  routeId?: string;
+  routeName?: string;
+  routeGateIds?: string[];
+  routeTerms?: string;
   publicNotice?: string;
   expiresAtTick?: number;
   expiredAnnounced?: boolean;
@@ -475,6 +524,8 @@ export type GateSabotageState = {
   tick: number;
   tribeId: TribeId;
   targetTribeId?: TribeId;
+  gateOperationId?: string;
+  saboteurUnitId?: string;
   action: Extract<GateSabotageAction, "force_open" | "jam_closed">;
   previousGateState?: GateState;
   expiresAtTick?: number;
@@ -487,6 +538,8 @@ export type GateSabotageRecord = {
   tribeId: TribeId;
   buildingId: string;
   targetTribeId?: TribeId;
+  gateOperationId?: string;
+  saboteurUnitId?: string;
   action: GateSabotageAction;
   previousGateState?: GateState;
   damage?: number;
@@ -501,6 +554,7 @@ export type SiegePlanRecord = {
   kind: "attack" | "repair" | "resource_raid";
   targetTribeId?: TribeId;
   targetBuildingId?: string;
+  targetBuildingIds?: string[];
   targetResourceType?: ResourceType;
   targetX?: number;
   targetY?: number;
@@ -516,6 +570,19 @@ export type SiegePlanRecord = {
   releasedWaveIndexes?: number[];
   feintDurationTicks?: number;
   feintWithdrawTick?: number;
+  coverPlan?: string;
+  coverUnitIds?: string[];
+  coverX?: number;
+  coverY?: number;
+  coverRadius?: number;
+  escortPlan?: string;
+  escortUnitIds?: string[];
+  escortX?: number;
+  escortY?: number;
+  escortRadius?: number;
+  interdictRepairs?: boolean;
+  repairInterdictionPlan?: string;
+  repairInterdictionRadius?: number;
   retreatCondition?: string;
   retreatHealthPct?: number;
   retreatX?: number;
@@ -545,7 +612,13 @@ export type SovereignDecisionCursor = {
   updatedTick: number;
 };
 
-export type ForeignObservationKind = "unit_seen" | "unit_lost" | "building_seen" | "building_lost";
+export type ForeignObservationKind =
+  | "unit_seen"
+  | "unit_lost"
+  | "building_seen"
+  | "building_lost"
+  | "gate_treaty_incident_witnessed"
+  | "gate_sabotage_witnessed";
 
 export type ForeignObservationSubject = {
   subjectKind: "unit" | "building";
@@ -562,6 +635,16 @@ export type ForeignObservation = ForeignObservationSubject & {
   tick: number;
   observerTribeId: TribeId;
   kind: ForeignObservationKind;
+  gateTreatyIncidentId?: string;
+  gateTreatyId?: string;
+  gateOperationId?: string;
+  gateOwnerTribeId?: TribeId;
+  affectedTribeId?: TribeId;
+  packetId?: string;
+  gateIncidentAction?: Extract<GatePassageAction, "refuse" | "detain" | "ambush">;
+  gateBuildingId?: string;
+  gateSabotageId?: string;
+  gateSabotageAction?: GateSabotageAction;
 };
 
 export type ForeignObservationMemory = {
@@ -641,6 +724,19 @@ export type UnitTask =
       feintWithdrawTick?: number;
       retreatHealthPct?: number;
       retreatTarget?: Position;
+      interdictRepairs?: boolean;
+      repairInterdictionPlan?: string;
+      repairInterdictionRadius?: number;
+    }
+  | {
+      kind: "guardSiege";
+      siegePlanId: string;
+      guardRole: "cover" | "escort";
+      anchor: Position;
+      radius: number;
+      path: Position[];
+      targetBuildingId?: string;
+      guardPlan?: string;
     }
   | { kind: "attackResource"; target: Position; resource: ResourceType; path: Position[] }
   | { kind: "repair"; targetBuildingId: string; path: Position[]; siegePlanId?: string; siegeIntent?: string; lastInterruptedTick?: number };
@@ -715,10 +811,13 @@ export type Packet = CombatStats & {
 
 export type SiegeProjectile = CombatStats & {
   id: string;
-  projectileType: "stone_shot";
+  projectileType: ProjectileType;
   tribeId: TribeId;
-  originUnitId: string;
-  targetBuildingId: string;
+  originUnitId?: string;
+  originBuildingId?: string;
+  targetKind: "building" | "unit";
+  targetBuildingId?: string;
+  targetUnitId?: string;
   x: number;
   y: number;
   startX: number;
@@ -727,11 +826,12 @@ export type SiegeProjectile = CombatStats & {
   targetY: number;
   launchedTick: number;
   impactTick: number;
+  appliesDamageOnImpact: boolean;
   siegePlanId?: string;
 };
 
 export type CombatStatCoverageIssue = {
-  kind: "unitType" | "buildingType" | "resourceType" | "unit" | "building" | "resource" | "packet" | "projectile" | "map";
+  kind: "unitType" | "buildingType" | "resourceType" | "projectileType" | "unit" | "building" | "resource" | "packet" | "projectile" | "map";
   id: string;
   reason: string;
 };
@@ -739,7 +839,7 @@ export type CombatStatCoverageIssue = {
 export type CombatStatCoverageReport = {
   ok: boolean;
   checked: number;
-  byKind: Record<"unitType" | "buildingType" | "resourceType" | "unit" | "building" | "resource" | "packet" | "projectile", number>;
+  byKind: Record<"unitType" | "buildingType" | "resourceType" | "projectileType" | "unit" | "building" | "resource" | "packet" | "projectile", number>;
   issues: CombatStatCoverageIssue[];
 };
 
@@ -750,6 +850,16 @@ export type GameEvent = {
   title: string;
   body: string;
   visibleTo: TribeId[] | "all";
+  context?: {
+    x?: number;
+    y?: number;
+    actorTribeId?: TribeId;
+    targetTribeId?: TribeId;
+    subjectId?: string;
+    targetId?: string;
+    projectileType?: ProjectileType;
+    severity?: "skirmish" | "impact" | "destroyed" | "raid";
+  };
 };
 
 export type VictoryPressureConfig = {
@@ -807,6 +917,7 @@ export type VictoryPressureStatus = {
   leaderSurvivalScore: number;
   poorestTribeId: TribeId;
   poorestName: string;
+  poorestWealth: number;
   poorestSurvivalScore: number;
   runnerUpTribeId?: TribeId;
   runnerUpName?: string;
@@ -884,6 +995,7 @@ export type GameState = {
 export const tribeIds: TribeId[] = ["blue", "red", "green", "yellow", "purple"];
 export const unitTypes: readonly UnitType[] = ["sovereign", "peon", "sentinel", "messenger", "trader", "militia", "archer", "siege_engine", "battering_ram", "catapult"] as const;
 export const buildingTypes: readonly BuildingType[] = ["townHall", "farm", "house", "barracks", "market", "watchtower", "wall", "gate", "turret"] as const;
+export const projectileTypes: readonly ProjectileType[] = ["stone_shot", "arrow", "turret_bolt"] as const;
 
 export const tribeConfig: Record<TribeId, Pick<Tribe, "id" | "name" | "color" | "colorText" | "controller">> = {
   blue: {
@@ -1662,17 +1774,59 @@ function inferDevelopmentEffects(seed: RoadmapDevelopmentSeed): DevelopmentEffec
     add("yearly_happiness", -0.55, "Coercive institutions carry recurring legitimacy costs.");
     add("safety", -0.8, "Coercive institutions create internal safety risks.");
   }
+  if (/\b(tax|taxation|tithe|levy|assessment)\b/.test(text)) {
+    add("yearly_gold_per_population", 0.1, "Tax design increases predictable yearly revenue.");
+    add("yearly_happiness", -0.08, "Tax design can burden households if growth lags.");
+  }
+  if (/\b(progressive tax|charter|price bulletin|audit|anti-corruption|public accountability|petition)\b/.test(text)) {
+    add("yearly_happiness", 0.12, "Transparent fiscal institutions reduce resentment around public burdens.");
+    add("safety", 0.2, "Public fiscal accountability lowers corruption and unrest risk.");
+  }
+  if (/\b(market|trade|tariff|merchant|guild|export|mission|caravan|bridge|toll)\b/.test(text)) {
+    add("wealth", 1.8, "Commercial route institutions increase stored productive wealth.");
+    add("resource_control", 0.35, "Commercial route institutions improve contested resource access.");
+    add("unit_speed", 0.035, "Commercial route institutions improve courier and trader movement.", "courier");
+  }
+  if (/\b(bank|bond|credit|treasury|mint|currency|coinage|debt|insurance|forecast)\b/.test(text)) {
+    add("wealth", 3.2, "Financial institutions deepen capital reserves.");
+    add("yearly_gold_per_population", 0.04, "Financial institutions improve recurring monetary extraction.");
+    add("safety", -0.08, "Financial leverage creates debt and panic exposure.");
+  }
+  if (/\b(slavery|forced labor|quota|tax farming|monopsony|war-time procurement)\b/.test(text)) {
+    add("construction_cost_multiplier", -0.02, "Coercive labor and procurement can lower visible build costs.");
+    add("repair_speed", 0.18, "Compelled labor can mobilize emergency repairs faster.");
+  }
   if (/\b(abolition|rights|welfare|protection|minority|womens|refuge|humanitarian|reconciliation|moral)\b/.test(text)) {
     add("instant_happiness", 2, "Rights reforms immediately improve public trust.");
     add("yearly_happiness", 0.45, "Rights reforms sustain legitimacy.");
+  }
+  if (/\b(free press|assembly|public information|price bulletin|ledger|archive|education|school|curriculum)\b/.test(text)) {
+    add("yearly_happiness", 0.18, "Open public information improves long-run legitimacy.");
+    add("unit_vision", 0.25, "Public information networks help scouts and sentinels notice changes.", "watch");
+  }
+  if (/\b(censorship|controlled media|propaganda|narrative|secrecy)\b/.test(text)) {
+    add("yearly_happiness", 0.12, "Controlled messaging can stabilize morale in the short run.");
+    add("safety", -0.25, "Controlled messaging weakens truthful safety feedback.");
+  }
+  if (/\b(law|court|tribunal|criminal|judicial|magistrate|policing|watch|anti-coup|anti-piracy|anti-extortion)\b/.test(text)) {
+    add("safety", 0.45, "Rule-enforcement institutions improve public safety and dispute handling.");
+    add("unit_armor", 0.6, "Rule-enforcement institutions improve guard readiness.", "law_enforcement");
   }
   if (/\b(wall|fortress)\b/.test(text)) {
     add("building_max_hp", 55, "Wall institutions improve fortification durability.", "wall");
     add("building_armor", 1, "Wall institutions improve fortification armor.", "wall");
   }
+  if (/\b(fortress|fortification|military architecture)\b/.test(text)) {
+    add("building_max_hp", 22, "Fortress institutions strengthen defensive buildings as a class.", "defensive_building");
+    add("building_armor", 0.5, "Fortress institutions harden defensive buildings as a class.", "defensive_building");
+  }
   if (/\b(gate)\b/.test(text)) {
     add("building_max_hp", 35, "Gate institutions improve controlled-passage durability.", "gate");
     add("building_armor", 0.5, "Gate institutions improve controlled-passage armor.", "gate");
+  }
+  if (/\b(safe-conduct|humanitarian corridor|border gate|treaty|diplomacy|legation)\b/.test(text)) {
+    add("unit_speed", 0.02, "Safe-conduct institutions improve messenger reliability and route speed.", "courier");
+    add("safety", 0.25, "Treaty process reduces accidental gate and border danger.");
   }
   if (/\b(turret|battery)\b/.test(text)) {
     add("building_attack", 1.2, "Turret institutions increase defensive firepower.", "turret");
@@ -1686,9 +1840,18 @@ function inferDevelopmentEffects(seed: RoadmapDevelopmentSeed): DevelopmentEffec
     add("unit_attack", 0.45, "Military doctrine improves combat effectiveness.", "military");
     add("unit_armor", 0.25, "Military doctrine improves combat survivability.", "military");
   }
+  if (/\b(siege|siegeworks|artillery)\b/.test(text)) {
+    add("unit_attack", 0.75, "Siege institutions improve artillery and breach-unit attack.", "siege");
+    add("unit_armor", 0.35, "Siege institutions improve breach-unit survivability.", "siege");
+  }
+  if (/\b(archer|turret|battery|ranged|ballistic)\b/.test(text)) {
+    add("unit_attack", 0.25, "Ranged institutions sharpen missile-unit attack.", "ranged");
+    add("building_range", 0.25, "Ranged institutions improve tower and turret reach.", "ranged_defense");
+  }
   if (/\b(road|bridge|transport|corridor|mobility|water|infrastructure)\b/.test(text)) {
     add("unit_speed", 0.025, "Transport institutions improve logistical movement.", "logistics");
     add("repair_speed", 0.2, "Transport institutions speed repairs.");
+    add("resource_control", 0.3, "Transport institutions improve control over distant deposits.");
   }
   if (/\b(espionage|intelligence|counter|false flag|informant)\b/.test(text)) {
     add("unit_vision", 0.5, "Intelligence institutions improve sentinel awareness.", "sentinel");
@@ -1886,6 +2049,12 @@ const buildingStats: Record<
   turret: { maxHp: 320, armor: 5, visionRadius: 11, blocksMovement: false, attack: 9, range: 7, cooldownTicks: Math.round(TICK_RATE * 1.4) }
 };
 
+const projectileStats: Record<ProjectileType, CombatStats> = {
+  stone_shot: { hp: 1, maxHp: 1, armor: 0, attack: 24, range: 7.5, attackCooldown: 0 },
+  arrow: { hp: 1, maxHp: 1, armor: 0, attack: 5, range: 4.4, attackCooldown: 0 },
+  turret_bolt: { hp: 1, maxHp: 1, armor: 0, attack: 9, range: 7, attackCooldown: 0 }
+};
+
 type BuildingStatDefinition = (typeof buildingStats)[BuildingType];
 
 function effectiveUnitStats(state: GameState, tribeId: TribeId, type: UnitType): UnitStatDefinition {
@@ -1934,9 +2103,16 @@ function developmentEffectMatchesTarget(effect: DevelopmentEffect, target?: Unit
   if (effect.target === target) return true;
   if (effect.target === "military") return target === "militia" || target === "archer" || target === "siege_engine" || target === "battering_ram" || target === "catapult";
   if (effect.target === "logistics") return target === "peon" || target === "messenger" || target === "trader" || target === "siege_engine" || target === "battering_ram" || target === "catapult";
+  if (effect.target === "courier") return target === "messenger" || target === "trader";
+  if (effect.target === "watch") return target === "sentinel" || target === "watchtower";
+  if (effect.target === "ranged") return target === "archer" || target === "catapult";
+  if (effect.target === "ranged_defense") return target === "turret" || target === "watchtower";
   if (effect.target === "siege_engine") return target === "siege_engine" || target === "battering_ram" || target === "catapult";
+  if (effect.target === "siege") return target === "siege_engine" || target === "battering_ram" || target === "catapult";
+  if (effect.target === "law_enforcement") return target === "sentinel" || target === "militia";
   if (effect.target === "worker") return target === "peon";
   if (effect.target === "fortification") return target === "wall" || target === "gate" || target === "turret" || target === "watchtower";
+  if (effect.target === "defensive_building") return target === "wall" || target === "gate" || target === "turret" || target === "watchtower";
   return false;
 }
 
@@ -2198,6 +2374,8 @@ export function issueSovereignOrder(
       return { ok: true, summary: title };
     }
     case "REQUEST_INFO": {
+      const peerMisuse = validatePrivateInformationRequest(tribeId, order);
+      if (!peerMisuse.ok) return peerMisuse;
       const subject = clampText(order.subject ?? "Information request", 80);
       const body = clampText(order.body || order.reason, 360);
       const request: AiInformationRequest = {
@@ -2218,6 +2396,24 @@ export function issueSovereignOrder(
       addEvent(state, "AI_POLICY", `${state.tribes[tribeId].name} sets policy`, clampText(order.reason, 180), [tribeId]);
       return { ok: true, summary: "policy noted" };
   }
+}
+
+function validatePrivateInformationRequest(
+  tribeId: TribeId,
+  order: AiStrategicOrder
+): { ok: true } | { ok: false; reason: string } {
+  if (order.recipientTribeId && order.recipientTribeId !== tribeId) {
+    return { ok: false, reason: "REQUEST_INFO is private intelligence, not peer diplomacy; use SEND_MESSENGER with recipientTribeId for questions to another sovereign" };
+  }
+  const text = `${order.subject ?? ""} ${order.body ?? ""} ${order.reason ?? ""}`.toLowerCase();
+  const looksAddressedToPeer =
+    /\b(please|will you|would you|can you|could you|tell us|tell me|share|reveal|disclose|report|state)\b/.test(text) &&
+    /\byour\b/.test(text) &&
+    /\b(gold|wealth|treasur|reserve|stockpile|resource|troop|unit|army|military|safety|happiness)\b/.test(text);
+  if (looksAddressedToPeer) {
+    return { ok: false, reason: "REQUEST_INFO cannot address another sovereign as 'you'; use SEND_MESSENGER for diplomatic questions and negotiations" };
+  }
+  return { ok: true };
 }
 
 function orderBuildTarget(order: AiStrategicOrder, fallback: Position): Position {
@@ -2264,6 +2460,71 @@ function orderAssemblyTarget(order: AiStrategicOrder | undefined): Position | un
   };
 }
 
+function orderTargetBuildingIds(targetBuildingId: string | undefined, order: AiStrategicOrder | undefined): string[] {
+  const ids: string[] = [];
+  const addId = (value: unknown): void => {
+    if (typeof value !== "string") return;
+    const id = optionalOrderText(value, 80);
+    if (id && !ids.includes(id)) ids.push(id);
+  };
+  addId(targetBuildingId);
+  addId(order?.targetBuildingId);
+  if (Array.isArray(order?.targetBuildingIds)) {
+    for (const id of order.targetBuildingIds) addId(id);
+  }
+  return ids.slice(0, 5);
+}
+
+function orderGateRouteGateIds(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const ids: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string") continue;
+    const id = optionalOrderText(item, 80);
+    if (id && !ids.includes(id)) ids.push(id);
+  }
+  return ids.length > 0 ? ids.slice(0, 8) : undefined;
+}
+
+function orderGuardUnitIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const ids: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string") continue;
+    const id = optionalOrderText(item, 80);
+    if (id && !ids.includes(id)) ids.push(id);
+  }
+  return ids.slice(0, 8);
+}
+
+function orderCoverUnitIds(order: AiStrategicOrder | undefined): string[] {
+  return orderGuardUnitIds(order?.coverUnitIds);
+}
+
+function orderEscortUnitIds(order: AiStrategicOrder | undefined): string[] {
+  return orderGuardUnitIds(order?.escortUnitIds);
+}
+
+function orderCoverTarget(order: AiStrategicOrder | undefined, fallback: Position): Position {
+  const x = Number(order?.coverX);
+  const y = Number(order?.coverY);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return fallback;
+  return {
+    x: clamp(Math.round(x), 1, MAP_SIZE - 2),
+    y: clamp(Math.round(y), 1, MAP_SIZE - 2)
+  };
+}
+
+function orderEscortTarget(order: AiStrategicOrder | undefined, fallback: Position): Position {
+  const x = Number(order?.escortX);
+  const y = Number(order?.escortY);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return fallback;
+  return {
+    x: clamp(Math.round(x), 1, MAP_SIZE - 2),
+    y: clamp(Math.round(y), 1, MAP_SIZE - 2)
+  };
+}
+
 function optionalOrderText(value: string | undefined, maxLength: number): string | undefined {
   const clean = clampText(value ?? "", maxLength);
   return clean.length > 0 ? clean : undefined;
@@ -2298,6 +2559,9 @@ function hasGateOperationIntent(order: AiStrategicOrder): boolean {
       optionalOrderText(order.gateAccessTreatyName, 100) ||
       optionalOrderText(order.gateAccessTreatyTerms, 360) ||
       optionalOrderNumber(order.gateAccessTreatyDurationTicks, TICKS_PER_GAME_YEAR * 100) !== undefined ||
+      optionalOrderText(order.gateRouteName, 100) ||
+      (Array.isArray(order.gateRouteGateIds) && order.gateRouteGateIds.length > 0) ||
+      optionalOrderText(order.gateRouteTerms, 360) ||
       order.gateSabotageAction ||
       optionalOrderNumber(order.gateSabotageDurationTicks, TICKS_PER_GAME_YEAR * 20) !== undefined ||
       optionalOrderNumber(order.gateSabotageDamage, 5000) !== undefined ||
@@ -2552,7 +2816,10 @@ function orderHasForeignGateControlFields(order: AiStrategicOrder): boolean {
       order.gateAccessTreatyAction ||
       order.gateAccessTreatyName ||
       order.gateAccessTreatyTerms ||
-      order.gateAccessTreatyDurationTicks
+      order.gateAccessTreatyDurationTicks ||
+      order.gateRouteName ||
+      order.gateRouteGateIds ||
+      order.gateRouteTerms
   );
 }
 
@@ -2611,6 +2878,9 @@ function recordGateOperationFromOrder(
     accessTreatyName: optionalOrderText(order.gateAccessTreatyName, 100),
     accessTreatyTerms: optionalOrderText(order.gateAccessTreatyTerms, 360),
     accessTreatyDurationTicks: optionalOrderNumber(order.gateAccessTreatyDurationTicks, TICKS_PER_GAME_YEAR * 100),
+    routeName: optionalOrderText(order.gateRouteName, 100),
+    routeGateIds: orderGateRouteGateIds(order.gateRouteGateIds),
+    routeTerms: optionalOrderText(order.gateRouteTerms, 360),
     sabotageAction: order.gateSabotageAction,
     sabotageDurationTicks: optionalOrderNumber(order.gateSabotageDurationTicks, TICKS_PER_GAME_YEAR * 20),
     sabotageDamage: optionalOrderNumber(order.gateSabotageDamage, 5000),
@@ -2620,6 +2890,25 @@ function recordGateOperationFromOrder(
   pushBoundedRecord(state.gateOperations, record, 120);
   if (options.activate) gate.gateOperation = record;
   return record;
+}
+
+function resolveGateAccessTreatyRouteGateIds(
+  state: GameState,
+  tribeId: TribeId,
+  primaryGate: Building,
+  requestedGateIds: string[] | undefined
+): { ok: true; gateIds: string[] } | { ok: false; reason: string } {
+  const gateIds = [primaryGate.id];
+  for (const gateId of requestedGateIds ?? []) {
+    if (!gateIds.includes(gateId)) gateIds.push(gateId);
+  }
+  for (const gateId of gateIds) {
+    const gate = state.buildings[gateId];
+    if (!gate || gate.hp <= 0) return { ok: false, reason: `route gate ${gateId} is missing or destroyed` };
+    if (gate.type !== "gate") return { ok: false, reason: `route building ${gateId} is not a gate` };
+    if (gate.tribeId !== tribeId) return { ok: false, reason: `route gate ${gateId} is not owned by the gate operator` };
+  }
+  return { ok: true, gateIds: gateIds.slice(0, 8) };
 }
 
 function applyGateAccessTreatyOperation(
@@ -2632,30 +2921,47 @@ function applyGateAccessTreatyOperation(
   if (gate.tribeId !== tribeId) return { ok: false, reason: "only a gate owner can grant or revoke access treaties" };
   const targetTribeId = record.targetTribeId;
   if (!targetTribeId || targetTribeId === tribeId) return { ok: false, reason: "access treaty requires a counterparty tribe" };
-  const treaty: GateAccessTreatyRecord = {
+  const action = record.accessTreatyAction;
+  const routeGateResult = resolveGateAccessTreatyRouteGateIds(state, tribeId, gate, record.routeGateIds);
+  if (!routeGateResult.ok) return routeGateResult;
+  const routeGateIds = routeGateResult.gateIds;
+  const routeId = routeGateIds.length > 1 || record.routeName || record.routeTerms ? nextId(state, "gateroute") : undefined;
+  const treaties: GateAccessTreatyRecord[] = routeGateIds.map((gateId) => ({
     id: nextId(state, "gatetreaty"),
     tick: state.tick,
     tribeId,
-    buildingId: gate.id,
+    buildingId: gateId,
     targetTribeId,
-    action: record.accessTreatyAction,
+    action,
     treatyName: record.accessTreatyName,
     treatyTerms: record.accessTreatyTerms ?? record.gateTerms,
+    routeId,
+    routeName: record.routeName,
+    routeGateIds,
+    routeTerms: record.routeTerms,
     publicNotice: record.gatePublicNotice,
     expiresAtTick: record.accessTreatyAction === "grant" && record.accessTreatyDurationTicks ? state.tick + record.accessTreatyDurationTicks : undefined,
     reason: record.reason
-  };
-  pushBoundedRecord(state.gateAccessTreaties, treaty, 160);
+  }));
+  for (const treaty of treaties) pushBoundedRecord(state.gateAccessTreaties, treaty, 160);
+  const primaryTreaty = treaties[0];
+  const routeSummary = routeGateIds.length > 1 ? `Route ${routeId ?? primaryTreaty.id} gates ${routeGateIds.join(", ")}` : `Gate ${gate.id} at ${gate.x},${gate.y}`;
   addEvent(
     state,
     record.accessTreatyAction === "grant" ? "GATE_ACCESS_TREATY_GRANTED" : "GATE_ACCESS_TREATY_REVOKED",
     `${state.tribes[tribeId].name} ${record.accessTreatyAction === "grant" ? "grants" : "revokes"} gate passage`,
-    `Gate ${gate.id} at ${gate.x},${gate.y} ${record.accessTreatyAction === "grant" ? "grants controlled passage to" : "revokes controlled passage from"} ${
+    `${routeSummary} ${record.accessTreatyAction === "grant" ? "grants controlled passage to" : "revokes controlled passage from"} ${
       state.tribes[targetTribeId].name
-    }${treaty.expiresAtTick ? ` until turn ${treaty.expiresAtTick}` : ""}. ${record.accessTreatyTerms ?? record.reason}`,
+    }${primaryTreaty.expiresAtTick ? ` until turn ${primaryTreaty.expiresAtTick}` : ""}. ${record.routeTerms ?? record.accessTreatyTerms ?? record.reason}`,
     [tribeId, targetTribeId]
   );
-  return { ok: true, summary: `${record.accessTreatyAction} access treaty ${treaty.id}` };
+  return {
+    ok: true,
+    summary:
+      routeGateIds.length > 1
+        ? `${record.accessTreatyAction} route ${routeId ?? primaryTreaty.id} across ${routeGateIds.length} gates`
+        : `${record.accessTreatyAction} access treaty ${primaryTreaty.id}`
+  };
 }
 
 function applyGateSabotageOperation(
@@ -2670,7 +2976,9 @@ function applyGateSabotageOperation(
     tick: state.tick,
     tribeId,
     buildingId: gate.id,
-    targetTribeId: record.targetTribeId,
+    targetTribeId: record.targetTribeId ?? gate.tribeId,
+    gateOperationId: record.id,
+    saboteurUnitId: saboteur?.id,
     action: record.sabotageAction,
     previousGateState: gate.gateSabotage?.previousGateState ?? gate.gateState ?? "open",
     reason: record.reason
@@ -2695,7 +3003,9 @@ function applyGateSabotageOperation(
     const damage = record.sabotageDamage ?? 45;
     const beforeHp = gate.hp;
     const destroyed = applyBuildingDamage(state, gate, damage, tribeId);
-    pushBoundedRecord(state.gateSabotageHistory, { id: nextId(state, "gatesabotage"), ...base, damage }, 120);
+    const sabotageRecord = { id: nextId(state, "gatesabotage"), ...base, damage };
+    pushBoundedRecord(state.gateSabotageHistory, sabotageRecord, 120);
+    recordGateSabotageWitnessObservations(state, sabotageRecord, gate, saboteur);
     addEvent(
       state,
       "GATE_SABOTAGE_DAMAGED",
@@ -2713,7 +3023,9 @@ function applyGateSabotageOperation(
     id: nextId(state, "gatesabotage"),
     tick: state.tick,
     tribeId,
-    targetTribeId: record.targetTribeId,
+    targetTribeId: record.targetTribeId ?? gate.tribeId,
+    gateOperationId: record.id,
+    saboteurUnitId: saboteur?.id,
     action: record.sabotageAction,
     previousGateState: gate.gateSabotage?.previousGateState ?? gate.gateState ?? "open",
     expiresAtTick,
@@ -2732,6 +3044,18 @@ function applyGateSabotageOperation(
     },
     120
   );
+  recordGateSabotageWitnessObservations(
+    state,
+    {
+      id: sabotage.id,
+      ...base,
+      action: record.sabotageAction,
+      previousGateState: sabotage.previousGateState,
+      expiresAtTick
+    },
+    gate,
+    saboteur
+  );
   addEvent(
     state,
     record.sabotageAction === "force_open" ? "GATE_SABOTAGED_OPEN" : "GATE_SABOTAGED_CLOSED",
@@ -2742,6 +3066,31 @@ function applyGateSabotageOperation(
     [gate.tribeId, tribeId]
   );
   return { ok: true, summary: `${record.sabotageAction} on ${gate.id}` };
+}
+
+function recordGateSabotageWitnessObservations(state: GameState, sabotage: GateSabotageRecord, gate: Building, saboteur?: Unit): void {
+  if (!saboteur || sabotage.tribeId === gate.tribeId) return;
+  const subject: ForeignObservationSubject = {
+    subjectKind: "unit",
+    subjectTribeId: saboteur.tribeId,
+    subjectId: saboteur.id,
+    subjectType: saboteur.type,
+    x: Math.round(saboteur.x),
+    y: Math.round(saboteur.y),
+    hp: Math.ceil(saboteur.hp)
+  };
+  const observers = directVisionVisibleTo(state, gate, [gate.tribeId]).filter((tribeId) => tribeId !== saboteur.tribeId);
+  for (const observerTribeId of observers) {
+    ensureForeignObservationMemory(state, observerTribeId);
+    appendForeignObservation(state, observerTribeId, subject, "gate_sabotage_witnessed", {
+      gateOperationId: sabotage.gateOperationId,
+      gateOwnerTribeId: gate.tribeId,
+      affectedTribeId: gate.tribeId,
+      gateBuildingId: gate.id,
+      gateSabotageId: sabotage.id,
+      gateSabotageAction: sabotage.action
+    });
+  }
 }
 
 function applyGateOperationOrder(
@@ -2815,6 +3164,7 @@ function recordSiegePlan(
     kind: SiegePlanRecord["kind"];
     targetTribeId?: TribeId;
     targetBuildingId?: string;
+    targetBuildingIds?: string[];
     targetResourceType?: ResourceType;
     targetX?: number;
     targetY?: number;
@@ -2829,6 +3179,19 @@ function recordSiegePlan(
     assaultWaveIntervalTicks?: number;
     feintDurationTicks?: number;
     feintWithdrawTick?: number;
+    coverPlan?: string;
+    coverUnitIds?: string[];
+  coverX?: number;
+  coverY?: number;
+  coverRadius?: number;
+    escortPlan?: string;
+    escortUnitIds?: string[];
+    escortX?: number;
+    escortY?: number;
+    escortRadius?: number;
+    interdictRepairs?: boolean;
+    repairInterdictionPlan?: string;
+    repairInterdictionRadius?: number;
     retreatCondition?: string;
     retreatHealthPct?: number;
     retreatX?: number;
@@ -2845,6 +3208,13 @@ function recordSiegePlan(
     kind: input.kind,
     targetTribeId: input.targetTribeId,
     targetBuildingId: optionalOrderText(input.targetBuildingId, 80),
+    targetBuildingIds: input.targetBuildingIds
+      ?.flatMap((id) => {
+        const clean = optionalOrderText(id, 80);
+        return clean ? [clean] : [];
+      })
+      .filter((id, index, ids) => ids.indexOf(id) === index)
+      .slice(0, 5),
     targetResourceType: input.targetResourceType,
     targetX: Number.isFinite(input.targetX) ? Math.round(Number(input.targetX)) : undefined,
     targetY: Number.isFinite(input.targetY) ? Math.round(Number(input.targetY)) : undefined,
@@ -2858,6 +3228,31 @@ function recordSiegePlan(
     assaultWaveIntervalTicks: optionalOrderNumber(input.assaultWaveIntervalTicks, TICK_RATE * 120),
     releasedWaveIndexes: [],
     feintDurationTicks: optionalOrderNumber(input.feintDurationTicks, TICK_RATE * 120),
+    coverPlan: optionalOrderText(input.coverPlan, 260),
+    coverUnitIds: input.coverUnitIds
+      ?.flatMap((id) => {
+        const clean = optionalOrderText(id, 80);
+        return clean ? [clean] : [];
+      })
+      .filter((id, index, ids) => ids.indexOf(id) === index)
+      .slice(0, 8),
+    coverX: Number.isFinite(input.coverX) ? Math.round(Number(input.coverX)) : undefined,
+    coverY: Number.isFinite(input.coverY) ? Math.round(Number(input.coverY)) : undefined,
+    coverRadius: optionalOrderNumber(input.coverRadius, 20),
+    escortPlan: optionalOrderText(input.escortPlan, 260),
+    escortUnitIds: input.escortUnitIds
+      ?.flatMap((id) => {
+        const clean = optionalOrderText(id, 80);
+        return clean ? [clean] : [];
+      })
+      .filter((id, index, ids) => ids.indexOf(id) === index)
+      .slice(0, 8),
+    escortX: Number.isFinite(input.escortX) ? Math.round(Number(input.escortX)) : undefined,
+    escortY: Number.isFinite(input.escortY) ? Math.round(Number(input.escortY)) : undefined,
+    escortRadius: optionalOrderNumber(input.escortRadius, 20),
+    interdictRepairs: input.interdictRepairs === true ? true : undefined,
+    repairInterdictionPlan: optionalOrderText(input.repairInterdictionPlan, 260),
+    repairInterdictionRadius: optionalOrderNumber(input.repairInterdictionRadius, 20),
     retreatCondition: optionalOrderText(input.retreatCondition, 220),
     retreatHealthPct: optionalOrderNumber(input.retreatHealthPct, 100),
     retreatX: Number.isFinite(input.retreatX) ? Math.round(Number(input.retreatX)) : undefined,
@@ -2883,6 +3278,22 @@ export function formAlliance(state: GameState, a: TribeId, b: TribeId): { ok: tr
   return { ok: true, summary: `${state.tribes[a].name} allied with ${state.tribes[b].name}` };
 }
 
+function resolveSiegeGuardUnits(
+  state: GameState,
+  tribeId: TribeId,
+  unitIds: string[],
+  role: "cover" | "escort"
+): { ok: true; units: Unit[] } | { ok: false; reason: string } {
+  const units: Unit[] = [];
+  for (const unitId of unitIds) {
+    const unit = state.units[unitId];
+    if (!unit || unit.tribeId !== tribeId || unit.hp <= 0) return { ok: false, reason: `${role} unit ${unitId} is not an available own unit` };
+    if (!isFieldCombatUnit(unit)) return { ok: false, reason: `${role} unit ${unitId} must be militia or archer` };
+    units.push(unit);
+  }
+  return { ok: true, units };
+}
+
 function issueAttackOrder(
   state: GameState,
   tribeId: TribeId,
@@ -2892,31 +3303,50 @@ function issueAttackOrder(
   targetResource?: { x: number; y: number; type?: ResourceType },
   order?: AiStrategicOrder
 ): { ok: true; summary: string } | { ok: false; reason: string } {
-  const targetBuilding = targetBuildingId ? state.buildings[targetBuildingId] : undefined;
+  const targetBuildingIds = orderTargetBuildingIds(targetBuildingId, order);
+  const missingTargetId = targetBuildingIds.find((id) => !state.buildings[id] || state.buildings[id].hp <= 0);
+  if (missingTargetId) return { ok: false, reason: `target building ${missingTargetId} is missing or destroyed` };
+  const targetBuildings = targetBuildingIds.map((id) => state.buildings[id]).filter((building): building is Building => Boolean(building));
+  const targetBuilding = targetBuildings[0];
   if (!targetBuilding && targetResource) {
     return issueResourceAttackOrder(state, tribeId, targetTribeId, reason, targetResource, order);
   }
   const resolvedTargetTribeId = targetTribeId ?? targetBuilding?.tribeId;
   if (!resolvedTargetTribeId || resolvedTargetTribeId === tribeId || !tribeIds.includes(resolvedTargetTribeId)) return { ok: false, reason: "invalid attack target" };
   if (!isTribeActive(state, resolvedTargetTribeId)) return { ok: false, reason: `${state.tribes[resolvedTargetTribeId].name} is not an active separate civilization` };
-  if (targetBuildingId) {
-    if (!targetBuilding || targetBuilding.hp <= 0) return { ok: false, reason: "target building is missing or destroyed" };
-    if (targetBuilding.tribeId !== resolvedTargetTribeId) return { ok: false, reason: "target building belongs to a different tribe" };
-    if (targetBuilding.tribeId === tribeId) return { ok: false, reason: "cannot attack own building" };
+  if (targetBuildings.length > 0) {
+    if (targetBuildings.some((building) => building.tribeId === tribeId)) return { ok: false, reason: "cannot attack own building" };
+    if (targetBuildings.some((building) => building.tribeId !== resolvedTargetTribeId)) return { ok: false, reason: "target buildings belong to different tribes" };
   }
-  const attackers = Object.values(state.units)
+  const attackerLimit = targetBuildings.length > 1 ? Math.min(8, Math.max(5, targetBuildings.length * 3)) : targetBuilding ? 5 : 4;
+  const candidateAttackers = Object.values(state.units)
     .filter((unit) => unit.tribeId === tribeId && unit.hp > 0 && (targetBuilding ? isSiegeCapableUnit(unit) : isFieldCombatUnit(unit)))
-    .sort((left, right) => siegeUnitPriority(right) - siegeUnitPriority(left) || left.id.localeCompare(right.id))
-    .slice(0, targetBuilding ? 5 : 4);
+    .sort((left, right) => siegeUnitPriority(right) - siegeUnitPriority(left) || left.id.localeCompare(right.id));
+  const coverUnitIds = targetBuilding ? orderCoverUnitIds(order) : [];
+  const escortUnitIds = targetBuilding ? orderEscortUnitIds(order) : [];
+  if (coverUnitIds.some((unitId) => escortUnitIds.includes(unitId))) return { ok: false, reason: "cover and escort unit ids must not overlap" };
+  const coverUnitsResult = resolveSiegeGuardUnits(state, tribeId, coverUnitIds, "cover");
+  if (!coverUnitsResult.ok) return coverUnitsResult;
+  const escortUnitsResult = resolveSiegeGuardUnits(state, tribeId, escortUnitIds, "escort");
+  if (!escortUnitsResult.ok) return escortUnitsResult;
+  const coverUnits = coverUnitsResult.units;
+  const escortUnits = escortUnitsResult.units;
+  const guardUnitIdSet = new Set([...coverUnits, ...escortUnits].map((unit) => unit.id));
+  const attackers = candidateAttackers.filter((unit) => !guardUnitIdSet.has(unit.id)).slice(0, attackerLimit);
   if (attackers.length === 0) return { ok: false, reason: "no military units available" };
   declareWar(state, tribeId, resolvedTargetTribeId, reason ?? "AI attack order");
   if (targetBuilding) {
     const retreatTarget = orderRetreatTarget(order, findTownHall(state, tribeId) ?? starts[tribeId]);
     const assemblyTarget = orderAssemblyTarget(order);
+    const coverAnchor = orderCoverTarget(order, assemblyTarget ?? { x: targetBuilding.x, y: targetBuilding.y });
+    const coverRadius = optionalOrderNumber(order?.coverRadius, 20) ?? 4;
+    const escortAnchor = orderEscortTarget(order, assemblyTarget ?? { x: targetBuilding.x, y: targetBuilding.y });
+    const escortRadius = optionalOrderNumber(order?.escortRadius, 20) ?? 4;
     const siegePlan = recordSiegePlan(state, tribeId, {
       kind: "attack",
       targetTribeId: resolvedTargetTribeId,
       targetBuildingId: targetBuilding.id,
+      targetBuildingIds: targetBuildings.map((building) => building.id),
       siegeIntent: order?.siegeIntent,
       assaultPlan: order?.assaultPlan,
       assaultMode: order?.assaultMode,
@@ -2926,6 +3356,19 @@ function issueAttackOrder(
       assaultWaveSize: order?.assaultWaveSize,
       assaultWaveIntervalTicks: order?.assaultWaveIntervalTicks,
       feintDurationTicks: order?.feintDurationTicks,
+      coverPlan: order?.coverPlan,
+      coverUnitIds: coverUnits.map((unit) => unit.id),
+      coverX: coverUnits.length > 0 ? coverAnchor.x : undefined,
+      coverY: coverUnits.length > 0 ? coverAnchor.y : undefined,
+      coverRadius: coverUnits.length > 0 ? coverRadius : undefined,
+      escortPlan: order?.escortPlan,
+      escortUnitIds: escortUnits.map((unit) => unit.id),
+      escortX: escortUnits.length > 0 ? escortAnchor.x : undefined,
+      escortY: escortUnits.length > 0 ? escortAnchor.y : undefined,
+      escortRadius: escortUnits.length > 0 ? escortRadius : undefined,
+      interdictRepairs: order?.interdictRepairs === true,
+      repairInterdictionPlan: order?.repairInterdictionPlan,
+      repairInterdictionRadius: order?.repairInterdictionRadius,
       retreatCondition: order?.retreatCondition,
       retreatHealthPct: order?.retreatHealthPct,
       retreatX: retreatTarget?.x,
@@ -2944,16 +3387,17 @@ function issueAttackOrder(
     const waveSize = siegePlan.assaultWaveSize ? clamp(siegePlan.assaultWaveSize, 1, attackers.length) : attackers.length;
     const waveIntervalTicks = siegePlan.assaultWaveIntervalTicks ?? 0;
     for (const [index, unit] of attackers.entries()) {
+      const assignedTarget = targetBuildings[index % targetBuildings.length] ?? targetBuilding;
       const assaultWaveIndex = Math.floor(index / waveSize);
       const assaultWaveDelayTicks = assaultWaveIndex > 0 && waveIntervalTicks > 0 ? assaultWaveIndex * waveIntervalTicks : undefined;
-      const attackPosition = findBuildingAttackPosition(state, unit, targetBuilding);
+      const attackPosition = findBuildingAttackPosition(state, unit, assignedTarget);
       const initialAssaultPhase =
         assaultPhase === "assembling" ? "assembling" : assaultWaveDelayTicks !== undefined ? "waiting_wave" : "attacking";
       const immediateTarget =
         (initialAssaultPhase === "assembling" || initialAssaultPhase === "waiting_wave") && assemblyTarget ? assemblyTarget : attackPosition;
       unit.task = {
         kind: "attackBuilding",
-        targetBuildingId: targetBuilding.id,
+        targetBuildingId: assignedTarget.id,
         path: findPath(state, unit, immediateTarget),
         siegePlanId: siegePlan.id,
         siegeIntent: siegePlan.siegeIntent,
@@ -2969,14 +3413,43 @@ function issueAttackOrder(
         retreatTarget:
           siegePlan.retreatX !== undefined && siegePlan.retreatY !== undefined
             ? { x: siegePlan.retreatX, y: siegePlan.retreatY }
-            : undefined
+            : undefined,
+        interdictRepairs: siegePlan.interdictRepairs,
+        repairInterdictionPlan: siegePlan.repairInterdictionPlan,
+        repairInterdictionRadius: siegePlan.repairInterdictionRadius ?? (siegePlan.interdictRepairs ? 4 : undefined)
       };
     }
+    for (const unit of coverUnits) {
+      unit.task = {
+        kind: "guardSiege",
+        siegePlanId: siegePlan.id,
+        guardRole: "cover",
+        anchor: coverAnchor,
+        radius: coverRadius,
+        path: findPath(state, unit, coverAnchor),
+        targetBuildingId: targetBuilding.id,
+        guardPlan: siegePlan.coverPlan
+      };
+    }
+    for (const unit of escortUnits) {
+      unit.task = {
+        kind: "guardSiege",
+        siegePlanId: siegePlan.id,
+        guardRole: "escort",
+        anchor: escortAnchor,
+        radius: escortRadius,
+        path: findPath(state, unit, escortAnchor),
+        targetBuildingId: targetBuilding.id,
+        guardPlan: siegePlan.escortPlan
+      };
+    }
+    const targetLabel = targetBuildings.length === 1 ? `${targetBuilding.type} ${targetBuilding.id}` : `${targetBuildings.length} targets`;
+    const targetDetails = targetBuildings.map((building) => `${building.type} ${building.id} at ${building.x},${building.y}`).join("; ");
     addEvent(
       state,
       "WAR_SIEGE_ORDER",
       `${state.tribes[tribeId].name} attacks ${state.tribes[resolvedTargetTribeId].name}'s ${labelBuildingType(targetBuilding.type)}`,
-      `${attackers.length} military units move to destroy ${targetBuilding.type} ${targetBuilding.id} at ${targetBuilding.x},${targetBuilding.y}. ${
+      `${attackers.length} military units move to destroy ${targetLabel}. ${targetBuildings.length > 1 ? "Multi-target siege group. " : ""}Targets: ${targetDetails}. ${
         siegePlan.siegeIntent ? `Intent: ${siegePlan.siegeIntent}. ` : ""
       }${siegePlan.assaultPlan ? `Plan: ${siegePlan.assaultPlan}. ` : ""}${
         siegePlan.assaultMode ? `Mode: ${siegePlan.assaultMode}. ` : ""
@@ -2985,13 +3458,59 @@ function issueAttackOrder(
       }${siegePlan.assaultWaveSize ? `Wave size ${siegePlan.assaultWaveSize}. ` : ""}${
         siegePlan.assaultWaveIntervalTicks ? `Wave interval ${siegePlan.assaultWaveIntervalTicks} ticks. ` : ""
       }${siegePlan.feintDurationTicks ? `Withdraw after ${siegePlan.feintDurationTicks} ticks. ` : ""}${
+        coverUnits.length > 0 ? `Cover ${coverUnits.length} units at ${coverAnchor.x},${coverAnchor.y} radius ${coverRadius}. ` : ""
+      }${siegePlan.coverPlan ? `Cover plan: ${siegePlan.coverPlan}. ` : ""}${
+        escortUnits.length > 0 ? `Escort ${escortUnits.length} units at ${escortAnchor.x},${escortAnchor.y} radius ${escortRadius}. ` : ""
+      }${siegePlan.escortPlan ? `Escort plan: ${siegePlan.escortPlan}. ` : ""}${
+        siegePlan.interdictRepairs
+          ? `Repair interdiction around target buildings within radius ${siegePlan.repairInterdictionRadius ?? 4}. ${
+              siegePlan.repairInterdictionPlan ? `Interdiction plan: ${siegePlan.repairInterdictionPlan}. ` : ""
+            }`
+          : ""
+      }${
         siegePlan.retreatHealthPct ? `Retreat below ${siegePlan.retreatHealthPct}% health. ` : ""
       }${clampText(reason ?? "No stated reason.", 180)}`,
       directVisionVisibleTo(state, targetBuilding, [tribeId, resolvedTargetTribeId])
     );
+    if (coverUnits.length > 0) {
+      addEvent(
+        state,
+        "SIEGE_COVER_ASSIGNED",
+        `${state.tribes[tribeId].name} assigns siege cover`,
+        `${coverUnits.map((unit) => unit.id).join(", ")} screen ${siegePlan.id} around ${coverAnchor.x},${coverAnchor.y} within radius ${coverRadius}. ${
+          siegePlan.coverPlan ? `Plan: ${siegePlan.coverPlan}. ` : ""
+        }`,
+        directVisionVisibleTo(state, coverAnchor, [tribeId, resolvedTargetTribeId])
+      );
+    }
+    if (escortUnits.length > 0) {
+      addEvent(
+        state,
+        "SIEGE_ESCORT_ASSIGNED",
+        `${state.tribes[tribeId].name} assigns siege escorts`,
+        `${escortUnits.map((unit) => unit.id).join(", ")} escort ${siegePlan.id} around ${escortAnchor.x},${escortAnchor.y} within radius ${escortRadius}. ${
+          siegePlan.escortPlan ? `Plan: ${siegePlan.escortPlan}. ` : ""
+        }`,
+        directVisionVisibleTo(state, escortAnchor, [tribeId, resolvedTargetTribeId])
+      );
+    }
+    if (siegePlan.interdictRepairs) {
+      addEvent(
+        state,
+        "SIEGE_REPAIR_INTERDICTION_ORDERED",
+        `${state.tribes[tribeId].name} orders repair interdiction`,
+        `Attackers in ${siegePlan.id} will strike hostile repair crews working on ${targetBuildings.map((building) => building.id).join(", ")} within radius ${
+          siegePlan.repairInterdictionRadius ?? 4
+        }.${siegePlan.repairInterdictionPlan ? ` Plan: ${siegePlan.repairInterdictionPlan}.` : ""}`,
+        directVisionVisibleTo(state, targetBuilding, [tribeId, resolvedTargetTribeId])
+      );
+    }
     return {
       ok: true,
-      summary: `declared war on ${state.tribes[resolvedTargetTribeId].name} and sent ${attackers.length} attackers against ${targetBuilding.type} ${targetBuilding.id}`
+      summary:
+        targetBuildings.length === 1
+          ? `declared war on ${state.tribes[resolvedTargetTribeId].name} and sent ${attackers.length} attackers against ${targetBuilding.type} ${targetBuilding.id}`
+          : `declared war on ${state.tribes[resolvedTargetTribeId].name} and sent ${attackers.length} attackers against ${targetBuildings.length} targets: ${targetBuildings.map((building) => building.id).join(", ")}`
     };
   }
   const visibleTarget = getVisibleUnits(state, tribeId)
@@ -3414,7 +3933,177 @@ type PerimeterBuildSegment = {
   index: number;
 };
 
+type PlannedPerimeterBuildSegment = PerimeterBuildSegment & { site: Position };
+type PlannedPerimeterBuild = {
+  pattern: PerimeterPattern;
+  direction: PerimeterDirection;
+  length: number;
+  gateSegmentIndex?: number;
+  planned: PlannedPerimeterBuildSegment[];
+  totalCost: ResourceCost;
+  affordable: boolean;
+};
+
+type PerimeterBuildPlanResult =
+  | { ok: true; plan: PlannedPerimeterBuild }
+  | { ok: false; reason: string; missingDevelopments?: DevelopmentId[]; cost?: ResourceCost; affordable?: boolean };
+
 type PerimeterBuildResult = { ok: true; buildingIds: string[]; summary: string } | { ok: false; reason: string };
+
+export function previewFortificationBuild(state: GameState, tribeId: TribeId, order: AiStrategicOrder): FortificationPrebuildPreviewResult {
+  if (order.type !== "BUILD") return { ok: false, reason: "fortification preview requires a BUILD order" };
+  const townHall = findTownHall(state, tribeId);
+  if (!townHall) return { ok: false, reason: "town hall destroyed" };
+  const buildingType = order.buildingType ?? "farm";
+  if (!isBuildableFortification(buildingType)) {
+    return { ok: false, reason: "fortification preview supports wall, gate, turret, and watchtower structures only" };
+  }
+  const target = orderBuildTarget(order, townHall);
+  const perimeter = resolvePerimeterBuildPlan(state, tribeId, order, buildingType, target, { requireAffordable: false });
+  if (perimeter) {
+    if (!perimeter.ok) {
+      return {
+        ok: false,
+        reason: perimeter.reason,
+        missingDevelopments: perimeter.missingDevelopments,
+        cost: perimeter.cost,
+        affordable: perimeter.affordable
+      };
+    }
+    return previewFortificationFromPlannedSegments(state, tribeId, order, buildingType, target, perimeter.plan);
+  }
+
+  const missingDevelopments = getMissingBuildingDevelopments(state, tribeId, buildingType);
+  if (missingDevelopments.length > 0) {
+    return {
+      ok: false,
+      reason: `${labelBuildingType(buildingType)} requires development ${formatDevelopmentList(missingDevelopments)}.`,
+      missingDevelopments
+    };
+  }
+  const cost = getEffectiveBuildingCost(state, tribeId, buildingType);
+  const site = findBuildSite(state, target);
+  if (!site) return { ok: false, reason: "No clear build site nearby.", cost, affordable: canAfford(state.tribes[tribeId].resources, cost) };
+  return previewFortificationFromSites(state, tribeId, order, buildingType, target, [{ type: buildingType, target, index: 0, site }], {
+    planKind: "single",
+    pattern: "single",
+    direction: undefined,
+    length: 1,
+    gateSegmentIndex: undefined,
+    cost,
+    affordable: canAfford(state.tribes[tribeId].resources, cost)
+  });
+}
+
+function previewFortificationFromPlannedSegments(
+  state: GameState,
+  tribeId: TribeId,
+  order: AiStrategicOrder,
+  buildingType: BuildableBuildingType,
+  target: Position,
+  plan: PlannedPerimeterBuild
+): FortificationPrebuildPreviewResult {
+  return previewFortificationFromSites(state, tribeId, order, buildingType, target, plan.planned, {
+    planKind: "perimeter",
+    pattern: plan.pattern,
+    direction: plan.direction,
+    length: plan.length,
+    gateSegmentIndex: plan.gateSegmentIndex,
+    cost: plan.totalCost,
+    affordable: plan.affordable
+  });
+}
+
+function previewFortificationFromSites(
+  state: GameState,
+  tribeId: TribeId,
+  order: AiStrategicOrder,
+  buildingType: BuildableBuildingType,
+  target: Position,
+  planned: PlannedPerimeterBuildSegment[],
+  options: {
+    planKind: "single" | "perimeter";
+    pattern: PerimeterPattern;
+    direction?: PerimeterDirection;
+    length: number;
+    gateSegmentIndex?: number;
+    cost: ResourceCost;
+    affordable: boolean;
+  }
+): FortificationPrebuildPreviewResult {
+  const previewState: GameState = { ...state, buildings: { ...state.buildings } };
+  const previewBuildingIds: string[] = [];
+  for (const segment of planned) {
+    const id = makePreviewBuildingId(previewState, segment.type, segment.index);
+    previewState.buildings[id] = createPreviewBuilding(state, tribeId, segment.type, segment.site, id);
+    previewBuildingIds.push(id);
+  }
+  const placementPreview = buildFortificationPlacementPreview(previewState, tribeId, previewBuildingIds, {
+    requestedX: Number.isFinite(order.targetX) ? Number(order.targetX) : target.x,
+    requestedY: Number.isFinite(order.targetY) ? Number(order.targetY) : target.y
+  });
+  if (!placementPreview) return { ok: false, reason: "Could not build fortification placement preview.", cost: options.cost, affordable: options.affordable };
+  const wouldBuildTypes = planned.reduce<Partial<Record<BuildableBuildingType, number>>>((counts, segment) => {
+    counts[segment.type] = (counts[segment.type] ?? 0) + 1;
+    return counts;
+  }, {});
+  const gateIndex = options.gateSegmentIndex === undefined ? undefined : options.gateSegmentIndex + 1;
+  return {
+    ok: true,
+    preview: {
+      planKind: options.planKind,
+      buildingType,
+      requestedTarget: { x: Math.round(target.x), y: Math.round(target.y) },
+      perimeterPattern: options.pattern,
+      perimeterDirection: options.direction,
+      perimeterLength: options.length,
+      perimeterGateIndex: gateIndex,
+      missingDevelopments: [],
+      affordable: options.affordable,
+      cost: { ...options.cost },
+      wouldSpendResources: { ...options.cost },
+      wouldBuildCount: planned.length,
+      wouldBuildTypes,
+      wouldCreateBuildingIds: previewBuildingIds,
+      placementPreview,
+      summary: `pre-build ${options.planKind} preview would place ${planned.length} ${planned.length === 1 ? "structure" : "structures"}; ${
+        options.affordable ? "resources available" : `short resources: need ${formatResourceCost(options.cost)}`
+      }; ${placementPreview.summary}`
+    }
+  };
+}
+
+function makePreviewBuildingId(state: GameState, type: BuildableBuildingType, index: number): string {
+  let suffix = index + 1;
+  let id = `preview_${type}_${suffix}`;
+  while (state.buildings[id]) {
+    suffix += 1;
+    id = `preview_${type}_${suffix}`;
+  }
+  return id;
+}
+
+function createPreviewBuilding(state: GameState, tribeId: TribeId, type: BuildableBuildingType, site: Position, id: string): Building {
+  const stats = effectiveBuildingStats(state, tribeId, type);
+  const building: Building = {
+    id,
+    type,
+    tribeId,
+    x: site.x,
+    y: site.y,
+    hp: stats.maxHp,
+    maxHp: stats.maxHp,
+    armor: stats.armor,
+    attack: stats.attack,
+    range: stats.range,
+    attackCooldown: 0
+  };
+  if (type === "gate") {
+    building.gateState = "open";
+    building.gateAccessPolicy = "owner_allies";
+  }
+  return building;
+}
 
 function buildPerimeterFromOrder(
   state: GameState,
@@ -3423,36 +4112,12 @@ function buildPerimeterFromOrder(
   buildingType: BuildableBuildingType,
   target: Position
 ): PerimeterBuildResult | undefined {
-  const length = optionalOrderNumber(order.perimeterLength, 12) ?? 1;
-  const pattern = order.perimeterPattern ?? "single";
-  if (length <= 1 || pattern === "single") return undefined;
-  if (buildingType !== "wall" && buildingType !== "gate") return { ok: false, reason: "perimeter builds currently support wall and gate structures only" };
-  if (buildingType === "gate" && pattern === "line") {
-    return { ok: false, reason: "Use perimeterPattern gate_line when a perimeter should include a commanded gate segment." };
-  }
-  const direction = order.perimeterDirection ?? "east_west";
-  const segments = perimeterSegments(pattern, direction, length, order.perimeterGateIndex, target);
-  if (segments.length <= 1) return undefined;
-  const uniqueTypes = Array.from(new Set(segments.map((segment) => segment.type)));
-  for (const type of uniqueTypes) {
-    const missingDevelopments = getMissingBuildingDevelopments(state, tribeId, type);
-    if (missingDevelopments.length > 0) return { ok: false, reason: `${labelBuildingType(type)} requires development ${formatDevelopmentList(missingDevelopments)}.` };
-  }
-  const reserved = new Set<string>();
-  const sites = segments.map((segment) => {
-    const site = findBuildSite(state, segment.target, reserved);
-    if (site) reserved.add(positionKey(site));
-    return site ? { ...segment, site } : undefined;
-  });
-  if (sites.some((site) => !site)) return { ok: false, reason: "No clear build sites for the requested perimeter." };
-  const planned = sites.filter((site): site is PerimeterBuildSegment & { site: Position } => Boolean(site));
-  const totalCost = planned.reduce<ResourceCost>((sum, segment) => addResourceCosts(sum, getEffectiveBuildingCost(state, tribeId, segment.type)), {});
-  if (!canAfford(state.tribes[tribeId].resources, totalCost)) {
-    return { ok: false, reason: `Not enough resources to build perimeter. Need ${formatResourceCost(totalCost)}.` };
-  }
+  const resolved = resolvePerimeterBuildPlan(state, tribeId, order, buildingType, target, { requireAffordable: true });
+  if (!resolved) return undefined;
+  if (!resolved.ok) return { ok: false, reason: resolved.reason };
+  const { pattern, direction, length, gateSegmentIndex, planned, totalCost } = resolved.plan;
   spendResources(state.tribes[tribeId].resources, totalCost);
   const groupId = nextId(state, "perimeter");
-  const gateSegmentIndex = normalizedPerimeterGateIndex(pattern, length, order.perimeterGateIndex);
   const buildingIds: string[] = [];
   for (const segment of planned) {
     const building = addBuilding(state, tribeId, segment.type, segment.site.x, segment.site.y);
@@ -3488,14 +4153,77 @@ function buildPerimeterFromOrder(
   return { ok: true, buildingIds, summary: `built perimeter ${groupId} with ${buildingIds.length} structures` };
 }
 
+function resolvePerimeterBuildPlan(
+  state: GameState,
+  tribeId: TribeId,
+  order: AiStrategicOrder,
+  buildingType: BuildableBuildingType,
+  target: Position,
+  options: { requireAffordable?: boolean } = {}
+): PerimeterBuildPlanResult | undefined {
+  const length = optionalOrderNumber(order.perimeterLength, 12) ?? 1;
+  const pattern = order.perimeterPattern ?? "single";
+  if (length <= 1 || pattern === "single") return undefined;
+  if (buildingType !== "wall" && buildingType !== "gate" && buildingType !== "turret" && buildingType !== "watchtower") {
+    return { ok: false, reason: "perimeter builds support wall, gate, turret, and watchtower structures only" };
+  }
+  if (buildingType === "gate" && (pattern === "line" || pattern === "corner")) {
+    return { ok: false, reason: "Use perimeterPattern gate_line or gate_corner when a perimeter should include a commanded gate segment." };
+  }
+  if ((buildingType === "turret" || buildingType === "watchtower") && isGateBearingPerimeterPattern(pattern)) {
+    return { ok: false, reason: "Use perimeterPattern line or corner for turret or watchtower perimeters; gate-bearing patterns are only for wall and gate boundaries." };
+  }
+  const direction = order.perimeterDirection ?? "east_west";
+  const segments = perimeterSegments(pattern, direction, length, order.perimeterGateIndex, target, buildingType);
+  if (segments.length <= 1) return undefined;
+  const uniqueTypes = Array.from(new Set(segments.map((segment) => segment.type)));
+  for (const type of uniqueTypes) {
+    const missingDevelopments = getMissingBuildingDevelopments(state, tribeId, type);
+    if (missingDevelopments.length > 0) {
+      return {
+        ok: false,
+        reason: `${labelBuildingType(type)} requires development ${formatDevelopmentList(missingDevelopments)}.`,
+        missingDevelopments
+      };
+    }
+  }
+  const reserved = new Set<string>();
+  const sites = segments.map((segment) => {
+    const site = findBuildSite(state, segment.target, reserved);
+    if (site) reserved.add(positionKey(site));
+    return site ? { ...segment, site } : undefined;
+  });
+  if (sites.some((site) => !site)) return { ok: false, reason: "No clear build sites for the requested perimeter." };
+  const planned = sites.filter((site): site is PlannedPerimeterBuildSegment => Boolean(site));
+  const totalCost = planned.reduce<ResourceCost>((sum, segment) => addResourceCosts(sum, getEffectiveBuildingCost(state, tribeId, segment.type)), {});
+  const affordable = canAfford(state.tribes[tribeId].resources, totalCost);
+  if (options.requireAffordable !== false && !affordable) {
+    return { ok: false, reason: `Not enough resources to build perimeter. Need ${formatResourceCost(totalCost)}.`, cost: totalCost, affordable };
+  }
+  return {
+    ok: true,
+    plan: {
+      pattern,
+      direction,
+      length: segments.length,
+      gateSegmentIndex: normalizedPerimeterGateIndex(pattern, segments.length, order.perimeterGateIndex),
+      planned,
+      totalCost,
+      affordable
+    }
+  };
+}
+
 function perimeterSegments(
   pattern: PerimeterPattern,
   direction: PerimeterDirection,
   length: number,
   requestedGateIndex: number | undefined,
-  target: Position
+  target: Position,
+  buildingType: BuildableBuildingType
 ): PerimeterBuildSegment[] {
-  const segmentCount = clamp(optionalOrderNumber(length, 12) ?? 1, 1, 12);
+  const segmentCount = clamp(optionalOrderNumber(length, 12) ?? 1, isCornerPerimeterPattern(pattern) ? 3 : 1, 12);
+  if (isCornerPerimeterPattern(pattern)) return cornerPerimeterSegments(pattern, direction, segmentCount, requestedGateIndex, target, buildingType);
   const vector = perimeterDirectionVector(direction);
   const centerOffset = Math.floor(segmentCount / 2);
   const gateIndex = normalizedPerimeterGateIndex(pattern, segmentCount, requestedGateIndex);
@@ -3504,16 +4232,70 @@ function perimeterSegments(
     const offset = index - centerOffset;
     const x = clamp(Math.round(target.x + vector.x * offset), 1, MAP_SIZE - 2);
     const y = clamp(Math.round(target.y + vector.y * offset), 1, MAP_SIZE - 2);
-    segments.push({ type: gateIndex === index ? "gate" : "wall", target: { x, y }, index });
+    const type = gateIndex === index ? "gate" : gateIndex === undefined ? buildingType : "wall";
+    segments.push({ type, target: { x, y }, index });
+  }
+  return segments;
+}
+
+function cornerPerimeterSegments(
+  pattern: PerimeterPattern,
+  direction: PerimeterDirection,
+  segmentCount: number,
+  requestedGateIndex: number | undefined,
+  target: Position,
+  buildingType: BuildableBuildingType
+): PerimeterBuildSegment[] {
+  const primary = perimeterDirectionVector(direction);
+  const secondary = perimeterCornerVector(direction);
+  const cornerIndex = cornerJoinIndex(segmentCount);
+  const gateIndex = normalizedPerimeterGateIndex(pattern, segmentCount, requestedGateIndex);
+  const segments: PerimeterBuildSegment[] = [];
+  for (let index = 0; index < segmentCount; index += 1) {
+    let x: number;
+    let y: number;
+    if (index < cornerIndex) {
+      const offset = cornerIndex - index;
+      x = target.x + primary.x * offset;
+      y = target.y + primary.y * offset;
+    } else if (index === cornerIndex) {
+      x = target.x;
+      y = target.y;
+    } else {
+      const offset = index - cornerIndex;
+      x = target.x + secondary.x * offset;
+      y = target.y + secondary.y * offset;
+    }
+    const type = gateIndex === index ? "gate" : gateIndex === undefined ? buildingType : "wall";
+    segments.push({
+      type,
+      target: {
+        x: clamp(Math.round(x), 1, MAP_SIZE - 2),
+        y: clamp(Math.round(y), 1, MAP_SIZE - 2)
+      },
+      index
+    });
   }
   return segments;
 }
 
 function normalizedPerimeterGateIndex(pattern: PerimeterPattern, length: number, requestedGateIndex: number | undefined): number | undefined {
-  if (pattern !== "gate_line") return undefined;
-  const fallback = Math.floor(length / 2);
+  if (!isGateBearingPerimeterPattern(pattern)) return undefined;
+  const fallback = pattern === "gate_corner" ? cornerJoinIndex(length) : Math.floor(length / 2);
   const value = optionalOrderNumber(requestedGateIndex, length) ?? fallback + 1;
   return clamp(value - 1, 0, Math.max(0, length - 1));
+}
+
+function isGateBearingPerimeterPattern(pattern: PerimeterPattern): boolean {
+  return pattern === "gate_line" || pattern === "gate_corner";
+}
+
+function isCornerPerimeterPattern(pattern: PerimeterPattern): boolean {
+  return pattern === "corner" || pattern === "gate_corner";
+}
+
+function cornerJoinIndex(length: number): number {
+  return Math.max(0, Math.ceil(length / 2) - 1);
 }
 
 function perimeterDirectionVector(direction: PerimeterDirection): Position {
@@ -3521,6 +4303,13 @@ function perimeterDirectionVector(direction: PerimeterDirection): Position {
   if (direction === "northeast_southwest") return { x: 1, y: -1 };
   if (direction === "northwest_southeast") return { x: 1, y: 1 };
   return { x: 1, y: 0 };
+}
+
+function perimeterCornerVector(direction: PerimeterDirection): Position {
+  if (direction === "north_south") return { x: 1, y: 0 };
+  if (direction === "northeast_southwest") return { x: 1, y: 1 };
+  if (direction === "northwest_southeast") return { x: 1, y: -1 };
+  return { x: 0, y: 1 };
 }
 
 export function canChooseDevelopment(state: GameState, tribeId: TribeId, developmentId: DevelopmentId): { ok: true } | { ok: false; reason: string } {
@@ -3754,6 +4543,10 @@ export function getPacketItemTypeCombatStats(): CombatStats {
   return { ...packetStats };
 }
 
+export function getProjectileTypeCombatStats(type: ProjectileType): CombatStats {
+  return { ...projectileStats[type] };
+}
+
 export function getResourceTypeCombatStats(type: ResourceType, amount = 1): CombatStats {
   return getResourceDepositCombatStats(createResourceDeposit(type, amount));
 }
@@ -3764,6 +4557,7 @@ export function getCombatStatCoverageReport(state: GameState): CombatStatCoverag
     unitType: 0,
     buildingType: 0,
     resourceType: 0,
+    projectileType: 0,
     unit: 0,
     building: 0,
     resource: 0,
@@ -3801,6 +4595,7 @@ export function getCombatStatCoverageReport(state: GameState): CombatStatCoverag
   for (const type of unitTypes) check("unitType", type, getUnitTypeCombatStats(type));
   for (const type of buildingTypes) check("buildingType", type, getBuildingTypeCombatStats(type));
   for (const type of resourceTypes) check("resourceType", type, getResourceTypeCombatStats(type, 12), { attackMustBeZero: true });
+  for (const type of projectileTypes) check("projectileType", type, getProjectileTypeCombatStats(type));
   check("packet", "packet:itemType", getPacketItemTypeCombatStats(), { attackMustBeZero: true });
 
   for (const unit of Object.values(state.units)) if (unit.hp > 0) check("unit", unit.id, unit);
@@ -3824,7 +4619,7 @@ export function getCombatStatCoverageReport(state: GameState): CombatStatCoverag
   }
   for (const projectile of Object.values(state.projectiles)) {
     check("projectile", projectile.id, projectile);
-    if (projectile.projectileType !== "stone_shot") issues.push({ kind: "projectile", id: projectile.id, reason: "unknown projectile type" });
+    if (!projectileTypes.includes(projectile.projectileType)) issues.push({ kind: "projectile", id: projectile.id, reason: "unknown projectile type" });
   }
   return {
     ok: issues.length === 0,
@@ -3950,15 +4745,23 @@ export function getVictoryPressure(state: GameState): VictoryPressureStatus {
     .sort(
       (left, right) =>
         Number(!isTribeActive(state, left.tribeId)) - Number(!isTribeActive(state, right.tribeId)) ||
+        right.wealth - left.wealth ||
         right.survivalScore - left.survivalScore ||
-        right.wealthPerCapita - left.wealthPerCapita ||
         tribeIds.indexOf(left.tribeId) - tribeIds.indexOf(right.tribeId)
     )
     .map((entry, index) => ({ ...entry, rank: index + 1 }));
   const leader = ranked[0];
   const runnerUp = ranked[1];
   const surviving = ranked.filter((entry) => isTribeActive(state, entry.tribeId));
-  const poorest = surviving.slice().sort((left, right) => left.survivalScore - right.survivalScore || left.wealthPerCapita - right.wealthPerCapita)[0] ?? leader;
+  const poorest =
+    surviving
+      .slice()
+      .sort(
+        (left, right) =>
+          left.wealth - right.wealth ||
+          left.survivalScore - right.survivalScore ||
+          tribeIds.indexOf(left.tribeId) - tribeIds.indexOf(right.tribeId)
+      )[0] ?? leader;
   const config = state.victoryPressure;
   const winnerTribeId = config.winnerTribeId;
   const status: VictoryPressureStatus["status"] = winnerTribeId ? "claimed" : config.warningIssued ? "warning" : "surviving";
@@ -3974,7 +4777,7 @@ export function getVictoryPressure(state: GameState): VictoryPressureStatus {
   const publicText =
     status === "claimed" && winnerTribeId
       ? `${winnerName} is the last surviving population in year ${config.wonYear ?? currentYear}. Post-game learning has been written into each sovereign memory.`
-      : `Year ${currentYear}: each sovereign must keep its population happy, alive, and safe. Every ${config.reviewIntervalYears} years the poorest surviving population is wiped out and dies; that is the opposite of safety. The last living population around year ${config.finalYear} survives. Exact rival wealth is not public.`;
+      : `Year ${currentYear}: each sovereign must keep its population happy, alive, and safe. Every ${config.reviewIntervalYears} years the surviving population with the lowest total wealth is wiped out and dies; that is the opposite of safety. The last living population around year ${config.finalYear} survives. Exact rival wealth is not public.`;
 
   return {
     status,
@@ -3999,12 +4802,13 @@ export function getVictoryPressure(state: GameState): VictoryPressureStatus {
     leaderSurvivalScore: leader.survivalScore,
     poorestTribeId: poorest.tribeId,
     poorestName: poorest.tribeName,
+    poorestWealth: poorest.wealth,
     poorestSurvivalScore: poorest.survivalScore,
     runnerUpTribeId: runnerUp?.tribeId,
     runnerUpName: runnerUp?.tribeName,
     runnerUpGold: runnerUp?.gold,
     runnerUpWealth: runnerUp?.wealth,
-    leaderMargin: leader.survivalScore - (runnerUp?.survivalScore ?? 0),
+    leaderMargin: leader.wealth - (runnerUp?.wealth ?? 0),
     targetProgress,
     winnerTribeId,
     winnerName,
@@ -4063,7 +4867,7 @@ function survivalScoreEntry(state: GameState, tribeId: TribeId): VictoryScoreEnt
   const happiness = Math.round(tribe.happiness);
   const survivalScore = !isTribeActive(state, tribeId)
     ? 0
-    : Math.round(wealthPerCapita * 0.72 + happiness * 3.2 + safety * 2.4 + Math.min(120, population * 5));
+    : Math.round(Math.min(420, wealth * 0.08) + happiness * 3.2 + safety * 2.4 + Math.min(120, population * 5));
   return {
     tribeId,
     tribeName: tribe.name,
@@ -5037,10 +5841,35 @@ function recordGateTreatyIncident(state: GameState, packet: Packet, operation: G
     summary
   };
   pushBoundedRecord(state.gateTreatyIncidents, incident, 160);
+  recordGateTreatyWitnessObservations(state, incident, gatePosition, gate?.hp ?? 0);
   packet.routeMemory.push(`Gate treaty incident ${incident.id}: ${summary}`);
   if (packet.routeMemory.length > 12) packet.routeMemory.splice(0, packet.routeMemory.length - 12);
   addEvent(state, "GATE_TREATY_INCIDENT_RECORDED", "Gate treaty incident recorded", summary, participantTribeIds);
   return incident;
+}
+
+function recordGateTreatyWitnessObservations(state: GameState, incident: GateTreatyIncidentRecord, gatePosition: Position, gateHp: number): void {
+  const subject: ForeignObservationSubject = {
+    subjectKind: "building",
+    subjectTribeId: incident.gateOwnerTribeId,
+    subjectId: incident.buildingId,
+    subjectType: "gate",
+    x: Math.round(gatePosition.x),
+    y: Math.round(gatePosition.y),
+    hp: Math.ceil(gateHp)
+  };
+  for (const witnessTribeId of incident.witnessTribeIds ?? []) {
+    ensureForeignObservationMemory(state, witnessTribeId);
+    appendForeignObservation(state, witnessTribeId, subject, "gate_treaty_incident_witnessed", {
+      gateTreatyIncidentId: incident.id,
+      gateTreatyId: incident.treatyId,
+      gateOperationId: incident.gateOperationId,
+      gateOwnerTribeId: incident.gateOwnerTribeId,
+      affectedTribeId: incident.affectedTribeId,
+      packetId: incident.packetId,
+      gateIncidentAction: incident.action
+    });
+  }
 }
 
 function updateGateAccessTreaties(state: GameState): void {
@@ -5113,6 +5942,7 @@ function updateUnits(state: GameState): void {
       case "attack":
       case "attackBuilding":
       case "attackResource":
+      case "guardSiege":
         updateAttacker(state, unit);
         break;
       case "repair":
@@ -5655,6 +6485,10 @@ function updateAttacker(state: GameState, unit: Unit): void {
     moveAlongPath(state, unit, unit.task.path);
     return;
   }
+  if (unit.task.kind === "guardSiege") {
+    updateSiegeCoverGuard(state, unit, unit.task);
+    return;
+  }
   if (unit.task.kind === "attackResource") {
     const targetTile = state.map[tileIndex(unit.task.target.x, unit.task.target.y)];
     if (!targetTile.resource || targetTile.resource.type !== unit.task.resource || targetTile.resource.hp <= 0 || targetTile.resource.amount <= 0) {
@@ -5674,6 +6508,7 @@ function updateAttacker(state: GameState, unit: Unit): void {
   }
   const target = state.buildings[unit.task.targetBuildingId];
   if (!target || target.hp <= 0 || target.tribeId === unit.tribeId) {
+    if (retargetSiegeGroupAttacker(state, unit, task)) return;
     unit.task = { kind: "idle" };
     return;
   }
@@ -5683,9 +6518,99 @@ function updateAttacker(state: GameState, unit: Unit): void {
     withdrawSiegeUnit(state, unit, task, "SIEGE_FEINT_WITHDRAWAL", `after ${task.assaultMode} timing completed`);
     return;
   }
+  if (task.interdictRepairs && isFieldCombatUnit(unit)) {
+    const repairer = findSiegeRepairInterdictionTarget(state, unit, task, target);
+    if (repairer) {
+      if (distance(unit, repairer) <= unit.range) return;
+      task.path = findPath(state, unit, { x: repairer.x, y: repairer.y });
+      moveAlongPath(state, unit, task.path);
+      return;
+    }
+  }
   if (distance(unit, target) <= unit.range) return;
   if (unit.task.path.length === 0) unit.task.path = findPath(state, unit, findBuildingAttackPosition(state, unit, target));
   moveAlongPath(state, unit, unit.task.path);
+}
+
+function updateSiegeCoverGuard(state: GameState, unit: Unit, task: Extract<UnitTask, { kind: "guardSiege" }>): void {
+  const hostile = findSiegeCoverTarget(state, unit, task);
+  if (hostile) {
+    if (distance(unit, hostile) <= unit.range) return;
+    task.path = findPath(state, unit, { x: hostile.x, y: hostile.y });
+    moveAlongPath(state, unit, task.path);
+    return;
+  }
+  const plan = state.siegePlans.find((candidate) => candidate.id === task.siegePlanId);
+  const liveTarget =
+    plan?.targetBuildingIds?.some((id) => {
+      const building = state.buildings[id];
+      return Boolean(building && building.hp > 0 && building.tribeId !== unit.tribeId);
+    }) ?? (task.targetBuildingId ? Boolean(state.buildings[task.targetBuildingId]?.hp > 0) : false);
+  if (!liveTarget) {
+    unit.task = { kind: "idle" };
+    return;
+  }
+  if (distance(unit, task.anchor) > Math.max(0.75, task.radius * 0.35)) {
+    if (task.path.length === 0) task.path = findPath(state, unit, task.anchor);
+    moveAlongPath(state, unit, task.path);
+    return;
+  }
+  task.path = [];
+}
+
+function findSiegeCoverTarget(state: GameState, unit: Unit, task: Extract<UnitTask, { kind: "guardSiege" }>): Unit | undefined {
+  return Object.values(state.units)
+    .filter(
+      (other) =>
+        other.hp > 0 &&
+        other.tribeId !== unit.tribeId &&
+        !isProtectedMessenger(other) &&
+        areHostile(state, unit.tribeId, other.tribeId) &&
+        distance(other, task.anchor) <= task.radius
+    )
+    .sort((left, right) => distance(unit, left) - distance(unit, right) || left.id.localeCompare(right.id))[0];
+}
+
+function findSiegeRepairInterdictionTarget(
+  state: GameState,
+  unit: Unit,
+  task: Extract<UnitTask, { kind: "attackBuilding" }>,
+  building: Building,
+  requireInRange = false
+): Unit | undefined {
+  const radius = task.repairInterdictionRadius ?? 4;
+  return Object.values(state.units)
+    .filter(
+      (other) =>
+        other.hp > 0 &&
+        other.tribeId !== unit.tribeId &&
+        areHostile(state, unit.tribeId, other.tribeId) &&
+        other.task.kind === "repair" &&
+        other.task.targetBuildingId === building.id &&
+        distance(other, building) <= radius &&
+        (!requireInRange || distance(unit, other) <= unit.range)
+    )
+    .sort((left, right) => distance(unit, left) - distance(unit, right) || left.id.localeCompare(right.id))[0];
+}
+
+function retargetSiegeGroupAttacker(state: GameState, unit: Unit, task: Extract<UnitTask, { kind: "attackBuilding" }>): boolean {
+  const plan = task.siegePlanId ? state.siegePlans.find((candidate) => candidate.id === task.siegePlanId) : undefined;
+  if (!plan?.targetBuildingIds || plan.targetBuildingIds.length <= 1) return false;
+  const nextTarget = plan.targetBuildingIds
+    .map((id) => state.buildings[id])
+    .find((building): building is Building => Boolean(building && building.hp > 0 && building.tribeId !== unit.tribeId));
+  if (!nextTarget) return false;
+  task.targetBuildingId = nextTarget.id;
+  task.path = findPath(state, unit, findBuildingAttackPosition(state, unit, nextTarget));
+  task.assaultPhase = task.assaultPhase === "assembling" || task.assaultPhase === "waiting_wave" ? task.assaultPhase : "attacking";
+  addEvent(
+    state,
+    "SIEGE_GROUP_RETARGETED",
+    `${state.tribes[unit.tribeId].name} redirects a siege unit`,
+    `${unit.name ?? unit.id} retargets within ${plan.id} to ${nextTarget.type} ${nextTarget.id}.`,
+    directVisionVisibleTo(state, nextTarget, [unit.tribeId, plan.targetTribeId, nextTarget.tribeId])
+  );
+  return true;
 }
 
 function updateSiegeAssembly(state: GameState, unit: Unit, task: Extract<UnitTask, { kind: "attackBuilding" }>, target: Building): boolean {
@@ -5886,6 +6811,28 @@ function updateCombat(state: GameState): void {
     if (unit.task.kind === "attackBuilding") {
       if (unit.task.assaultPhase === "assembling" || unit.task.assaultPhase === "waiting_wave") continue;
       const assignedTarget = state.buildings[unit.task.targetBuildingId];
+      const repairTarget =
+        assignedTarget && unit.task.interdictRepairs && isFieldCombatUnit(unit)
+          ? findSiegeRepairInterdictionTarget(state, unit, unit.task, assignedTarget, true)
+          : undefined;
+      if (repairTarget) {
+        const beforeHp = repairTarget.hp;
+        if (unit.type === "archer") launchArrowProjectile(state, unit, repairTarget, unit.task.siegePlanId);
+        applyUnitDamage(state, repairTarget, unit.attack, unit.tribeId);
+        if (beforeHp > 0 && repairTarget.hp <= 0) {
+          addEvent(
+            state,
+            "SIEGE_REPAIR_CREW_INTERDICTED",
+            `${state.tribes[unit.tribeId].name} stops a repair crew`,
+            `${unit.name} brings down ${repairTarget.name} while interdicting repairs on ${assignedTarget?.id ?? unit.task.targetBuildingId}.${
+              unit.task.repairInterdictionPlan ? ` Plan: ${unit.task.repairInterdictionPlan}.` : ""
+            }`,
+            directVisionVisibleTo(state, repairTarget, [unit.tribeId, repairTarget.tribeId])
+          );
+        }
+        unit.attackCooldown = Math.round(TICK_RATE * 1.2);
+        continue;
+      }
       if (
         assignedTarget &&
         assignedTarget.hp > 0 &&
@@ -5894,7 +6841,10 @@ function updateCombat(state: GameState): void {
         distance(unit, assignedTarget) <= unit.range
       ) {
         if (unit.type === "catapult") launchSiegeProjectile(state, unit, assignedTarget, unit.task.siegePlanId);
-        else applyBuildingDamage(state, assignedTarget, buildingAttackDamage(state, unit, assignedTarget), unit.tribeId);
+        else {
+          if (unit.type === "archer") launchArrowProjectile(state, unit, assignedTarget, unit.task.siegePlanId);
+          applyBuildingDamage(state, assignedTarget, buildingAttackDamage(state, unit, assignedTarget), unit.tribeId);
+        }
         unit.attackCooldown = siegeAttackCooldownTicks(unit);
         continue;
       }
@@ -5922,15 +6872,20 @@ function updateCombat(state: GameState): void {
         distance(unit, other) <= unit.range
     );
     if (target && !isDedicatedSiegeUnit(unit)) {
+      if (unit.type === "archer") launchArrowProjectile(state, unit, target);
       applyUnitDamage(state, target, unit.attack, unit.tribeId);
       unit.attackCooldown = Math.round(TICK_RATE * 1.2);
       continue;
     }
+    if (unit.task.kind === "guardSiege") continue;
     if (unit.task.kind === "move") continue;
     const buildingTarget = findHostileBuildingInRange(state, unit);
     if (!buildingTarget) continue;
     if (unit.type === "catapult") launchSiegeProjectile(state, unit, buildingTarget);
-    else applyBuildingDamage(state, buildingTarget, buildingAttackDamage(state, unit, buildingTarget), unit.tribeId);
+    else {
+      if (unit.type === "archer") launchArrowProjectile(state, unit, buildingTarget);
+      applyBuildingDamage(state, buildingTarget, buildingAttackDamage(state, unit, buildingTarget), unit.tribeId);
+    }
     unit.attackCooldown = siegeAttackCooldownTicks(unit);
   }
 }
@@ -5948,9 +6903,11 @@ function siegeProjectileTravelTicks(unit: Position, target: Position): number {
 function launchSiegeProjectile(state: GameState, unit: Unit, target: Building, siegePlanId?: string): SiegeProjectile {
   const travelTicks = siegeProjectileTravelTicks(unit, target);
   const damage = buildingAttackDamage(state, unit, target);
+  const projectileType: ProjectileType = "stone_shot";
+  const stats = projectileStats[projectileType];
   const projectile: SiegeProjectile = {
     id: nextId(state, "projectile"),
-    projectileType: "stone_shot",
+    projectileType,
     tribeId: unit.tribeId,
     originUnitId: unit.id,
     targetBuildingId: target.id,
@@ -5962,13 +6919,15 @@ function launchSiegeProjectile(state: GameState, unit: Unit, target: Building, s
     targetY: target.y,
     launchedTick: state.tick,
     impactTick: state.tick + travelTicks,
+    targetKind: "building",
+    appliesDamageOnImpact: true,
     siegePlanId,
-    hp: 1,
-    maxHp: 1,
-    armor: 0,
+    hp: stats.hp,
+    maxHp: stats.maxHp,
+    armor: stats.armor,
     attack: damage,
     range: unit.range,
-    attackCooldown: 0
+    attackCooldown: stats.attackCooldown
   };
   state.projectiles[projectile.id] = projectile;
   addEvent(
@@ -5976,15 +6935,132 @@ function launchSiegeProjectile(state: GameState, unit: Unit, target: Building, s
     "SIEGE_PROJECTILE_LAUNCHED",
     `${state.tribes[unit.tribeId].name} launches artillery`,
     `${unit.name} fires a stone shot at ${target.type} ${target.id}.`,
-    directVisionVisibleTo(state, target, [unit.tribeId, target.tribeId])
+    directVisionVisibleTo(state, target, [unit.tribeId, target.tribeId]),
+    {
+      x: target.x,
+      y: target.y,
+      actorTribeId: unit.tribeId,
+      targetTribeId: target.tribeId,
+      subjectId: projectile.id,
+      targetId: target.id,
+      projectileType,
+      severity: "skirmish"
+    }
   );
   return projectile;
 }
 
+function launchArrowProjectile(state: GameState, unit: Unit, target: Unit | Building, siegePlanId?: string): SiegeProjectile {
+  const targetKind = "type" in target && buildingTypes.includes(target.type as BuildingType) ? "building" : "unit";
+  return launchVisualCombatProjectile(state, {
+    projectileType: "arrow",
+    tribeId: unit.tribeId,
+    originUnitId: unit.id,
+    targetKind,
+    targetId: target.id,
+    start: unit,
+    target,
+    attack: unit.attack,
+    range: unit.range,
+    eventTitle: `${state.tribes[unit.tribeId].name} looses arrows`,
+    eventBody: `${unit.name} fires an arrow at ${targetKind} ${target.id}.`,
+    siegePlanId
+  });
+}
+
+function launchTurretProjectile(state: GameState, turret: Building, target: Unit): SiegeProjectile {
+  return launchVisualCombatProjectile(state, {
+    projectileType: "turret_bolt",
+    tribeId: turret.tribeId,
+    originBuildingId: turret.id,
+    targetKind: "unit",
+    targetId: target.id,
+    start: turret,
+    target,
+    attack: turret.attack,
+    range: turret.range,
+    eventTitle: `${state.tribes[turret.tribeId].name} turret fires`,
+    eventBody: `Turret ${turret.id} fires a bolt at ${target.name}.`
+  });
+}
+
+function launchVisualCombatProjectile(
+  state: GameState,
+  options: {
+    projectileType: ProjectileType;
+    tribeId: TribeId;
+    originUnitId?: string;
+    originBuildingId?: string;
+    targetKind: "building" | "unit";
+    targetId: string;
+    start: Position;
+    target: Position & { tribeId: TribeId; id: string };
+    attack: number;
+    range: number;
+    eventTitle: string;
+    eventBody: string;
+    siegePlanId?: string;
+  }
+): SiegeProjectile {
+  const stats = projectileStats[options.projectileType];
+  const travelTicks = visualProjectileTravelTicks(options.start, options.target);
+  const projectile: SiegeProjectile = {
+    id: nextId(state, "projectile"),
+    projectileType: options.projectileType,
+    tribeId: options.tribeId,
+    originUnitId: options.originUnitId,
+    originBuildingId: options.originBuildingId,
+    targetKind: options.targetKind,
+    targetBuildingId: options.targetKind === "building" ? options.targetId : undefined,
+    targetUnitId: options.targetKind === "unit" ? options.targetId : undefined,
+    x: options.start.x,
+    y: options.start.y,
+    startX: options.start.x,
+    startY: options.start.y,
+    targetX: options.target.x,
+    targetY: options.target.y,
+    launchedTick: state.tick,
+    impactTick: state.tick + travelTicks,
+    appliesDamageOnImpact: false,
+    siegePlanId: options.siegePlanId,
+    hp: stats.hp,
+    maxHp: stats.maxHp,
+    armor: stats.armor,
+    attack: options.attack,
+    range: options.range,
+    attackCooldown: stats.attackCooldown
+  };
+  state.projectiles[projectile.id] = projectile;
+  addEvent(
+    state,
+    "COMBAT_PROJECTILE_LAUNCHED",
+    options.eventTitle,
+    options.eventBody,
+    directVisionVisibleTo(state, options.target, [options.tribeId, options.target.tribeId]),
+    {
+      x: Number(options.target.x.toFixed(2)),
+      y: Number(options.target.y.toFixed(2)),
+      actorTribeId: options.tribeId,
+      targetTribeId: options.target.tribeId,
+      subjectId: projectile.id,
+      targetId: options.targetId,
+      projectileType: options.projectileType,
+      severity: "skirmish"
+    }
+  );
+  return projectile;
+}
+
+function visualProjectileTravelTicks(origin: Position, target: Position): number {
+  return Math.max(3, Math.round(distance(origin, target) * 1.1));
+}
+
 function updateProjectiles(state: GameState): void {
   for (const projectile of Object.values(state.projectiles)) {
-    const target = state.buildings[projectile.targetBuildingId];
-    if (!target || target.hp <= 0) {
+    const targetUnit = projectile.targetKind === "unit" && projectile.targetUnitId ? state.units[projectile.targetUnitId] : undefined;
+    const targetBuilding = projectile.targetKind === "building" && projectile.targetBuildingId ? state.buildings[projectile.targetBuildingId] : undefined;
+    const target = targetUnit ?? targetBuilding;
+    if (projectile.appliesDamageOnImpact && (!target || target.hp <= 0)) {
       delete state.projectiles[projectile.id];
       continue;
     }
@@ -5993,14 +7069,26 @@ function updateProjectiles(state: GameState): void {
     projectile.x = projectile.startX + (projectile.targetX - projectile.startX) * progress;
     projectile.y = projectile.startY + (projectile.targetY - projectile.startY) * progress;
     if (state.tick < projectile.impactTick) continue;
-    const destroyed = applyBuildingDamage(state, target, projectile.attack, projectile.tribeId);
-    addEvent(
-      state,
-      "SIEGE_PROJECTILE_IMPACT",
-      `${state.tribes[projectile.tribeId].name}'s artillery lands`,
-      `Stone shot ${projectile.id} hits ${target.type} ${target.id} at ${target.x},${target.y}${destroyed ? " and destroys it" : ""}.`,
-      directVisionVisibleTo(state, target, [projectile.tribeId, target.tribeId])
-    );
+    if (projectile.appliesDamageOnImpact && targetBuilding) {
+      const destroyed = applyBuildingDamage(state, targetBuilding, projectile.attack, projectile.tribeId);
+      addEvent(
+        state,
+        "SIEGE_PROJECTILE_IMPACT",
+        `${state.tribes[projectile.tribeId].name}'s artillery lands`,
+        `Stone shot ${projectile.id} hits ${targetBuilding.type} ${targetBuilding.id} at ${targetBuilding.x},${targetBuilding.y}${destroyed ? " and destroys it" : ""}.`,
+        directVisionVisibleTo(state, targetBuilding, [projectile.tribeId, targetBuilding.tribeId]),
+        {
+          x: targetBuilding.x,
+          y: targetBuilding.y,
+          actorTribeId: projectile.tribeId,
+          targetTribeId: targetBuilding.tribeId,
+          subjectId: projectile.id,
+          targetId: targetBuilding.id,
+          projectileType: projectile.projectileType,
+          severity: destroyed ? "destroyed" : "impact"
+        }
+      );
+    }
     delete state.projectiles[projectile.id];
   }
 }
@@ -6022,6 +7110,7 @@ function updateTurrets(state: GameState): void {
       )
       .sort((left, right) => targetPriority(right) - targetPriority(left) || distance(turret, left) - distance(turret, right))[0];
     if (!target) continue;
+    launchTurretProjectile(state, turret, target);
     applyUnitDamage(state, target, turret.attack, turret.tribeId);
     turret.attackCooldown = stats.cooldownTicks;
   }
@@ -6125,8 +7214,16 @@ function applyUnitDamage(state: GameState, target: Unit, amount: number, attacke
       state,
       "MESSENGER_KILLED",
       "Messenger killed",
-      `${target.name} disappeared with a sealed packet near ${Math.round(target.x)},${Math.round(target.y)}.`,
-      [attackerTribeId]
+    `${target.name} disappeared with a sealed packet near ${Math.round(target.x)},${Math.round(target.y)}.`,
+      [attackerTribeId],
+      {
+        x: Number(target.x.toFixed(2)),
+        y: Number(target.y.toFixed(2)),
+        actorTribeId: attackerTribeId,
+        targetTribeId: target.tribeId,
+        targetId: target.id,
+        severity: "destroyed"
+      }
     );
   }
 }
@@ -6136,6 +7233,7 @@ function applyBuildingDamage(state: GameState, building: Building, amount: numbe
   if (building.hp > 0) return false;
   const destroyedType = building.type;
   const destroyedTribe = building.tribeId;
+  const destroyedId = building.id;
   const destroyedAt = { x: building.x, y: building.y };
   delete state.buildings[building.id];
   addEvent(
@@ -6143,7 +7241,15 @@ function applyBuildingDamage(state: GameState, building: Building, amount: numbe
     "STRUCTURE_DESTROYED",
     `${state.tribes[destroyedTribe].name} loses ${labelBuildingType(destroyedType)}`,
     `${labelBuildingType(destroyedType)} at ${destroyedAt.x},${destroyedAt.y} was destroyed${attackerTribeId ? ` by ${state.tribes[attackerTribeId].name}` : ""}.`,
-    directVisionVisibleTo(state, destroyedAt, [destroyedTribe, attackerTribeId])
+    directVisionVisibleTo(state, destroyedAt, [destroyedTribe, attackerTribeId]),
+    {
+      x: destroyedAt.x,
+      y: destroyedAt.y,
+      actorTribeId: attackerTribeId,
+      targetTribeId: destroyedTribe,
+      targetId: destroyedId,
+      severity: "destroyed"
+    }
   );
   updateVisibility(state);
   return true;
@@ -6182,7 +7288,15 @@ function destroyResourceDepositAt(
     "RESOURCE_DEPOSIT_DESTROYED",
     `${labelResourceType(type)} deposit destroyed`,
     `${labelResourceType(type)} deposit at ${target.x},${target.y} was destroyed${attackerTribeId ? ` by ${state.tribes[attackerTribeId].name}` : ""}.`,
-    visibleTo
+    visibleTo,
+    {
+      x: target.x,
+      y: target.y,
+      actorTribeId: attackerTribeId,
+      targetTribeId: controlledBy,
+      targetId: `${type}@${target.x},${target.y}`,
+      severity: "raid"
+    }
   );
   updateVisibility(state);
 }
@@ -6320,7 +7434,7 @@ function updateVictoryPressure(state: GameState): void {
       state,
       "SURVIVAL_REVIEW_WARNING",
       "Century review approaching",
-      `Year ${currentYear}: a century review will wipe out the poorest surviving population in year ${config.nextReviewYear}. Its people will die and its sovereign will lose everything. Exact rival wealth remains private unless learned through diplomacy, scouting, or deception.`,
+      `Year ${currentYear}: a century review will wipe out the surviving population with the lowest total wealth in year ${config.nextReviewYear}. Its people will die and its sovereign will lose everything. Exact rival wealth remains private unless learned through diplomacy, scouting, or deception.`,
       "all"
     );
   }
@@ -6339,7 +7453,12 @@ function runCenturyReview(state: GameState, reviewYear: number): void {
   }
   const eliminated = surviving
     .slice()
-    .sort((left, right) => left.survivalScore - right.survivalScore || left.wealthPerCapita - right.wealthPerCapita || tribeIds.indexOf(left.tribeId) - tribeIds.indexOf(right.tribeId))[0];
+    .sort(
+      (left, right) =>
+        left.wealth - right.wealth ||
+        left.survivalScore - right.survivalScore ||
+        tribeIds.indexOf(left.tribeId) - tribeIds.indexOf(right.tribeId)
+    )[0];
   eliminateTribeAtReview(state, eliminated.tribeId, reviewYear, eliminated);
   const refreshed = getVictoryPressure(state);
   const remaining = refreshed.scoreByTribe.filter((score) => isTribeActive(state, score.tribeId));
@@ -6376,7 +7495,7 @@ function eliminateTribeAtReview(state: GameState, tribeId: TribeId, reviewYear: 
     state,
     "CENTURY_POPULATION_ELIMINATED",
     `${tribe.name} is eliminated at the century review`,
-    `Year ${reviewYear}: the poorest surviving population died out with survival score ${score.survivalScore}, happiness ${score.happiness}, safety ${score.safety}, and wealth per person ${score.wealthPerCapita}.`,
+    `Year ${reviewYear}: the surviving population with the lowest total wealth died out with wealth ${score.wealth}, happiness ${score.happiness}, safety ${score.safety}, and wealth per person ${score.wealthPerCapita}.`,
     "all"
   );
 }
@@ -6413,7 +7532,7 @@ function recordSurvivalReviewLearning(
       outcome === "winner"
         ? `Post-game learning: survived to year ${reviewYear} as the last living population. Keep people richer each year, defend food and homes, and use diplomacy to mislead rivals about true wealth.`
         : outcome === "eliminated"
-          ? `Post-game learning: wiped out in year ${reviewYear} as the poorest population with happiness ${effectiveScore.happiness}, safety ${effectiveScore.safety}, and wealth per person ${effectiveScore.wealthPerCapita}. The people died; this was total safety failure. Next iteration must raise yearly wealth, food security, and defenses before the next review.`
+          ? `Post-game learning: wiped out in year ${reviewYear} as the lowest-total-wealth surviving population with total wealth ${effectiveScore.wealth}, happiness ${effectiveScore.happiness}, and safety ${effectiveScore.safety}. The people died; this was total safety failure. Next iteration must raise total yearly wealth, food security, and defenses before the next review.`
           : `Post-game learning: survived the year ${reviewYear} review while ${eliminated.tribeName} was wiped out and died. Keep the population slightly wealthier every year and do not reveal exact wealth unless deception or alliance strategy justifies it.`;
     const learning: PostGameLearning = {
       id: nextId(state, "learn"),
@@ -6864,12 +7983,31 @@ function recordRouteMemory(state: GameState, unit: Unit, packet: Packet): void {
 
 function recordGateAccessTreatyRouteMemory(state: GameState, packet: Packet): void {
   const gateIds = packet.outboundGateBuildingIds ?? [];
+  const recordedRouteIds = new Set<string>();
   for (const gateId of gateIds) {
     const treaty = activeGateAccessTreatyForTribe(state, gateId, packet.originTribeId);
     if (!treaty) continue;
     const gate = state.buildings[gateId];
     const treatyName = treaty.treatyName ? ` "${treaty.treatyName}"` : "";
+    const routeName = treaty.routeName ? ` "${treaty.routeName}"` : "";
     const expiry = treaty.expiresAtTick ? ` until turn ${treaty.expiresAtTick}` : "";
+    if (treaty.routeId) {
+      if (recordedRouteIds.has(treaty.routeId)) continue;
+      recordedRouteIds.add(treaty.routeId);
+      const routeGateIds = treaty.routeGateIds?.length ? treaty.routeGateIds : [gateId];
+      const usedRouteGateIds = routeGateIds.filter((id) => gateIds.includes(id));
+      const missingRouteGateIds = routeGateIds.filter((id) => !gateIds.includes(id));
+      const routeTerms = treaty.routeTerms ? ` Terms: ${treaty.routeTerms}` : "";
+      const note = `Safe-passage route ${treaty.routeId}${routeName}${treatyName} let ${
+        state.tribes[packet.originTribeId].name
+      }'s courier use ${state.tribes[treaty.tribeId].name} route gates ${usedRouteGateIds.join(", ")}${
+        missingRouteGateIds.length ? `; unused route gates ${missingRouteGateIds.join(", ")}` : ""
+      }${expiry}.${routeTerms}`;
+      if (!packet.routeMemory.some((entry) => entry.includes(`Safe-passage route ${treaty.routeId}`))) {
+        packet.routeMemory.push(note);
+      }
+      continue;
+    }
     const note = `Safe-passage treaty ${treaty.id}${treatyName} let ${state.tribes[packet.originTribeId].name}'s courier route through ${state.tribes[treaty.tribeId].name} gate ${gateId}${gate ? ` at ${gate.x},${gate.y}` : ""}${expiry}.`;
     if (!packet.routeMemory.some((entry) => entry.includes(`Safe-passage treaty ${treaty.id}`))) {
       packet.routeMemory.push(note);
@@ -6965,11 +8103,27 @@ function appendForeignObservation(
   state: GameState,
   observerTribeId: TribeId,
   subject: ForeignObservationSubject,
-  kind: ForeignObservationKind
+  kind: ForeignObservationKind,
+  extra: Partial<
+    Pick<
+      ForeignObservation,
+      | "gateTreatyIncidentId"
+      | "gateTreatyId"
+      | "gateOperationId"
+      | "gateOwnerTribeId"
+      | "affectedTribeId"
+      | "packetId"
+      | "gateIncidentAction"
+      | "gateBuildingId"
+      | "gateSabotageId"
+      | "gateSabotageAction"
+    >
+  > = {}
 ): void {
   const log = state.foreignObservations[observerTribeId] ?? [];
   log.push({
     ...subject,
+    ...extra,
     id: nextId(state, "obs"),
     tick: state.tick,
     observerTribeId,
@@ -7219,8 +8373,8 @@ function resourceTerrain(type: ResourceType): TerrainType {
   return "hill";
 }
 
-function addEvent(state: GameState, type: string, title: string, body: string, visibleTo: TribeId[] | "all"): void {
-  state.events.push({ id: nextId(state, "evt"), tick: state.tick, type, title, body, visibleTo });
+function addEvent(state: GameState, type: string, title: string, body: string, visibleTo: TribeId[] | "all", context?: GameEvent["context"]): void {
+  state.events.push({ id: nextId(state, "evt"), tick: state.tick, type, title, body, visibleTo, ...(context ? { context } : {}) });
   if (state.events.length > 250) state.events.shift();
 }
 

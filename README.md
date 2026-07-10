@@ -22,6 +22,7 @@ http://localhost:5173/
 - Five sovereign tribes with starting units, buildings, construction resources, colors, and
   fog-of-war visibility.
 - PixiJS-rendered map with DOM observer HUD.
+- PixiJS uses cached terrain chunks, pooled sprites for units/buildings/resources/packets/projectiles, ticker-owned motion interpolation, a 25 FPS smoothness floor, and capped Retina resolution so local Ollama work is less likely to stall the visible simulation.
 - Observer-first UI:
   - all five tribes visible for inspection
   - tribe wealth/unit/messenger summaries
@@ -32,28 +33,31 @@ http://localhost:5173/
   - per-tribe latest AI provider status so fallback is visible
   - physical diplomacy packet list
   - AI bug queue separating model/engine reports from ordinary blocked orders
-  - AI information request queue with generated answers for own, visible, and public intelligence
+  - private intelligence request queue with generated answers for own, visible, and public intelligence; peer questions belong in physical messenger chat
   - AI report review panel with current/cleared buckets, effective backlog counts, status/category/severity/provider/model filters, source/context search, in-app compact snapshot previews, triage status, proof metadata, and latest persisted reports
   - Victory Pressure panel showing the current game-year, population survival mandate, next century review, happiness/safety scores, winner, live learning state, and persisted learning history
   - map layer toggles for resource labels, contested-deposit halos, and wall/turret defense overlays
+  - defense overlay marker telemetry for active/revoked gate writs, tolls, detained couriers, treaty incidents, sabotage, and witnessed discoveries
   - unit, building, and resource legend
   - build-cost legend tying farms, watchtowers, walls, and turrets to their required materials
   - clay, limestone, iron, and coal deposits shown distinctly from food, wood, gold, and stone
   - resource deposits expose health, armor, attack/range, and condition metadata in hover and browser-hook output
+  - arrows, turret bolts, and stone shots render as pooled projectile sprites with combat halos when battles occur
 - Local LLM sovereign decisions through Ollama:
   - browser calls local Ollama through the Vite `/ollama` proxy
   - default model selection prefers `qwen3.5:9b-mlx` for clean/fast schema output, then `gemma4:12b`, then other schema-compatible local models
   - `gpt-oss` models use a dedicated `/api/chat` schema adapter with low thinking effort instead of the `/api/generate` path
-  - opening sovereign identities and first doctrines bootstrap in parallel through the fastest clean schema model so all five teams become active quickly; assigned qwen/gemma/gpt-oss models take over for later strategy and reply turns
+  - opening sovereign identities and first doctrines bootstrap through paced, frame-aware AI lanes; assigned qwen/gemma/gpt-oss models still vary later strategy and reply turns without forcing burst-parallel model starts
   - AI Observer tracks per-model live turns, fallback turns, rejected orders, parser/transport issues, and recovery evidence
   - each AI chooses a history/book-inspired realm name, sovereign name, and starting unit names; there are no hardcoded creative fallback names, and default placeholder realm/sovereign names are rejected and retried
   - each AI writes an independent freeform strategy before choosing immediate executable orders
   - each AI keeps bounded private strategy memory for commitments, lies, grudges, suspicions, alliance intentions, and long-term plans
   - sovereign strategy can ask for information, propose joint plans, invent economic schemes, bluff, lie, scout as spies, betray, attack, or prepare war
   - prompts tell each AI that its primary goal is keeping its population happy, alive, and safe; happiness depends on becoming a bit wealthier each year
-  - one game-year lasts roughly 20 real seconds at 1x speed; every 100 game-years, the poorest surviving population is wiped out and dies, which prompts define as the opposite of safety
+  - one game-year lasts roughly 20 real seconds at 1x speed; every 100 game-years, the surviving population with the lowest total wealth is wiped out and dies, which prompts define as the opposite of safety
   - exact rival wealth is hidden from AI prompts; sovereigns can ask each other for wealth/safety information, and the recipient may answer truthfully, refuse, exaggerate, or lie
-  - when the survival game resolves, each AI receives an individualized memory lesson based on survival, elimination, happiness, safety, and wealth-per-person; finished-game lessons persist in browser storage and load back into sovereign memory after reload
+  - private intelligence requests are separate from peer diplomacy; questions addressed to another sovereign must travel through physical messenger chat and replies
+  - when the survival game resolves, each AI receives an individualized memory lesson based on survival, elimination, happiness, safety, and total wealth; finished-game lessons persist in browser storage and load back into sovereign memory after reload
   - decisions return structured JSON
   - orders are validated before execution
   - later decisions can rename owned villagers, messengers, scouts, and soldiers
@@ -92,6 +96,7 @@ http://localhost:5173/
 - Defensive construction:
   - walls block movement until destroyed
   - gates are buildable, can be open/closed/locked, and open gates follow access policies
+  - gate access treaties can grant or revoke named safe-passage routes across multiple exact owned gates, with route ids, gate lists, terms, courier memory, prompt visibility, and browser telemetry
   - units, buildings, resource deposits, and physical messenger packets share an explicit health/armor/attack/range stat contract
   - walls are drawn as high-contrast segmented barrier tiles and selected/new walls get a bright construction pulse, centered camera, selected-panel confirmation, and recent-construction labels so rapid builds remain visible
   - selected units and buildings expose health, armor, attack/range, condition, and repair state; damaged walls/gates/turrets draw cracks, rubble, scorch marks, health bars, and repair pulses
@@ -107,8 +112,8 @@ http://localhost:5173/
   - alliances suppress hostile combat between allied tribes
   - ATTACK orders break alliances with the target and create explicit war state
 - Public victory pressure:
-  - the sandbox continues, but every 100 game-years the poorest surviving population is wiped out and dies
-  - the decisive rule is population happiness and safety, with happiness depending on yearly wealth improvement
+  - the sandbox continues, but every 100 game-years the surviving population with the lowest total wealth is wiped out and dies
+  - the decisive review metric is total wealth; happiness and safety remain the primary mandate and affect population health, growth, and sovereign memory
   - century-review warnings, eliminations, and the final survival winner are public events visible to all sovereigns
   - after the survival game resolves, `postGameLearnings` writes one lesson per AI into sovereign memory for the next iteration and the browser persists one finished-game learning record
   - `window.render_game_to_text()` exposes victory rule, current year, next review, survivors, winner, score table, construction feedback, recent construction markers, live post-game lessons, and persisted learning history for QA
@@ -130,17 +135,20 @@ http://localhost:5173/
   reset view, and wheel zoom.
 - Browser QA hooks:
   - `window.render_game_to_text()` returns structured JSON with tick, tribes,
-    visible entities, map-layer toggles, board-readability metadata, combat-stat coverage, blocking wall status, building costs, resource-tile samples, contested resource sites, statted packets, victory pressure, recent AI decisions, per-model LLM quality, sovereign memory, AI issue queue, and events
+    visible entities, map-layer toggles, board-readability metadata, combat-stat coverage, combat notice markers, blocking wall status, building costs, resource-tile samples, contested resource sites, statted packets, victory pressure, recent AI decisions, per-model LLM quality, sovereign memory, AI issue queue, and events
   - `window.advanceTime(ms)` steps the same simulation path used by the ticker
     and re-renders the game
 
 ## Roadmaps
 
-- `Sovereign_Worlds_Development_Tree_Roadmap.md` defines a large future
-  civilization development tree with 100+ AI-selectable developments across
+- `Sovereign_Worlds_Development_Tree_Roadmap.md` defines the implemented
+  civilization development tree with 191 AI-selectable developments across
   technology, governance, institutions, media, labor systems, diplomacy,
   economy, military doctrine, law, religion, culture, infrastructure,
   construction resources, fortification logistics, and map-control pressure.
+  Generated roadmap nodes now infer differentiated deterministic mechanics for
+  tax systems, trade corridors, finance, coercive labor, public information,
+  law enforcement, siege, gates, and logistics.
 
 Multiplayer, full persistence, treaty enforcement, spies, forgery, and the Vice
 President are intentionally deferred.
@@ -156,9 +164,14 @@ pnpm ai:snapshots:replay
 pnpm smoke:ai-fairness
 pnpm smoke:live-ai
 pnpm smoke:buildings
+SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:smooth
 pnpm smoke:mock-ollama
 pnpm smoke
 ```
+
+For active roadmap items 1-5, `pnpm smoke:smooth` is mandatory and must report
+`measuredFps >= 25`, an active mocked AI lane, multiple rendered frames per
+simulation tick, and no ticker-frame gap above the smoothness ceiling.
 
 `pnpm ai:snapshots:replay` validates every JSON file in `AI_BUG_SNAPSHOTS/`
 against the markdown report links and serialized invariant contract, then writes:

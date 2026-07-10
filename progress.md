@@ -3463,3 +3463,548 @@ Original prompt: ok continue with roadmap make sure the AIs can report bugs and 
 - Remaining backlog:
   - tune total scarce-resource yield over 400-year live-AI games,
   - add longer-run balance checks that resource scarcity creates migration, trade, conflict, or rationing pressure without scripting sovereign strategy.
+
+### 2026-07-08 Fortification Placement Preview Slice
+
+- Delivered resolved placement previews for authored fortifications:
+  - `FortificationPlanRecord.placementPreview` records the actual resolved tiles after `findBuildSite()`, so previews cannot lie about requested coordinates that were shifted by terrain, units, resources, or buildings,
+  - previews include blocking segment ids, owner gate passability, nearest-foreign gate passability, route checks with and without the placed structures, route-blocked count, and max added route steps,
+  - straight wall/gate perimeter groups receive an aggregate preview shared by all segment plans,
+  - observer fortification overlay groups expose `placementPreview`, `routeBlockedByPlacementCount`, and `maxAddedRouteSteps`,
+  - defense overlay drawing uses the simulator preview route checks for visible route-impact lines,
+  - sovereign catch-up prompts include the factual placement preview summary after a new fortification plan.
+- Strategy boundary:
+  - no strategy, placement, perimeter direction, or gate decision is chosen by the simulator,
+  - the preview is factual evidence about what the sovereign already ordered and what pathing/blocking consequences resulted.
+- QA completed:
+  - `pnpm exec tsc --noEmit` passed,
+  - focused sim regression passed: `pnpm exec vitest run packages/sim/src/sim.test.ts --testNamePattern "LLM-authored fortification placement intent|multi-tile perimeter" --reporter verbose`,
+  - focused LLM regression passed: `pnpm exec vitest run apps/client/src/llm.test.ts --testNamePattern "fortification placement previews|fortification policy prose" --reporter verbose`,
+  - full LLM suite passed with 71/71 tests,
+  - full simulator suite passed with 82/82 tests,
+  - syntax checks passed for `scripts/smoke-building-visibility.mjs` and `scripts/smoke-playwright.mjs`,
+  - `SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:buildings` passed and verified perimeter `placementPreview` in the browser hook and overlay group,
+  - `SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:smooth` passed at 28.1 FPS with only the known WebGL screenshot readback warnings,
+  - `pnpm build` passed with the existing Vite large-chunk warning,
+  - `git diff --check` passed,
+  - visually inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-buildings.png` and `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-smooth-frame-loop.png`.
+- Remaining backlog:
+  - add true pre-build route previews before resources are spent,
+  - support richer perimeter shapes beyond straight lines,
+  - extend multi-structure perimeter execution beyond wall/gate to turret and watchtower plans,
+  - add more detailed map visual states for placement risk, route detours, and blocked passages.
+
+### 2026-07-08 Multi-Target Siege Group Slice
+
+- Delivered explicit multi-target siege groups without hardcoded strategy:
+  - `AiStrategicOrder` and the LLM decision schema now accept `targetBuildingIds` in addition to the existing single `targetBuildingId`,
+  - sovereign prompts and order availability explain that `targetBuildingIds` must be exact visible hostile building ids chosen by the sovereign,
+  - simulator validation rejects missing, own, destroyed, or cross-civilization target groups instead of substituting an algorithmic target,
+  - `SiegePlanRecord` preserves the authored target list for catch-up context and observer/browser evidence,
+  - attack tasks still use the existing single-current-target shape, but attackers are split across the authored target ids and surviving attackers retarget only to remaining structures in the same explicit group.
+- Browser/observer QA:
+  - added `window.force_multi_target_siege_for_test()` beside the existing single-target siege hook,
+  - building smoke now proves assigned targets cover both authored wall ids, both structures are destroyed, the siege plan preserves `targetBuildingIds`, and a `SIEGE_GROUP_RETARGETED` event fires when units redirect from the first destroyed target to the remaining explicit target.
+- QA completed:
+  - `pnpm exec tsc --noEmit` passed,
+  - `node --check scripts/smoke-building-visibility.mjs` passed,
+  - `node --check scripts/smoke-playwright.mjs` passed,
+  - focused sim regression passed: `pnpm exec vitest run packages/sim/src/sim.test.ts -t "multi-target|authored building targets"`,
+  - focused LLM regression passed: `pnpm exec vitest run apps/client/src/llm.test.ts -t "preserves LLM-authored siege targets"`,
+  - full simulator suite passed with 84/84 tests,
+  - full LLM suite passed with 71/71 tests,
+  - `SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:buildings` passed on rerun after an initial dev-server reload interrupted the first attempt,
+  - `SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:smooth` passed at 30.6 FPS with only known WebGL readback warnings,
+  - `pnpm build` passed with the existing Vite large-chunk warning,
+  - `git diff --check` passed,
+  - visually inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-buildings.png` and `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-smooth-frame-loop.png`.
+- Remaining backlog:
+  - add cover/escort assignments for siege groups,
+  - add richer contested repair counterplay,
+  - add more projectile and artillery variants,
+  - consider per-unit role queues only when the AI needs more expressivity than the current single-current-target task shape.
+
+### 2026-07-09 Siege Cover And Escort Role Slice
+
+- Delivered explicit siege guard roles without hardcoded strategy:
+  - `ATTACK` orders now accept exact `coverUnitIds` and `escortUnitIds` for own militia/archers,
+  - cover and escort units can carry independent anchors, radii, and freeform `coverPlan` / `escortPlan` prose,
+  - simulator validation rejects missing, dead, wrong-owner, wrong-type, and overlapping cover/escort unit ids,
+  - cover and escort units are removed from breaching assignments and instead receive `guardSiege` tasks with role-specific task text,
+  - guard units intercept hostile units around their authored anchor while breachers continue against the sovereign's chosen structure or multi-target group,
+  - `SiegePlanRecord`, sovereign catch-up summaries, LLM schema, LLM prompts, browser hooks, and smoke checks expose the factual role evidence.
+- Strategy boundary:
+  - the simulator does not decide whether a sovereign should use cover, escort, both, or neither,
+  - the simulator does not choose which structures deserve protection or which units should be held back,
+  - role fields are tools the LLM can author; execution only validates and carries out those explicit orders.
+- QA completed:
+  - `pnpm exec tsc --noEmit` passed,
+  - `node --check scripts/smoke-building-visibility.mjs` passed,
+  - focused sim regression passed: `pnpm exec vitest run packages/sim/src/sim.test.ts -t "multi-target|authored building targets"`,
+  - focused LLM regression passed: `pnpm exec vitest run apps/client/src/llm.test.ts -t "preserves LLM-authored siege targets"`,
+  - full LLM suite passed with 71/71 tests,
+  - full simulator suite passed with 84/84 tests,
+  - `SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:buildings` passed and verified cover/escort role text plus cover/escort assignment events,
+  - `SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:smooth` passed at 24.5 FPS with only the known WebGL readback warnings,
+  - `pnpm build` passed with the existing Vite large-chunk warning,
+  - visually inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-buildings.png` and `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-smooth-frame-loop.png`.
+- Remaining backlog:
+  - add richer contested repair counterplay,
+  - add more nuanced per-unit role behaviors only where the LLM needs extra expressive tools beyond current cover/escort guards,
+  - add more projectile and artillery variants,
+  - keep future siege work framed as capabilities and evidence, not scripted doctrine.
+
+### 2026-07-09 Contested Repair Interdiction Slice
+
+- Delivered an explicit counter-repair attack tool:
+  - `ATTACK` orders against a hostile building now accept `interdictRepairs`, `repairInterdictionPlan`, and optional `repairInterdictionRadius`,
+  - `SiegePlanRecord` preserves the authored interdiction fields for later sovereign catch-up,
+  - militia/archers assigned to that attack can suppress hostile repair crews actively repairing the exact target before resuming structural damage,
+  - dedicated siege tools still remain structural-pressure tools; repair interdiction is carried by field combat units in the authored attack,
+  - browser task text exposes "Interdicting repairs..." so observer and smoke telemetry can see the role.
+- Repair pressure reliability:
+  - existing repair-under-fire interruption now has regression coverage that proves repair resumes once the hostile pressure is removed,
+  - browser smoke now has a separate `force_repair_interdiction_for_test()` hook that creates a real red repair order and a real blue interdiction attack.
+- Strategy boundary:
+  - no automatic doctrine chooses interdiction for a sovereign,
+  - the LLM must opt in with `interdictRepairs` and write its own `repairInterdictionPlan`,
+  - execution is limited to repair crews on the exact target building inside the authored/default worksite radius, so it does not become a hidden worker-hunting strategy.
+- QA completed:
+  - `pnpm exec tsc --noEmit` passed,
+  - `node --check scripts/smoke-building-visibility.mjs` passed,
+  - focused sim regression passed: `pnpm exec vitest run packages/sim/src/sim.test.ts -t "repair|multi-target|authored building targets"` with 6 passing tests,
+  - focused LLM regression passed: `pnpm exec vitest run apps/client/src/llm.test.ts -t "preserves LLM-authored siege targets|repair targets"` with 2 passing tests,
+  - `SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:buildings` passed after tightening the repair-interdiction event to name the exact target id,
+  - `SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:smooth` passed at 24.8 FPS with only the known WebGL readback warnings,
+  - generic web-game client passed against `http://127.0.0.1:5173/?qaCanvasReadback=1`,
+  - `pnpm build` passed with the existing Vite large-chunk warning,
+  - full LLM suite passed with 71/71 tests,
+  - full simulator suite passed with 85/85 tests,
+  - visually inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-buildings.png`, `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-smooth-frame-loop.png`, and `/Users/benjaminpommeraud/Desktop/Sovereigns/output/web-game-readback/shot-0.png`.
+- Remaining backlog:
+  - add more nuanced per-unit role behaviors only where the LLM needs extra expressive tools,
+  - add more projectile and artillery variants,
+  - keep siege tools as opt-in capabilities and factual evidence rather than prescribed tactics.
+
+### 2026-07-09 Turret And Watchtower Line Perimeter Slice
+
+- Delivered multi-structure tower perimeters as authored placement tools:
+  - `BUILD` orders with `buildingType: "turret"` and `perimeterPattern: "line"` now build a real multi-turret line,
+  - `BUILD` orders with `buildingType: "watchtower"` and `perimeterPattern: "line"` now build a real multi-watchtower line,
+  - both paths reuse the existing perimeter command surface: `targetX`, `targetY`, `perimeterDirection`, `perimeterLength`, and freeform `fortificationIntent` / `perimeterShape` / `perimeterStrategy`,
+  - simulator cost, development requirements, `FortificationPlanRecord`, group ids, segment indices, and placement previews are preserved for every segment,
+  - `gate_line` remains restricted to wall/gate boundaries and is rejected for turret/watchtower perimeters, so no hidden gate/tower doctrine is inferred.
+- Browser/observer exposure:
+  - added `force_tower_perimeter_for_test()` to build a real turret line and a real watchtower line through normal `issueSovereignOrder` paths,
+  - building smoke now verifies visible turret/watchtower groups, plan counts, nonblocking placement previews, overlay perimeter-group ids, and structure counts.
+- Strategy boundary:
+  - no strategy decides whether the sovereign should build towers, watchtowers, walls, or nothing,
+  - the LLM has an explicit placement tool and must choose the structure type, coordinates, direction, length, and rationale,
+  - `gate_line` still requires the sovereign to ask for a wall/gate boundary rather than silently appearing inside tower lines.
+- QA completed:
+  - `pnpm exec tsc --noEmit` passed,
+  - `node --check scripts/smoke-building-visibility.mjs` passed,
+  - focused sim regression passed: `pnpm exec vitest run packages/sim/src/sim.test.ts -t "perimeter|fortification placement"` with 4 passing tests,
+  - focused LLM regression passed: `pnpm exec vitest run apps/client/src/llm.test.ts -t "turret line perimeter|fortification|gate operations"` with 4 passing tests,
+  - browser building smoke passed: `SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:buildings`, including `towerPerimeterState`, visible tower perimeter overlay groups, 3 turrets, 3 watchtowers, and inspected `sovereign-worlds-buildings.png`,
+  - smooth-frame smoke passed: `SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:smooth`, reporting 26.4 FPS against the 24 FPS floor, simulation steps at 0.1 seconds, and inspected `sovereign-worlds-smooth-frame-loop.png`,
+  - generic browser client passed: `web_game_playwright_client.js` against `http://127.0.0.1:5173/?qaCanvasReadback=1`, with inspected `output/web-game-readback/shot-0.png`,
+  - production build passed: `pnpm build`,
+  - full LLM regression passed: `pnpm exec vitest run apps/client/src/llm.test.ts` with 72 passing tests,
+  - full sim regression passed: `pnpm exec vitest run packages/sim/src/sim.test.ts` with 86 passing tests.
+- Remaining backlog:
+  - support richer perimeter shapes beyond straight lines only through explicit fields,
+  - add true pre-build previews before resources are spent,
+  - keep future placement work as capabilities and factual evidence, not recommended layouts.
+
+### 2026-07-09 Active-Five Roadmap Numbering And FPS Gate Closure
+
+- Closed the roadmap-clarity story:
+  - added a dedicated `Active Next Five Roadmap Items` section to `Sovereign_Worlds_Development_Tree_Roadmap.md`,
+  - made the current scope explicitly limited to items 1-5: development-tree balancing, chosen placement, advanced siege behavior, gate diplomacy/strategy, and the fortification/item stat contract,
+  - moved items 6+ under `Later Roadmap Items` so graphics, survival scoring, map readability, learning QA, hidden-world QA, mergers, and finite-resource balance do not silently enter the current active-five implementation scope,
+  - added a story closure rule: once a roadmap story is built, it must be QAed, documented in `progress.md` with exact evidence, and explicitly closed before moving on,
+  - added an active-five performance gate requiring smooth-frame QA at `measuredFps >= 24` before any active-five slice can close,
+  - updated `README.md` verification commands to include the mandatory active-five smooth-frame smoke,
+  - reworded the early PixiJS roadmap bullets from "next graphics/map-scale work" to "later item 6 graphics/map-scale work" so item 6 cannot be mistaken for the current active-five scope,
+  - tightened the active-five FPS gate to define equivalent browser evidence: `render_game_to_text().clock.measuredFps >= 24`, `tickerMinFps: 24`, nonzero/interpolated visual motion, no browser errors, and inspected screenshot evidence,
+  - tightened item 5 so the stat contract is implementable through schema, simulator validation, browser hooks, and tests for each new targetable or combat-effective item.
+- QA completed:
+  - `SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:smooth` passed after the roadmap update,
+  - fresh smooth-frame telemetry reported `measuredFps: 26.6`, `tickerMinFps: 24`, and no active LLM frame-pressure,
+  - visually inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-smooth-frame-loop.png` after the fresh run.
+- Closed status:
+  - this was documentation/QA governance only; no simulation or rendering behavior was changed,
+  - next implementation work should resume at active-five item 1, 2, 3, 4, or 5 only.
+
+### 2026-07-09 Projectile Visualization And Stat-Contract Slice
+
+- Closed active-five item 3/5 story:
+  - made catapult `stone_shot` projectiles visibly stronger on the Pixi board with a larger directional trail, glow, outlined stone, and forward spark,
+  - added `window.force_projectile_visual_for_test()` to leave a real `stone_shot` mid-flight between a catapult and hostile wall,
+  - building smoke now writes `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-projectile.png` immediately after the projectile is launched, before impact removes it,
+  - `render_game_to_text().visibleProjectiles` exposes the in-flight projectile with screen coordinates and combat stats.
+- Closed active-five item 5/5 story:
+  - added a `ProjectileType` registry with `projectileTypes` and `getProjectileTypeCombatStats()`,
+  - live siege projectiles now inherit their base stat shape from the projectile type contract while preserving computed impact damage,
+  - `getCombatStatCoverageReport()` now verifies projectile types as well as live projectile instances,
+  - browser projectile snapshots now expose `projectileType`, `hp`, `maxHp`, `armor`, `attack`, `range`, and `attackCooldown`,
+  - browser smoke fails if an in-flight projectile lacks full stat coverage.
+- QA completed:
+  - `pnpm exec tsc --noEmit` passed,
+  - `node --check scripts/smoke-building-visibility.mjs` passed,
+  - focused sim regression passed: `pnpm exec vitest run packages/sim/src/sim.test.ts -t "health, armor|catapults and fire visible projectiles"` with 2 passing tests,
+  - browser building smoke passed: `SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:buildings`,
+  - projectile smoke evidence showed `stone_shot` at mid-flight `x: 47.8, y: 50`, `attack: 39`, `range: 7.5`, `attackCooldown: 0`, and `visibleProjectiles` coverage,
+  - visually inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-projectile.png`,
+  - production build passed: `pnpm build`,
+  - active-five smooth-frame gate passed: `SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:smooth` reported `measuredFps: 24.4`, `tickerMinFps: 24`, nonzero visual interpolation, and no active LLM frame-pressure,
+  - visually inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-smooth-frame-loop.png`.
+- Closed status:
+  - projectiles are now explicitly visible in a mid-flight browser screenshot and covered by the item stat contract,
+  - remaining active-five work should continue with item 1, 2, 3, 4, or 5 only; item 6 graphics remains parked.
+
+### 2026-07-09 Factual Combat Opportunity Brief Slice
+
+- Closed active-five item 3 story:
+  - added a neutral `Combat opportunity brief` to the main and compact LLM prompts,
+  - the brief aggregates known contacts, active wars, own military count, field/siege split, visible foreign units, exact visible hostile structure ids with breach estimates, and visible raid/denial resource coordinates,
+  - raid/denial targets now rank conflict/hostile pressure first and scarce resources before raw pile size, so small iron/coal opportunities are not buried behind larger local gold piles,
+  - the prompt states the brief is evidence only and explicitly leaves the sovereign free to fight, negotiate, scout, defend, deceive, ignore, or prepare.
+- Strategy boundary:
+  - no attack, war, alliance, target, raid, or doctrine is selected by code,
+  - the simulator still executes only the LLM's authored legal orders,
+  - the brief raises salience of already-visible evidence instead of creating hidden knowledge or a preferred tactic.
+- Why battles may still be rare:
+  - sovereigns start encounter-scoped and do not know all other tribes until evidence reaches them,
+  - `ATTACK` requires visible/legal targets and an explicit LLM-authored order,
+  - the larger randomized map can delay contact,
+  - fallback behavior is conservative and will not invent wars.
+- QA completed:
+  - `pnpm exec tsc --noEmit` passed,
+  - focused LLM regression passed: `pnpm exec vitest run apps/client/src/llm.test.ts -t "siege targets|resource raid targets|fortification policy prose" --reporter verbose` with 3 passing tests,
+  - production build passed: `pnpm build` with the existing Vite large-chunk warning,
+  - browser building smoke passed: `SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:buildings`,
+  - building smoke evidence includes real war/siege/repair-interdiction events and the dedicated projectile screenshot,
+  - active-five smooth-frame gate passed on official rerun: `SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:smooth` reported `measuredFps: 29.2`, `tickerMinFps: 24`, nonzero visual interpolation, and no browser errors,
+  - visually inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-buildings.png`, `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-projectile.png`, and `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-smooth-frame-loop.png`.
+- Closed status:
+  - the combat-opportunity prompt story is closed,
+  - remaining active-five work should continue with items 1, 2, 3, 4, or 5 only; item 6 graphics remains parked unless explicitly reprioritized.
+
+### 2026-07-09 Gate Treaty Witness Memory Slice
+
+- Closed active-five item 4 story:
+  - added `gate_treaty_incident_witnessed` to the existing `ForeignObservationKind` stream,
+  - `recordGateTreatyIncident()` now appends bounded witness-only observation records for each direct-vision witness,
+  - witness observations preserve incident id, gate owner, affected tribe, packet id, gate action, gate id, position, and tick,
+  - witness observations deliberately keep treaty details unverified for the witness and do not expose treaty terms as truth,
+  - repeated treaty incidents append repeated observations, giving sovereigns a time-series memory instead of a one-off raw incident list,
+  - `formatForeignObservation()` now renders those observations in sovereign catch-up as witnessed gate incidents,
+  - `render_game_to_text()` exposes current-player observation metadata and observer-facing `gateTreatyWitnessObservations` for browser QA.
+- Strategy boundary:
+  - no automatic war, alliance, trust, punishment, reputation, or target choice was added,
+  - participant treaty incident records still exist separately; witnesses receive only observed gate behavior and unverified context,
+  - the LLM gets evidence it can interpret, ignore, question, lie about, escalate, or investigate on its own.
+- QA completed:
+  - `pnpm exec tsc --noEmit` passed,
+  - focused simulator regression passed: `pnpm exec vitest run packages/sim/src/sim.test.ts -t "records factual treaty incident evidence without hardcoding consequences" --reporter verbose`,
+  - focused LLM regression passed: `pnpm exec vitest run apps/client/src/llm.test.ts -t "freeform gate operations|witnessed gate incidents" --reporter verbose` with 2 passing tests,
+  - browser building smoke passed: `SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:buildings`, including the new `gateTreatyWitnessObservations` assertion from the forced gate-access/sabotage hook,
+  - active-five smooth-frame gate passed on rerun: `SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:smooth` reported `measuredFps: 28.9`, `tickerMinFps: 24`, nonzero visual interpolation, and no browser errors,
+  - generic web-game Playwright client passed against `http://127.0.0.1:5173/?qaCanvasReadback=1`,
+  - production build passed: `pnpm build` with the existing Vite large-chunk warning,
+  - visually inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-buildings.png`, `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-smooth-frame-loop.png`, and `/Users/benjaminpommeraud/Desktop/Sovereigns/output/web-game-readback/shot-0.png`.
+- Closed status:
+  - the witness-memory gate diplomacy story is closed,
+  - remaining item 4 work is saboteur discovery, multi-gate route terms, and richer visual marker states for active/revoked writs, detained couriers, tolls, sabotage, and incidents.
+
+### 2026-07-09 Pre-Build Fortification Preview Slice
+
+- Closed active-five item 2 story:
+  - added exported `previewFortificationBuild()` to resolve wall/gate/turret/watchtower placement before a sovereign commits resources,
+  - extracted the perimeter resolver so previews and real `BUILD` execution share geometry, site reservation, development checks, effective costs, affordability, and gate index handling,
+  - preview placement uses synthetic buildings to run the existing fortification route/blocking preview without mutating the live `GameState`,
+  - the preview reports plan kind, requested target, perimeter pattern/direction/length/gate index, cost, affordability, would-build counts by type, would-create ids, and the same route-impact `placementPreview` used after real construction,
+  - the browser perimeter hook now runs the pre-build preview first and fails if previewing changes resources, building count, or fortification-plan count,
+  - browser smoke asserts the five-segment wall/gate preview has four walls, one gate, four blocking tiles, one owner-passable gate, and route checks before the actual visible perimeter is built.
+- Strategy boundary:
+  - no fortification doctrine, target preference, wall shape, or build timing was added,
+  - the tool only exposes factual placement/cost/pathing consequences for an explicit sovereign-authored build order,
+  - sovereigns remain free to build, delay, negotiate, bluff, scout, redesign, or spend resources elsewhere.
+- QA completed:
+  - `pnpm exec tsc --noEmit` passed,
+  - focused simulator regression passed: `pnpm exec vitest run packages/sim/src/sim.test.ts -t "previews fortification placement|explicit multi-tile perimeter" --reporter verbose` with 2 passing tests,
+  - browser building smoke passed: `SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:buildings`, including pre-build no-mutation assertions and the existing visible wall/gate/projectile coverage,
+  - active-five smooth-frame gate passed: `SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:smooth` reported `measuredFps: 26.2`, `tickerMinFps: 24`, nonzero visual interpolation, and no browser errors,
+  - production build passed: `pnpm build` with the existing Vite large-chunk warning,
+  - generic web-game Playwright client passed against `http://127.0.0.1:5173/?qaCanvasReadback=1`,
+  - visually inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-buildings.png`, `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-projectile.png`, `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-smooth-frame-loop.png`, and `/Users/benjaminpommeraud/Desktop/Sovereigns/output/web-game-readback/shot-0.png`.
+- Closed status:
+  - the first pre-build fortification preview story is closed,
+  - remaining item 2 work is richer perimeter shapes beyond straight lines, broader pre-build preview surfaces for those authored shapes, and optional human confirmation only after the human play model is decided.
+
+### 2026-07-09 Ranged Projectile Visualization Slice
+
+- Closed active-five item 3/5 story:
+  - expanded `ProjectileType` from only `stone_shot` to `stone_shot`, `arrow`, and `turret_bolt`,
+  - archer attacks now emit short-lived `arrow` projectile entities when firing at units or buildings,
+  - turret attacks now emit short-lived `turret_bolt` projectile entities when firing at hostile units,
+  - archer and turret damage timing remains immediate as before; the new arrow/bolt projectiles are visual/stat evidence for the already-executed ranged shot, not a balance rewrite,
+  - projectiles now expose target kind, optional target building id, optional target unit id, optional origin unit/building id, and whether damage applies on impact,
+  - `render_game_to_text().visibleProjectiles` and browser projectile snapshots expose the new target/origin metadata and full combat stats,
+  - Pixi rendering now draws `arrow` as a visible shaft/head and `turret_bolt` as a bright fast bolt while keeping `stone_shot` as the heavier glowing artillery projectile,
+  - `window.force_ranged_projectiles_for_test()` creates a bounded archer/turret first-volley fixture, captures both projectile types, then cleans up the fixture so later smoke steps are not polluted.
+- Strategy boundary:
+  - no target selection doctrine, battle trigger, war trigger, or AI tactical preference was added,
+  - existing archer/turret combat rules still decide when a shot happens,
+  - this slice only makes already-legal ranged fire visible, statted, and testable.
+- QA completed:
+  - `pnpm exec tsc --noEmit` passed,
+  - focused simulator regression passed: `pnpm exec vitest run packages/sim/src/sim.test.ts -t "health, armor|catapults and fire visible projectiles|archer arrows and turret bolts" --reporter verbose` with 3 passing tests,
+  - browser building smoke passed: `SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:buildings`, including `projectileType: 3`, ranged projectile hook assertions, and a refreshed projectile screenshot,
+  - active-five smooth-frame gate passed: `SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:smooth` reported `measuredFps: 24.8`, `tickerMinFps: 24`, nonzero visual interpolation, and no browser errors,
+  - production build passed: `pnpm build` with the existing Vite large-chunk warning,
+  - generic web-game Playwright client passed against `http://127.0.0.1:5173/?qaCanvasReadback=1`,
+  - visually inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-projectile.png`, `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-buildings.png`, `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-smooth-frame-loop.png`, and `/Users/benjaminpommeraud/Desktop/Sovereigns/output/web-game-readback/shot-0.png`.
+- Closed status:
+  - visible arrow and turret-bolt projectile visualization is closed,
+  - remaining item 3 work is more nuanced per-unit role behavior and additional projectile/artillery variants beyond stone shot, arrow, and turret bolt,
+  - remaining item 5 work is to keep enforcing the stat contract on every future targetable or combat-effective item.
+
+### 2026-07-09 Projectile And Battle Visibility QA
+
+- Follow-up QA for the user question about visible arrows/bullets/projectiles and not seeing live battles:
+  - verified the simulator still registers three projectile types: `stone_shot`, `arrow`, and `turret_bolt`,
+  - verified `render_game_to_text().visibleProjectiles` exposes projectile type, origin, target, position, screen position, impact tick, and combat stats,
+  - verified Pixi rendering draws all live `game.projectiles` visible to the observer/player camera,
+  - visually inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-projectile.png`, `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-buildings.png`, and `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-smooth-frame-loop.png`.
+- Why organic battles may still be rare:
+  - projectile rendering is present, but projectiles only exist during real combat windows and are intentionally short-lived,
+  - battles require explicit `ATTACK` or resource-raid orders, visible/valid targets, available military units, hostile state, pathing into range, and non-cooldown attackers,
+  - fallback AI behavior remains conservative and does not invent wars,
+  - no treaty incident, resource pressure, or diplomatic insult automatically creates war; sovereigns receive evidence and must choose their own consequences.
+- QA completed:
+  - `pnpm exec vitest run packages/sim/src/sim.test.ts -t "projectile|archer|turret|attack|siege|resource raid" --reporter verbose` passed with 20 focused combat/projectile tests,
+  - `pnpm exec vitest run apps/client/src/llm.test.ts -t "combat opportunity|targetBuilding|resource raid|ranged|projectile" --reporter verbose` passed the matching focused LLM target/raid test,
+  - `SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:buildings` passed, including projectile screenshot capture and combat-stat coverage with `projectileType: 3`,
+  - `SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:smooth` passed at `measuredFps: 24.5`, `tickerMinFps: 24`, nonzero visual interpolation, and no browser errors beyond known WebGL readback warnings.
+- Remaining improvement:
+  - add observer-side combat discoverability, such as recent combat/projectile event surfacing or optional follow-first-combat camera behavior,
+  - run a longer live-AI war/raid soak to measure whether sovereigns choose attacks under real pressure,
+  - do not add an automatic war or attack policy unless the user explicitly chooses that world rule, because it would hardcode strategy instead of giving sovereigns evidence and tools.
+
+### 2026-07-09 Corner Perimeter Placement Slice
+
+- Closed active-five item 2 story:
+  - added explicit `perimeterPattern: "corner"` and `perimeterPattern: "gate_corner"` to the simulator perimeter resolver, LLM schema, prompts, and browser smoke hooks,
+  - `corner` creates an L-shaped multi-structure perimeter from the same `targetX`, `targetY`, `perimeterDirection`, and `perimeterLength` fields as straight lines,
+  - `gate_corner` creates the same L-shaped perimeter with one commanded gate segment selected by 1-based `perimeterGateIndex`, defaulting to the bend when the sovereign does not choose another segment,
+  - wall/gate/turret/watchtower corner perimeters reuse the existing development requirements, real costs, site reservation, group/segment records, and route/blocking placement preview,
+  - pre-build preview and real construction share the same corner resolver and browser smoke fails if previewing mutates resources, buildings, or fortification-plan records,
+  - browser `window.force_corner_perimeter_for_test()` builds a five-segment gated corner and returns non-collinearity, wall blocking, gate passability, preview, group id, plans, and event evidence,
+  - `scripts/smoke-building-visibility.mjs` now verifies the corner group through both the hook and `render_game_to_text().boardReadability.fortificationOverlay`.
+- Strategy boundary:
+  - no fortification doctrine, wall timing, target preference, or defensive pattern was hardcoded,
+  - `perimeterShape` stays LLM-authored rationale/prose and is not parsed into geometry,
+  - sovereigns get one more explicit placement tool and still decide independently whether, where, why, and when to use it.
+- QA completed:
+  - `pnpm exec tsc --noEmit` passed,
+  - focused simulator regression passed: `pnpm exec vitest run packages/sim/src/sim.test.ts -t "perimeter|fortification placement" --reporter verbose` with 6 passing tests,
+  - focused LLM regression passed: `pnpm exec vitest run apps/client/src/llm.test.ts -t "fortification|perimeter|gate operations" --reporter verbose` with 5 passing tests,
+  - browser building smoke passed: `SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:buildings`, including `cornerPerimeterState`, the existing visible wall/gate/tower/siege/projectile checks, and refreshed projectile/building screenshots,
+  - active-five smooth-frame gate passed: `SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:smooth` reported `measuredFps: 28.2`, `tickerMinFps: 24`, nonzero visual interpolation, and no browser errors beyond known WebGL readback warnings,
+  - production build passed: `pnpm build` with the existing Vite large-chunk warning,
+  - generic web-game Playwright client passed against `http://127.0.0.1:5173/?qaCanvasReadback=1`,
+  - visually inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-buildings.png`, `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-projectile.png`, and `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-smooth-frame-loop.png`.
+- Closed status:
+  - explicit L-shaped `corner` and `gate_corner` perimeter placement is closed,
+  - remaining item 2 work is richer perimeter shapes beyond straight lines and L corners, broader preview coverage for those future authored shapes, and optional human confirmation only after the human play model is decided.
+
+### 2026-07-09 Saboteur Discovery Evidence Slice
+
+- Closed active-five item 4 story:
+  - foreign gate sabotage now preserves the executing nearby unit id on active `gateSabotage` state for force-open/jam-shut actions,
+  - every gate sabotage history record now includes the gate operation id, target gate owner, and optional saboteur unit id,
+  - visible foreign sabotage emits a bounded `gate_sabotage_witnessed` scouting observation for the gate owner and direct-vision witnesses,
+  - the observation identifies the saboteur tribe/unit, unit type, gate id, gate owner, sabotage id, operation id, action, position, and tick,
+  - sovereign catch-up prompts now summarize those observations as factual sightings only,
+  - `render_game_to_text()` exposes the same data through player `foreignObservations` and observer-facing `gateSabotageWitnessObservations`,
+  - the gate access/sabotage browser hook now returns sabotage actor and witness ids so smoke can prove the browser snapshot sees the same evidence.
+- Strategy boundary:
+  - no automatic war, alliance break, punishment, trust score, reputation score, retaliation, or target choice was added,
+  - unseen sabotage can remain hidden from non-witnesses,
+  - AIs receive factual evidence and remain free to investigate, deny, lie, negotiate, retaliate, ignore, or ask for more information.
+- QA completed:
+  - `pnpm exec tsc --noEmit` passed,
+  - focused simulator regression passed: `pnpm exec vitest run packages/sim/src/sim.test.ts -t "foreign gate sabotage|treaty incident evidence|proximity for foreign gate sabotage" --reporter verbose` with 2 passing tests,
+  - focused LLM regression passed: `pnpm exec vitest run apps/client/src/llm.test.ts -t "witnessed gate incidents|witnessed gate sabotage|gate operations" --reporter verbose` with 3 passing tests,
+  - browser building smoke passed: `SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:buildings`, including sabotage actor identity, sabotage witness observations, treaty evidence, existing perimeter/projectile/siege/resource/repair checks, and refreshed screenshots,
+  - active-five smooth-frame gate passed: `SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:smooth` reported `measuredFps: 27.4`, `tickerMinFps: 24`, nonzero visual interpolation, and no browser errors beyond known WebGL readback warnings,
+  - production build passed: `pnpm build` with the existing Vite large-chunk warning,
+  - generic web-game Playwright client passed against `http://127.0.0.1:5173/?qaCanvasReadback=1`,
+  - visually inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-buildings.png`, `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-projectile.png`, and `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-smooth-frame-loop.png`.
+- Closed status:
+  - factual saboteur discovery for visible foreign gate sabotage is closed,
+  - remaining item 4 work is multi-gate route terms and richer visual states for active writs, revoked writs, detained couriers, tolls, sabotage, discoveries, and incidents.
+
+### 2026-07-09 Observer Combat Discoverability Slice
+
+- Closed active-five item 3 story:
+  - `GameEvent` now supports optional structured context for combat-relevant facts,
+  - projectile launches, projectile impacts, structure destruction, resource raid destruction, and messenger kills now preserve board coordinates, actor/target tribes, target ids, projectile type, and severity when available,
+  - `render_game_to_text()` now exposes bounded `recentCombatEvents` with screen coordinates,
+  - `boardReadability.combatOverlay` now exposes recent combat marker counts, marker ids, active projectile counts, active projectile types, and bounded marker payloads,
+  - the Pixi board draws lightweight pulse rings around recent visible combat events and currently visible projectiles,
+  - the existing event log now shows a compact recent-combat block so off-camera fights are easier to notice.
+- Strategy boundary:
+  - no automatic war, target choice, retaliation, fallback aggression, LLM prompt doctrine, cooldown, damage, pathing, or combat priority was changed,
+  - the slice is observer/readability instrumentation only,
+  - AIs still decide independently whether to attack, raid, negotiate, deceive, ignore, or prepare.
+- QA completed:
+  - `pnpm exec tsc --noEmit` passed,
+  - focused simulator regression passed: `pnpm exec vitest run packages/sim/src/sim.test.ts -t "projectile|archer arrows and turret bolts|catapults and fire visible projectiles" --reporter verbose` with 2 passing tests,
+  - browser building smoke passed: `SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:buildings`, including structured combat evidence, combat overlay markers, active projectile types, existing wall/gate/tower/siege/resource/repair checks, and refreshed screenshots,
+  - active-five smooth-frame gate passed: `SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:smooth` reported `measuredFps: 28.1`, `tickerMinFps: 24`, nonzero visual interpolation, and no browser errors beyond known WebGL readback warnings,
+  - shared web-game Playwright client passed against `http://127.0.0.1:5173/?qaCanvasReadback=1`,
+  - production build passed: `pnpm build` with the existing Vite large-chunk warning,
+  - `git diff --check` passed,
+  - visually inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-projectile.png`, `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-buildings.png`, `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-smooth-frame-loop.png`, and `/Users/benjaminpommeraud/Desktop/Sovereigns/output/web-game-readback/shot-0.png`.
+- Closed status:
+  - observer-side combat discoverability for real projectile/combat events is closed,
+  - remaining item 3 work is more nuanced per-unit role behaviors beyond current cover/escort/interdiction tools, longer live-AI war/raid soak evidence, and more projectile/artillery variants beyond stone shot, arrow, and turret bolt.
+
+### 2026-07-09 Total-Wealth, Private-Intelligence, Projectile Sprite, and FPS Slice
+
+- Closed active-five QA story spanning items 3, 4, 5, and the global performance gate:
+  - century-review ranking, culling, public pressure text, prompt wording, and post-game learning now use lowest total wealth, not wealth per capita,
+  - wealth per head remains visible as a diagnostic only and is no longer part of the secondary mandate score,
+  - `REQUEST_INFO` is now private intelligence to a sovereign's own clerks/scouts, not a peer conversation channel,
+  - peer-directed requests such as "please reveal your gold reserves" are rejected through `REQUEST_INFO` and must use physical `SEND_MESSENGER` chat,
+  - the observer panel was renamed from AI Info Requests to Private Intelligence so generated clerk answers are not mistaken for another sovereign's reply,
+  - projectile visuals now use pooled Pixi sprites for `stone_shot`, `arrow`, and `turret_bolt`, with browser telemetry exposing projectile texture counts and active/visible projectile sprite counts,
+  - Pixi rendering now disables antialiasing and caps device-pixel-ratio resolution at 1.5 for the RTS board,
+  - concurrent Ollama lanes are capped lower and all identity/first-doctrine/reply jobs respect frame-pressure throttling instead of bypassing it,
+  - the smooth-frame gate is now 25 FPS with `tickerMinFps: 25`.
+- Battle diagnosis:
+  - projectiles and combat rendering were already present, and smoke now proves arrows, turret bolts, and stone shots on screen,
+  - if a normal live game has no battles, the usual cause is that no live sovereign chose an executable `ATTACK`, raid, or siege, or that tribes were not hostile/in range,
+  - no fallback aggression, auto-war, target doctrine, trust score, or retaliation logic was added.
+- QA completed:
+  - `pnpm exec tsc --noEmit` passed,
+  - focused simulator regression passed: `pnpm exec vitest run packages/sim/src/sim.test.ts -t "lowest total wealth|lowest-total-wealth|private REQUEST_INFO|survival mandate" --reporter verbose` with 4 passing tests,
+  - focused prompt/reply regression passed: `pnpm exec vitest run apps/client/src/llm.test.ts -t "existential death|REQUEST_INFO|reply" --reporter verbose` with 9 passing tests,
+  - focused projectile regression passed: `pnpm exec vitest run packages/sim/src/sim.test.ts -t "projectile|archer arrows and turret bolts|catapults and fire visible projectiles" --reporter verbose` with 2 passing tests,
+  - smoke syntax check passed: `node --check scripts/smoke-building-visibility.mjs && node --check scripts/smoke-smooth-frame-loop.mjs`,
+  - browser building/projectile smoke passed: `SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:buildings`, including projectile sprite telemetry and refreshed screenshots,
+  - smooth-frame gate passed: `SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:smooth` reported `measuredFps: 36`, `tickerMinFps: 25`, nonzero visual interpolation, and no browser errors beyond known WebGL screenshot readback warnings,
+  - production build passed: `pnpm build` with the existing Vite large-chunk warning,
+  - `git diff --check` passed,
+  - visually inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-projectile.png` and `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-smooth-frame-loop.png`.
+- Closed status:
+  - total-wealth review semantics are closed,
+  - private intelligence versus peer messenger chat separation is closed,
+  - projectile sprite rendering and telemetry are closed,
+  - the active performance gate is now 25 FPS,
+  - remaining item 3 work is long-run live-AI war/raid soak and richer combat roles/variants,
+  - remaining item 4 work is multi-gate route terms and richer gate-diplomacy visual states.
+
+### 2026-07-09 Gate-Diplomacy Marker State Slice
+
+- Closed active-five item 4 story:
+  - `render_game_to_text().boardReadability.fortificationOverlay.visualOverlayMarkers` now exposes bounded marker families for active writ gates, revoked writ gates, detained-courier gates, toll gates, treaty-incident gates, sabotage gates, and discovery gates,
+  - the marker families are derived only from existing structured state: active access treaties, access treaty revokes, gate operations, detained packet state, treaty incidents, sabotage history, active sabotage, and foreign observations,
+  - Pixi defense overlay drawing now adds small gate badges for revoked writ history, toll evidence, detained-courier evidence, treaty incidents, witnessed discoveries, and recent sabotage history in addition to the existing active writ, operation, lock, safe-passage, and active-sabotage badges,
+  - browser smoke now asserts the new marker ids on the existing grant/revoke/detain/sabotage fixture.
+- Strategy boundary:
+  - no simulation rule, passability rule, trust score, reputation, war trigger, retaliation, alliance change, target selection, or AI prompt doctrine was added,
+  - this is observer/readability instrumentation only; sovereigns still decide what the evidence means.
+- QA completed:
+  - `pnpm exec tsc --noEmit` passed,
+  - `node --check scripts/smoke-building-visibility.mjs` passed,
+  - browser building smoke passed: `SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:buildings`, including `visualOverlayMarkers.revokedWritGateIds`, `detainedCourierGateIds`, `tollGateIds`, `treatyIncidentGateIds`, `sabotageGateIds`, and `discoveryGateIds`,
+  - active-five smooth-frame gate passed: `SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:smooth` reported `measuredFps: 30.1`, `tickerMinFps: 25`, nonzero visual interpolation, and no browser errors beyond known WebGL screenshot readback warnings,
+  - production build passed: `pnpm build` with the existing Vite large-chunk warning,
+  - shared web-game Playwright client passed against `http://127.0.0.1:5173/?qaCanvasReadback=1`,
+  - visually inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-buildings.png`, `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-smooth-frame-loop.png`, and `/Users/benjaminpommeraud/Desktop/Sovereigns/output/web-game-readback/shot-0.png`.
+- Closed status:
+  - richer gate-diplomacy visual marker states are closed,
+  - remaining item 4 work is multi-gate route terms plus longer live-AI negotiation evidence,
+  - recommended next active-five story is item 1 roadmap-to-effects specialization, based on the read-only development-tree scan,
+  - recommended item 3 story after that is a QA-only live-AI war/raid pressure soak that measures LLM-chosen attacks without injecting fallback aggression.
+
+### 2026-07-09 Generated-Development Effect Specialization Slice
+
+- Closed active-five item 1 story:
+  - generated `SW-*` roadmap developments now infer additional deterministic effects from institution semantics, not only broad category,
+  - tax/tithe/levy nodes add predictable yearly revenue plus household-burden pressure,
+  - trade/tariff/market/guild/corridor nodes add commercial wealth, resource-control pressure, and courier/trader speed,
+  - bank/bond/credit/treasury/currency nodes add capital reserves and debt/panic exposure,
+  - slavery/forced-labor/quota/procurement nodes add coercive construction/repair output plus legitimacy/safety costs,
+  - public-information, controlled-media, law-enforcement, safe-conduct, fortress, siege, ranged-defense, and transport semantics now produce narrower mechanical effects,
+  - `developmentEffectMatchesTarget()` now supports target buckets for `courier`, `watch`, `ranged`, `ranged_defense`, `siege`, `law_enforcement`, and `defensive_building`.
+- Strategy boundary:
+  - no AI build order, utility score, doctrine, recommendation, or scripted strategy was added,
+  - sovereigns still choose, delay, reject, negotiate, or lie about developments through their own prompts and messages,
+  - this only gives the world more differentiated consequences when a sovereign explicitly chooses a development.
+- QA completed:
+  - `pnpm exec tsc --noEmit` passed,
+  - focused simulator regression passed: `pnpm exec vitest run packages/sim/src/sim.test.ts -t "development tree|generated roadmap" --reporter verbose` with 4 passing tests,
+  - active-five smooth-frame gate passed: `SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:smooth` reported `measuredFps: 31.9`, `tickerMinFps: 25`, nonzero visual interpolation, and no browser errors beyond known WebGL screenshot readback warnings,
+  - production build passed: `pnpm build` with the existing Vite large-chunk warning,
+  - visually inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-smooth-frame-loop.png`.
+- Closed status:
+  - first generated-development effect specialization story is closed,
+  - remaining item 1 work is broader long-run balance, more explicit branch counter-effects, and better observer comparison/search UX,
+  - next recommended active-five story is item 3 QA-only live-AI war/raid pressure soak, then item 4 multi-gate route terms.
+
+### 2026-07-09 Frame-Loop Decoupling And Active-AI Smoothness Closure
+
+- Closed the active-five performance blocker raised by the user:
+  - simulation ticks no longer call `scheduleLlmReply()` / `scheduleLlmDecision()` directly from the Pixi ticker path,
+  - LLM work is queued through a post-frame pump so the browser can paint before prompt/request startup work begins,
+  - each pump starts at most one LLM job, and possible second-lane launches are spaced by 1200 ms so FPS metrics can react before more local-model load is added,
+  - `maxConcurrentLlmJobs()` now drops to one unless the browser is comfortably near 60 FPS, while still preserving per-tribe model diversity across sequential turns,
+  - `window.render_motion_probe_for_test()` and `window.reset_motion_probe_for_test()` expose a lightweight ticker-owned motion cadence probe, avoiding the old heavy full-state telemetry loop for smoothness QA,
+  - `scripts/smoke-smooth-frame-loop.mjs` now waits for an active mocked Ollama lane and proves multiple rendered frames per simulation tick, same-tick visual motion, `maxTickerDeltaMs <= 160`, and `measuredFps >= 25`.
+- QA completed:
+  - `pnpm exec tsc --noEmit` passed,
+  - `node --check scripts/smoke-smooth-frame-loop.mjs` passed,
+  - active-AI smooth-frame smoke passed: `SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:smooth` reported an active LLM lane, `minMeasuredFps: 42.6`, `maxTickerDeltaMs: 40`, `averageFramesPerTick: 5.39`, `sameTickMotionFrames: 123`, and `snapTickChanges: 0`,
+  - production build passed: `pnpm build` with the existing Vite large-chunk warning,
+  - shared web-game Playwright client passed against `http://127.0.0.1:5173/?qaCanvasReadback=1`,
+  - visually inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/output/web-game-readback/shot-0.png`.
+- Closed status:
+  - the one-frame-per-turn regression is now covered by a stronger active-AI cadence gate,
+  - remaining performance risk is real Ollama CPU/GPU contention during long multi-model runs, which should be watched with the same smoke gate and browser telemetry during the next live-AI soak.
+
+### 2026-07-09 Multi-Gate Route Terms Slice
+
+- Closed active-five item 4 story:
+  - `GATE_OPERATION` access-treaty grants/revokes now preserve `gateRouteName`, `gateRouteGateIds`, and `gateRouteTerms`,
+  - a named route across multiple owned living gates creates one per-gate treaty record under a shared `routeId`,
+  - route grants make only the listed owned gates passable for the counterparty while active,
+  - route revokes create matching per-gate revoke records and remove passability from every listed gate,
+  - foreign, non-gate, missing, or destroyed route gates are rejected instead of silently creating a bad route,
+  - safe-passage courier memory now records shared route ids, route names, treaty names, used route gates, unused route gates, and route terms,
+  - sovereign prompts expose exact owned gate ids as route inputs and summarize route treaty metadata,
+  - selected-gate UI and `render_game_to_text()` expose active route treaty metadata,
+  - browser smoke now proves two real owned gates share the route id, route terms, route gate list, courier route memory, grant, revoke, and route passability transitions.
+- Strategy boundary:
+  - no trust score, reputation, retaliation, fallback aggression, target choice, automatic war, alliance behavior, or diplomacy outcome logic was added,
+  - this gives sovereigns an explicit gate-route tool and factual evidence; they still decide whether to negotiate, lie, honor, exploit, revoke, sabotage, ignore, or attack.
+- QA completed:
+  - `pnpm exec tsc --noEmit` passed,
+  - focused simulator regression passed: `pnpm exec vitest run packages/sim/src/sim.test.ts -t "safe-passage|multi-gate|non-owned|destroyed gates|gate access" --reporter verbose` with 3 passing tests,
+  - focused LLM regression passed: `pnpm exec vitest run apps/client/src/llm.test.ts -t "gate operations" --reporter verbose` with 1 passing test,
+  - smoke syntax check passed: `node --check scripts/smoke-building-visibility.mjs && node --check scripts/smoke-smooth-frame-loop.mjs`,
+  - browser building smoke passed: `SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:buildings`, including shared multi-gate route id, route gate ids, route terms, route memory, grant/revoke, and existing wall/gate/projectile/repair coverage,
+  - active-five smooth-frame gate passed: `SOVEREIGNS_URL=http://127.0.0.1:5173/ pnpm smoke:smooth` reported an active mocked LLM lane, `minMeasuredFps: 42.1`, `maxTickerDeltaMs: 40`, `averageFramesPerTick: 5.56`, `sameTickMotionFrames: 123`, and `snapTickChanges: 0`,
+  - production build passed: `pnpm build` with the existing Vite large-chunk warning,
+  - shared web-game Playwright client passed against `http://127.0.0.1:5173/?qaCanvasReadback=1`,
+  - full regression suite passed: `pnpm test` with 174 passing tests,
+  - visually inspected `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-buildings.png`, `/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-smooth-frame-loop.png`, and `/Users/benjaminpommeraud/Desktop/Sovereigns/output/web-game-readback/shot-0.png`.
+- Closed status:
+  - multi-gate route terms are closed,
+  - remaining item 4 work is longer live-AI negotiation evidence that sovereigns invent, bargain over, exploit, and honor complex gate arrangements without scripted strategy,
+  - next recommended active-five story is the item 3 live-AI war/raid soak evidence collector, then item 1 long-run development-tree balance/comparison UX.

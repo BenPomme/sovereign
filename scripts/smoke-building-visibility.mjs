@@ -5,6 +5,9 @@ const url = process.env.SOVEREIGNS_URL ?? "http://localhost:5173/";
 const screenshotPath =
   process.env.SOVEREIGNS_BUILDING_SMOKE_SCREENSHOT ??
   "/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-buildings.png";
+const projectileScreenshotPath =
+  process.env.SOVEREIGNS_PROJECTILE_SMOKE_SCREENSHOT ??
+  "/Users/benjaminpommeraud/Desktop/Sovereigns/sovereign-worlds-projectile.png";
 
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1440, height: 940 } });
@@ -170,11 +173,21 @@ for (const type of ["farm", "watchtower", "wall", "gate", "turret"]) {
   }
 }
 const perimeterState = await assertPerimeterBuild(page);
+const cornerPerimeterState = await assertCornerPerimeterBuild(page);
+const towerPerimeterState = await assertTowerPerimeterBuild(page);
 const siegeStates = [];
 for (const type of ["wall", "gate", "turret"]) {
   siegeStates.push(await assertExplicitSiegeOrder(page, type));
 }
+const multiTargetSiegeState = await assertMultiTargetSiegeOrder(page);
 const siegeEngineState = await assertSiegeEngineOrder(page);
+const projectileVisualState = await assertProjectileVisual(page);
+const rangedProjectileVisualState = await assertRangedProjectileVisuals(page);
+await page.screenshot({ path: projectileScreenshotPath, fullPage: true });
+const projectileScreenshot = await stat(projectileScreenshotPath);
+if (projectileScreenshot.size < 50_000) {
+  throw new Error(`Projectile visibility screenshot looks too small: ${projectileScreenshot.size} bytes`);
+}
 const artilleryState = await assertArtilleryOrder(page);
 const retreatState = await assertRetreatOrder(page);
 const coordinatedFeintState = await assertCoordinatedFeintOrder(page);
@@ -184,6 +197,7 @@ const civilizationMergerState = await assertCivilizationMerger(page);
 const damageState = await assertDamageVisualization(page);
 const repairState = await assertRepairOrder(page);
 const repairUnderFireState = await assertRepairUnderFire(page);
+const repairInterdictionState = await assertRepairInterdiction(page);
 const finalCombatStatCoverage = await page.evaluate(() => JSON.parse(window.render_game_to_text()).combatStatCoverage);
 if (!finalCombatStatCoverage?.ok) {
   throw new Error(`Combat stat coverage failed after siege/raid/repair flow: ${JSON.stringify(finalCombatStatCoverage)}`);
@@ -207,15 +221,22 @@ console.log(
       url,
       screenshotPath,
       screenshotBytes: screenshot.size,
+      projectileScreenshotPath,
+      projectileScreenshotBytes: projectileScreenshot.size,
       seedState,
       buildingState,
       gateOperationState,
       gateRansomState,
       gateAccessSabotageState,
       perimeterState,
+      cornerPerimeterState,
+      towerPerimeterState,
       siegeStates,
+      multiTargetSiegeState,
       siegeEngineState,
-      artilleryState,
+  projectileVisualState,
+  rangedProjectileVisualState,
+  artilleryState,
       retreatState,
       coordinatedFeintState,
       resourceRaidState,
@@ -224,6 +245,7 @@ console.log(
       damageState,
       repairState,
       repairUnderFireState,
+      repairInterdictionState,
       finalCombatStatCoverage
     },
     null,
@@ -481,13 +503,15 @@ async function assertGateOperation(page) {
   if (
     state.overlay?.operatedGateCount < 1 ||
     !state.overlay?.operatedGateIds?.includes(state.selected.id) ||
-    state.overlay?.visualOverlayMarkers?.operatedGateMarkers < 1 ||
-    !state.overlay?.visualOverlayMarkers?.operatedGateIds?.includes(state.selected.id) ||
-    state.overlay?.visualOverlayMarkers?.safePassageMarkers < 1 ||
-    !state.overlay?.visualOverlayMarkers?.safePassageGateIds?.includes(state.selected.id)
-  ) {
-    throw new Error(`Fortification overlay did not expose the operated gate: ${JSON.stringify({ result, state })}`);
-  }
+	    state.overlay?.visualOverlayMarkers?.operatedGateMarkers < 1 ||
+	    !state.overlay?.visualOverlayMarkers?.operatedGateIds?.includes(state.selected.id) ||
+	    state.overlay?.visualOverlayMarkers?.safePassageMarkers < 1 ||
+	    !state.overlay?.visualOverlayMarkers?.safePassageGateIds?.includes(state.selected.id) ||
+	    state.overlay?.visualOverlayMarkers?.tollMarkers < 1 ||
+	    !state.overlay?.visualOverlayMarkers?.tollGateIds?.includes(state.selected.id)
+	  ) {
+	    throw new Error(`Fortification overlay did not expose the operated gate: ${JSON.stringify({ result, state })}`);
+	  }
   return { hook: result, selected: state.selected, latest: state.latest };
 }
 
@@ -537,18 +561,38 @@ async function assertGateAccessSabotage(page) {
   if (!result.ok) throw new Error(`Gate access/sabotage hook failed: ${JSON.stringify(result)}`);
   if (
     result.redPassableBefore !== false ||
+    result.redRoutePassableBefore !== false ||
     result.redPassableAfterGrant !== true ||
+    result.redRoutePassableAfterGrant !== true ||
     result.redPassableAfterRevoke !== false ||
+    result.redRoutePassableAfterRevoke !== false ||
+    !result.grantRouteId ||
+    !result.grantRouteGateIds?.includes(result.buildingId) ||
+    !result.grantRouteGateIds?.includes(result.routeGateId) ||
+    result.grantRouteTreatyIds?.length !== 2 ||
+    result.revokeRouteTreatyIds?.length !== 2 ||
     !result.treatyPacketGateIds?.includes(result.buildingId) ||
-    !result.treatyPacketRouteMemory?.some((entry) => entry.includes(result.grantTreatyId) && entry.includes("Smoke road writ")) ||
+    !result.treatyPacketRouteMemory?.some(
+      (entry) =>
+        entry.includes(`Safe-passage route ${result.grantRouteId}`) &&
+        entry.includes("Smoke two-gate road") &&
+        entry.includes("Smoke road writ") &&
+        entry.includes(result.buildingId) &&
+        entry.includes(result.routeGateId) &&
+        entry.includes("both smoke route gates")
+    ) ||
     !result.treatyPacketRouteMemory?.some((entry) => entry.includes(result.treatyIncidentId) && entry.includes("detain")) ||
     result.treatyIncidentAction !== "detain" ||
     !result.treatyIncidentParticipants?.includes("blue") ||
     !result.treatyIncidentParticipants?.includes("red") ||
-    !result.treatyIncidentWitnesses?.includes("green") ||
-    result.redPassableAfterSabotage !== true ||
+	    !result.treatyIncidentWitnesses?.includes("green") ||
+    result.treatyWitnessObservationCount < 1 ||
+	    result.redPassableAfterSabotage !== true ||
     result.redPassableAfterSabotageExpires !== false ||
     result.sabotageAction !== "force_open" ||
+    !result.sabotageRecordId ||
+    !result.sabotageSaboteurUnitId ||
+    result.sabotageWitnessObservationCount < 1 ||
     !(result.damageAfter < result.damageBefore) ||
     !result.eventTypes?.includes("GATE_ACCESS_TREATY_GRANTED") ||
     !result.eventTypes?.includes("GATE_TREATY_INCIDENT_RECORDED") ||
@@ -559,49 +603,111 @@ async function assertGateAccessSabotage(page) {
   ) {
     throw new Error(`Gate access treaty/sabotage transitions were not proven: ${JSON.stringify(result)}`);
   }
-  const state = await page.evaluate(({ buildingId, grantTreatyId, revokeTreatyId, treatyPacketId, treatyIncidentId }) => {
+  const state = await page.evaluate(({ buildingId, routeGateId, grantTreatyId, grantRouteId, grantRouteTreatyIds, revokeTreatyId, treatyPacketId, treatyIncidentId }) => {
     const parsed = JSON.parse(window.render_game_to_text());
     const selected = parsed.visibleBuildings.find((building) => building.id === buildingId);
+    const routeGate = parsed.visibleBuildings.find((building) => building.id === routeGateId);
     const grant = parsed.recentGateAccessTreaties?.find((treaty) => treaty.id === grantTreatyId);
+    const routeTreaties = parsed.recentGateAccessTreaties?.filter((treaty) => grantRouteTreatyIds?.includes(treaty.id)) ?? [];
+    const sameRouteTreaties = parsed.recentGateAccessTreaties?.filter((treaty) => treaty.routeId === grantRouteId && treaty.action === "grant") ?? [];
     const revoke = parsed.recentGateAccessTreaties?.find((treaty) => treaty.id === revokeTreatyId);
     const incident = parsed.recentGateTreatyIncidents?.find((entry) => entry.id === treatyIncidentId);
     const treatyPacket = parsed.packets?.find((packet) => packet.id === treatyPacketId);
     const sabotage = parsed.recentGateSabotageHistory?.at(-1);
     const latest = parsed.recentGateOperations?.at(-1);
     const overlay = parsed.boardReadability?.fortificationOverlay;
-    const panel = document.querySelector("#selectedPanel")?.textContent ?? "";
-    return { selected, grant, revoke, incident, treatyPacket, sabotage, latest, overlay, panel };
-  }, result);
+    const witnessObservations = parsed.gateTreatyWitnessObservations ?? [];
+    const sabotageWitnessObservations = parsed.gateSabotageWitnessObservations ?? [];
+	    const panel = document.querySelector("#selectedPanel")?.textContent ?? "";
+    return { selected, routeGate, grant, routeTreaties, sameRouteTreaties, revoke, incident, treatyPacket, sabotage, latest, overlay, witnessObservations, sabotageWitnessObservations, panel };
+	  }, result);
   if (state.grant?.action !== "grant" || state.revoke?.action !== "revoke") {
     throw new Error(`render_game_to_text did not expose grant/revoke treaty records: ${JSON.stringify({ result, state })}`);
   }
-  if (!state.treatyPacket?.routeMemory?.some((entry) => entry.includes(result.grantTreatyId) && entry.includes("Smoke road writ"))) {
-    throw new Error(`render_game_to_text did not expose safe-passage treaty route evidence: ${JSON.stringify({ result, state })}`);
+  if (
+    state.routeTreaties.length !== 2 ||
+    state.sameRouteTreaties.length < 2 ||
+    !state.routeTreaties.every((treaty) => treaty.routeId === result.grantRouteId) ||
+    !state.routeTreaties.every((treaty) => treaty.routeName === "Smoke two-gate road") ||
+    !state.routeTreaties.every((treaty) => treaty.routeTerms === result.grantRouteTerms) ||
+    !state.routeTreaties.every((treaty) => treaty.routeGateIds?.includes(result.buildingId) && treaty.routeGateIds?.includes(result.routeGateId))
+  ) {
+    throw new Error(`render_game_to_text did not expose shared multi-gate route treaty metadata: ${JSON.stringify({ result, state })}`);
+  }
+  if (!state.routeGate || state.routeGate.type !== "gate") {
+    throw new Error(`render_game_to_text did not expose the second route gate: ${JSON.stringify({ result, state })}`);
   }
   if (
-    state.incident?.action !== "detain" ||
+    !state.treatyPacket?.routeMemory?.some(
+      (entry) =>
+        entry.includes(`Safe-passage route ${result.grantRouteId}`) &&
+        entry.includes("Smoke two-gate road") &&
+        entry.includes("Smoke road writ") &&
+        entry.includes(result.buildingId) &&
+        entry.includes(result.routeGateId) &&
+        entry.includes("both smoke route gates")
+    )
+  ) {
+    throw new Error(`render_game_to_text did not expose multi-gate safe-passage route evidence: ${JSON.stringify({ result, state })}`);
+  }
+	  if (
+	    state.incident?.action !== "detain" ||
     state.incident?.treatyId !== result.grantTreatyId ||
     state.incident?.packetId !== result.treatyPacketId ||
     !state.incident?.participantTribeIds?.includes("blue") ||
     !state.incident?.participantTribeIds?.includes("red") ||
     !state.incident?.witnessTribeIds?.includes("green")
-  ) {
-    throw new Error(`render_game_to_text did not expose treaty incident evidence: ${JSON.stringify({ result, state })}`);
+	  ) {
+	    throw new Error(`render_game_to_text did not expose treaty incident evidence: ${JSON.stringify({ result, state })}`);
+	  }
+  const matchingWitnessObservations = state.witnessObservations.filter(
+    (observation) =>
+      observation.observerTribeId === "green" &&
+      observation.gateTreatyIncidentId &&
+      result.treatyIncidentIds?.includes(observation.gateTreatyIncidentId) &&
+      observation.gateIncidentAction === "detain" &&
+      observation.gateOwnerTribeId === "blue" &&
+      observation.affectedTribeId === "red" &&
+      observation.buildingId === result.buildingId
+  );
+  if (matchingWitnessObservations.length < 1) {
+    throw new Error(`render_game_to_text did not expose gate treaty witness observations: ${JSON.stringify({ result, state })}`);
   }
   if (state.sabotage?.action !== "damage" || state.latest?.sabotageAction !== "damage") {
     throw new Error(`render_game_to_text did not expose sabotage history/operation: ${JSON.stringify({ result, state })}`);
   }
+  if (state.sabotage?.id !== result.sabotageRecordId || state.sabotage?.saboteurUnitId !== result.sabotageSaboteurUnitId) {
+    throw new Error(`render_game_to_text did not expose sabotage actor identity: ${JSON.stringify({ result, state })}`);
+  }
+  const matchingSabotageWitnessObservations = state.sabotageWitnessObservations.filter(
+    (observation) =>
+      observation.observerTribeId === "blue" &&
+      observation.gateSabotageId === result.sabotageRecordId &&
+      observation.gateSabotageAction === "damage" &&
+      observation.gateOwnerTribeId === "blue" &&
+      observation.saboteurTribeId === "red" &&
+      observation.saboteurUnitId === result.sabotageSaboteurUnitId &&
+      observation.gateBuildingId === result.buildingId
+  );
+  if (matchingSabotageWitnessObservations.length < 1) {
+    throw new Error(`render_game_to_text did not expose sabotage witness observations: ${JSON.stringify({ result, state })}`);
+  }
   if (!state.selected?.gateOperation || !state.panel.includes("sabotage damage")) {
     throw new Error(`Selected gate panel did not expose sabotage operation: ${JSON.stringify({ result, state })}`);
   }
-  if (
-    state.overlay?.operatedGateCount < 1 ||
-    !state.overlay?.operatedGateIds?.includes(result.buildingId) ||
-    state.overlay?.recentSabotageHistoryCount < result.sabotageHistoryCount ||
-    !state.overlay?.sabotageHistoryGateIds?.includes(result.buildingId)
-  ) {
-    throw new Error(`Fortification overlay did not expose gate operation/sabotage history: ${JSON.stringify({ result, state })}`);
-  }
+	  if (
+	    state.overlay?.operatedGateCount < 1 ||
+	    !state.overlay?.operatedGateIds?.includes(result.buildingId) ||
+	    state.overlay?.recentSabotageHistoryCount < result.sabotageHistoryCount ||
+	    !state.overlay?.sabotageHistoryGateIds?.includes(result.buildingId) ||
+	    !state.overlay?.visualOverlayMarkers?.revokedWritGateIds?.includes(result.buildingId) ||
+	    !state.overlay?.visualOverlayMarkers?.detainedCourierGateIds?.includes(result.buildingId) ||
+	    !state.overlay?.visualOverlayMarkers?.treatyIncidentGateIds?.includes(result.buildingId) ||
+	    !state.overlay?.visualOverlayMarkers?.sabotageGateIds?.includes(result.buildingId) ||
+	    !state.overlay?.visualOverlayMarkers?.discoveryGateIds?.includes(result.buildingId)
+	  ) {
+	    throw new Error(`Fortification overlay did not expose gate operation/sabotage history: ${JSON.stringify({ result, state })}`);
+	  }
   return { hook: result, grant: state.grant, revoke: state.revoke, sabotage: state.sabotage, selected: state.selected };
 }
 
@@ -621,11 +727,23 @@ async function assertPerimeterBuild(page) {
     result.gateIndex !== 3 ||
     result.wallBlocks !== true ||
     result.gatePassable !== true ||
+    result.prebuildPreviewOk !== true ||
+    result.prebuildResourcesUnchanged !== true ||
+    result.prebuildBuildingCountUnchanged !== true ||
+    result.prebuildPlanCountUnchanged !== true ||
+    result.prebuildPreview?.planKind !== "perimeter" ||
+    result.prebuildPreview?.affordable !== true ||
+    result.prebuildPreview?.wouldBuildCount !== 5 ||
+    result.prebuildPreview?.wouldBuildTypes?.wall !== 4 ||
+    result.prebuildPreview?.wouldBuildTypes?.gate !== 1 ||
+    result.prebuildPreview?.placementPreview?.blockingTileCount !== 4 ||
+    result.prebuildPreview?.placementPreview?.ownerGatePassableCount !== 1 ||
+    result.prebuildPreview?.placementPreview?.routeChecks?.length < 2 ||
     result.placementPreview?.blockingTileCount !== 4 ||
     result.placementPreview?.ownerGatePassableCount !== 1 ||
     result.placementPreview?.routeChecks?.length < 2
   ) {
-    throw new Error(`Perimeter hook did not build a visible blocking wall/gate line: ${JSON.stringify(result)}`);
+    throw new Error(`Perimeter hook did not preview and build a visible blocking wall/gate line: ${JSON.stringify(result)}`);
   }
   if (!result.recentEvents?.some((event) => event.includes("FORTIFICATION_PERIMETER_BUILT") && event.includes("5 structures"))) {
     throw new Error(`Perimeter hook did not emit perimeter build evidence: ${JSON.stringify(result)}`);
@@ -681,6 +799,167 @@ async function assertPerimeterBuild(page) {
   return { hook: result, selected: state.selected, planCount: state.planCount, overlayGroup: state.group };
 }
 
+async function assertCornerPerimeterBuild(page) {
+  const result = await page.evaluate(() => {
+    if (typeof window.force_corner_perimeter_for_test !== "function") return { ok: false, reason: "missing corner perimeter hook" };
+    return window.force_corner_perimeter_for_test();
+  });
+  const previewTiles = result.prebuildPreview?.placementPreview?.resolvedTiles ?? [];
+  const placementTiles = result.placementPreview?.resolvedTiles ?? [];
+  const previewNonCollinear = new Set(previewTiles.map((tile) => tile.x)).size > 1 && new Set(previewTiles.map((tile) => tile.y)).size > 1;
+  const placementNonCollinear = new Set(placementTiles.map((tile) => tile.x)).size > 1 && new Set(placementTiles.map((tile) => tile.y)).size > 1;
+  if (
+    !result.ok ||
+    result.wallCount !== 4 ||
+    result.gateCount !== 1 ||
+    result.planCount !== 5 ||
+    result.pattern !== "gate_corner" ||
+    result.direction !== "east_west" ||
+    result.length !== 5 ||
+    result.gateIndex !== 3 ||
+    result.nonCollinear !== true ||
+    result.wallBlocks !== true ||
+    result.gatePassable !== true ||
+    result.prebuildPreviewOk !== true ||
+    result.prebuildResourcesUnchanged !== true ||
+    result.prebuildBuildingCountUnchanged !== true ||
+    result.prebuildPlanCountUnchanged !== true ||
+    result.prebuildPreview?.planKind !== "perimeter" ||
+    result.prebuildPreview?.perimeterPattern !== "gate_corner" ||
+    result.prebuildPreview?.perimeterDirection !== "east_west" ||
+    result.prebuildPreview?.perimeterLength !== 5 ||
+    result.prebuildPreview?.perimeterGateIndex !== 3 ||
+    result.prebuildPreview?.wouldBuildCount !== 5 ||
+    result.prebuildPreview?.wouldBuildTypes?.wall !== 4 ||
+    result.prebuildPreview?.wouldBuildTypes?.gate !== 1 ||
+    result.prebuildPreview?.placementPreview?.blockingTileCount !== 4 ||
+    result.prebuildPreview?.placementPreview?.ownerGatePassableCount !== 1 ||
+    result.prebuildPreview?.placementPreview?.routeChecks?.length < 2 ||
+    previewNonCollinear !== true ||
+    result.placementPreview?.blockingTileCount !== 4 ||
+    result.placementPreview?.ownerGatePassableCount !== 1 ||
+    result.placementPreview?.routeChecks?.length < 2 ||
+    placementNonCollinear !== true
+  ) {
+    throw new Error(`Corner perimeter hook did not preview and build a visible blocking wall/gate bend: ${JSON.stringify(result)}`);
+  }
+  if (!result.recentEvents?.some((event) => event.includes("FORTIFICATION_PERIMETER_BUILT") && event.includes("gate_corner"))) {
+    throw new Error(`Corner perimeter hook did not emit gate_corner build evidence: ${JSON.stringify(result)}`);
+  }
+  const state = await page.evaluate(({ buildingIds, groupId }) => {
+    const parsed = JSON.parse(window.render_game_to_text());
+    const selected = parsed.visibleBuildings.find((building) => building.id === parsed.selected.buildingId);
+    const plans = parsed.recentFortificationPlans?.filter((plan) => plan.perimeterGroupId === groupId);
+    const overlay = parsed.boardReadability?.fortificationOverlay;
+    const group = overlay?.perimeterGroups?.find((candidate) => candidate.groupId === groupId);
+    const planTiles = plans?.[0]?.placementPreview?.resolvedTiles ?? [];
+    const groupTiles = group?.placementPreview?.resolvedTiles ?? [];
+    const panel = document.querySelector("#selectedPanel")?.textContent ?? "";
+    return {
+      selected,
+      overlay,
+      group,
+      panel,
+      planCount: plans?.length ?? 0,
+      planPlacementPreview: plans?.[0]?.placementPreview,
+      planNonCollinear: new Set(planTiles.map((tile) => tile.x)).size > 1 && new Set(planTiles.map((tile) => tile.y)).size > 1,
+      groupNonCollinear: new Set(groupTiles.map((tile) => tile.x)).size > 1 && new Set(groupTiles.map((tile) => tile.y)).size > 1,
+      matchingVisibleBuildings: parsed.visibleBuildings.filter((building) => buildingIds.includes(building.id)).length
+    };
+  }, { buildingIds: result.buildingIds ?? [], groupId: result.groupId });
+  if (state.selected?.type !== "gate" || state.selected.gateState !== "open" || state.selected.blocksMovement !== false) {
+    throw new Error(`Corner perimeter gate was not selected and passable in browser telemetry: ${JSON.stringify({ result, state })}`);
+  }
+  if (state.matchingVisibleBuildings !== 5 || state.planCount !== 5) {
+    throw new Error(`Corner perimeter buildings/plans were not visible in browser telemetry: ${JSON.stringify({ result, state })}`);
+  }
+  if (
+    state.overlay?.perimeterGroupCount < 1 ||
+    state.group?.segmentCount !== 5 ||
+    state.group?.visibleSegmentCount !== 5 ||
+    state.group?.counts?.wall !== 4 ||
+    state.group?.counts?.gate !== 1 ||
+    state.group?.blockedWallSegments !== 4 ||
+    state.group?.passableGateSegments !== 1 ||
+    state.group?.pattern !== "gate_corner" ||
+    state.group?.direction !== "east_west" ||
+    state.groupNonCollinear !== true ||
+    state.planNonCollinear !== true ||
+    !state.group?.latestStrategy?.includes("bend") ||
+    state.overlay?.visualOverlayMarkers?.perimeterCenterMarkers < 1 ||
+    !state.overlay?.visualOverlayMarkers?.perimeterGroupIds?.includes(result.groupId) ||
+    state.overlay?.visualOverlayMarkers?.blockedRouteMarkers < 4 ||
+    state.overlay?.visualOverlayMarkers?.safePassageMarkers < 1 ||
+    state.group?.placementPreview?.blockingTileCount !== 4 ||
+    state.group?.placementPreview?.ownerGatePassableCount !== 1 ||
+    state.group?.placementPreview?.routeChecks?.length < 2 ||
+    state.planPlacementPreview?.blockingTileCount !== 4
+  ) {
+    throw new Error(`Fortification overlay did not expose the authored corner perimeter group: ${JSON.stringify({ result, state })}`);
+  }
+  if (!state.panel.includes("Gate: open") || !state.panel.includes("Open gates follow their access policy")) {
+    throw new Error(`Corner perimeter gate selected panel did not expose gate behavior: ${JSON.stringify({ result, state })}`);
+  }
+  return { hook: result, selected: state.selected, planCount: state.planCount, overlayGroup: state.group };
+}
+
+async function assertTowerPerimeterBuild(page) {
+  const result = await page.evaluate(() => {
+    if (typeof window.force_tower_perimeter_for_test !== "function") return { ok: false, reason: "missing tower perimeter hook" };
+    return window.force_tower_perimeter_for_test();
+  });
+  if (
+    !result.ok ||
+    result.turretCount !== 3 ||
+    result.watchtowerCount !== 3 ||
+    result.planCount !== 6 ||
+    result.turretPreview?.resolvedTiles?.length !== 3 ||
+    result.watchtowerPreview?.resolvedTiles?.length !== 3 ||
+    result.turretPreview?.blockingTileCount !== 0 ||
+    result.watchtowerPreview?.blockingTileCount !== 0
+  ) {
+    throw new Error(`Tower perimeter hook did not build visible turret/watchtower line groups: ${JSON.stringify(result)}`);
+  }
+  if ((result.recentEvents?.filter((event) => event.includes("FORTIFICATION_PERIMETER_BUILT") && event.includes("3 structures")).length ?? 0) < 2) {
+    throw new Error(`Tower perimeter hook did not emit perimeter build evidence twice: ${JSON.stringify(result)}`);
+  }
+  const state = await page.evaluate(({ buildingIds, turretGroupId, watchtowerGroupId }) => {
+    const parsed = JSON.parse(window.render_game_to_text());
+    const overlay = parsed.boardReadability?.fortificationOverlay;
+    const turretGroup = overlay?.perimeterGroups?.find((candidate) => candidate.groupId === turretGroupId);
+    const watchtowerGroup = overlay?.perimeterGroups?.find((candidate) => candidate.groupId === watchtowerGroupId);
+    const plans = parsed.recentFortificationPlans?.filter((plan) => plan.perimeterGroupId === turretGroupId || plan.perimeterGroupId === watchtowerGroupId);
+    return {
+      overlay,
+      turretGroup,
+      watchtowerGroup,
+      planCount: plans?.length ?? 0,
+      matchingVisibleBuildings: parsed.visibleBuildings.filter((building) => buildingIds.includes(building.id)).length
+    };
+  }, { buildingIds: result.buildingIds ?? [], turretGroupId: result.turretGroupId, watchtowerGroupId: result.watchtowerGroupId });
+  if (state.matchingVisibleBuildings !== 6 || state.planCount !== 6) {
+    throw new Error(`Tower perimeter buildings/plans were not visible in browser telemetry: ${JSON.stringify({ result, state })}`);
+  }
+  if (
+    state.turretGroup?.segmentCount !== 3 ||
+    state.turretGroup?.counts?.turret !== 3 ||
+    state.turretGroup?.counts?.gate ||
+    state.turretGroup?.counts?.wall ||
+    state.watchtowerGroup?.segmentCount !== 3 ||
+    state.watchtowerGroup?.counts?.watchtower !== 3 ||
+    state.watchtowerGroup?.counts?.gate ||
+    state.watchtowerGroup?.counts?.wall ||
+    state.turretGroup?.pattern !== "line" ||
+    state.watchtowerGroup?.pattern !== "line" ||
+    state.overlay?.visualOverlayMarkers?.perimeterCenterMarkers < 2 ||
+    !state.overlay?.visualOverlayMarkers?.perimeterGroupIds?.includes(result.turretGroupId) ||
+    !state.overlay?.visualOverlayMarkers?.perimeterGroupIds?.includes(result.watchtowerGroupId)
+  ) {
+    throw new Error(`Fortification overlay did not expose turret/watchtower perimeter groups: ${JSON.stringify({ result, state })}`);
+  }
+  return { hook: result, turretGroup: state.turretGroup, watchtowerGroup: state.watchtowerGroup };
+}
+
 async function assertExplicitSiegeOrder(page, type) {
   const state = await page.evaluate((targetType) => {
     if (typeof window.force_siege_for_test !== "function") return { ok: false, reason: "missing siege hook" };
@@ -703,6 +982,52 @@ async function assertExplicitSiegeOrder(page, type) {
   }
   if (!state.recentEvents?.some((event) => event.includes("STRUCTURE_DESTROYED") && event.includes(type))) {
     throw new Error(`Explicit ${type} siege order did not emit destruction evidence: ${JSON.stringify(state)}`);
+  }
+  return state;
+}
+
+async function assertMultiTargetSiegeOrder(page) {
+  const state = await page.evaluate(() => {
+    if (typeof window.force_multi_target_siege_for_test !== "function") return { ok: false, reason: "missing multi-target siege hook" };
+    return window.force_multi_target_siege_for_test();
+  });
+  if (!state.ok || !Array.isArray(state.targetBuildingIds) || state.targetBuildingIds.length !== 2) {
+    throw new Error(`Multi-target siege hook failed: ${JSON.stringify(state)}`);
+  }
+  for (const id of state.targetBuildingIds) {
+    if (!state.destroyedTargets?.includes(id)) {
+      throw new Error(`Multi-target siege did not destroy ${id}: ${JSON.stringify(state)}`);
+    }
+    if (!state.assignedTargets?.includes(id)) {
+      throw new Error(`Multi-target siege did not assign attackers to ${id}: ${JSON.stringify(state)}`);
+    }
+  }
+  if (JSON.stringify(state.siegePlan ?? {}).includes("targetBuildingIds") !== true) {
+    throw new Error(`Multi-target siege plan did not preserve targetBuildingIds: ${JSON.stringify(state)}`);
+  }
+  if (!state.guardRoles?.some((guard) => guard.role === "cover" && String(guard.task).includes("Covering siege"))) {
+    throw new Error(`Multi-target siege did not expose cover guard role: ${JSON.stringify(state)}`);
+  }
+  if (!state.guardRoles?.some((guard) => guard.role === "escort" && String(guard.task).includes("Escorting siege"))) {
+    throw new Error(`Multi-target siege did not expose escort guard role: ${JSON.stringify(state)}`);
+  }
+  if (!state.attackerTasksBefore?.some((task) => task.includes("Attacking wall test_multi_siege_wall_a"))) {
+    throw new Error(`Multi-target siege did not expose first target task text: ${JSON.stringify(state)}`);
+  }
+  if (!state.attackerTasksBefore?.some((task) => task.includes("Attacking wall test_multi_siege_wall_b"))) {
+    throw new Error(`Multi-target siege did not expose second target task text: ${JSON.stringify(state)}`);
+  }
+  if (!state.recentEvents?.some((event) => event.includes("WAR_SIEGE_ORDER") && state.targetBuildingIds.every((id) => event.includes(id)))) {
+    throw new Error(`Multi-target siege did not emit order evidence for both targets: ${JSON.stringify(state)}`);
+  }
+  if (!state.recentEvents?.some((event) => event.includes("SIEGE_GROUP_RETARGETED") && event.includes(state.targetBuildingIds[1]))) {
+    throw new Error(`Multi-target siege did not retarget within the authored group: ${JSON.stringify(state)}`);
+  }
+  if (!state.recentEvents?.some((event) => event.includes("SIEGE_COVER_ASSIGNED"))) {
+    throw new Error(`Multi-target siege did not emit cover assignment evidence: ${JSON.stringify(state)}`);
+  }
+  if (!state.recentEvents?.some((event) => event.includes("SIEGE_ESCORT_ASSIGNED"))) {
+    throw new Error(`Multi-target siege did not emit escort assignment evidence: ${JSON.stringify(state)}`);
   }
   return state;
 }
@@ -744,6 +1069,25 @@ async function assertArtilleryOrder(page) {
   if (!state.projectileSnapshots.some((projectile) => projectile.targetBuildingId === state.targetBuildingId)) {
     throw new Error(`Artillery projectile snapshot targeted the wrong building: ${JSON.stringify(state)}`);
   }
+  if (
+    !state.projectileSnapshots.some(
+      (projectile) =>
+        projectile.projectileType === "stone_shot" &&
+        typeof projectile.hp === "number" &&
+        projectile.hp > 0 &&
+        typeof projectile.maxHp === "number" &&
+        projectile.maxHp >= projectile.hp &&
+        typeof projectile.armor === "number" &&
+        typeof projectile.attack === "number" &&
+        projectile.attack > 0 &&
+        typeof projectile.range === "number" &&
+        projectile.range > 0 &&
+        typeof projectile.attackCooldown === "number" &&
+        projectile.attackCooldown >= 0
+    )
+  ) {
+    throw new Error(`Artillery projectile snapshot did not expose full combat stats: ${JSON.stringify(state)}`);
+  }
   if (!state.recentEvents?.some((event) => event.includes("SIEGE_PROJECTILE_LAUNCHED") && event.includes(state.targetBuildingId))) {
     throw new Error(`Artillery order did not emit projectile launch evidence: ${JSON.stringify(state)}`);
   }
@@ -752,6 +1096,146 @@ async function assertArtilleryOrder(page) {
   }
   if (!state.recentEvents?.some((event) => event.includes("STRUCTURE_DESTROYED") && event.includes("wall"))) {
     throw new Error(`Artillery order did not emit wall destruction evidence: ${JSON.stringify(state)}`);
+  }
+  return state;
+}
+
+async function assertProjectileVisual(page) {
+  const state = await page.evaluate(() => {
+    if (typeof window.force_projectile_visual_for_test !== "function") return { ok: false, reason: "missing projectile visual hook" };
+    return window.force_projectile_visual_for_test();
+  });
+  if (!state.ok || state.projectileSeen !== true || !Array.isArray(state.projectileSnapshots) || state.projectileSnapshots.length < 1) {
+    throw new Error(`Projectile visual hook did not leave an in-flight projectile: ${JSON.stringify(state)}`);
+  }
+  const projectile = state.projectileSnapshots.find((shot) => shot.targetBuildingId === state.targetBuildingId);
+  if (!projectile) {
+    throw new Error(`Projectile visual hook targeted the wrong building: ${JSON.stringify(state)}`);
+  }
+  if (
+    projectile.projectileType !== "stone_shot" ||
+    typeof projectile.hp !== "number" ||
+    projectile.hp <= 0 ||
+    typeof projectile.maxHp !== "number" ||
+    projectile.maxHp < projectile.hp ||
+    typeof projectile.armor !== "number" ||
+    typeof projectile.attack !== "number" ||
+    projectile.attack <= 0 ||
+    typeof projectile.range !== "number" ||
+    projectile.range <= 0 ||
+    typeof projectile.attackCooldown !== "number" ||
+    projectile.attackCooldown < 0
+  ) {
+    throw new Error(`Projectile visual hook did not expose full projectile combat stats: ${JSON.stringify(state)}`);
+  }
+  if (!state.visibleProjectiles?.some((shot) => shot.id === projectile.id && shot.targetBuildingId === state.targetBuildingId && shot.attack > 0 && shot.range > 0)) {
+    throw new Error(`render_game_to_text did not expose the visible in-flight projectile: ${JSON.stringify(state)}`);
+  }
+  if (!state.recentEvents?.some((event) => event.includes("SIEGE_PROJECTILE_LAUNCHED") && event.includes(state.targetBuildingId))) {
+    throw new Error(`Projectile visual hook did not emit launch evidence: ${JSON.stringify(state)}`);
+  }
+  if (!state.recentCombatEvents?.some((event) => event.type === "SIEGE_PROJECTILE_LAUNCHED" && event.targetId === state.targetBuildingId && event.projectileType === "stone_shot")) {
+    throw new Error(`render_game_to_text did not expose structured recent combat evidence for the stone shot: ${JSON.stringify(state)}`);
+  }
+  if (
+    !state.combatOverlay ||
+    state.combatOverlay.activeProjectileMarkers < 1 ||
+    state.combatOverlay.recentCombatEventMarkers < 1 ||
+    !state.combatOverlay.activeProjectileTypes?.includes("stone_shot")
+  ) {
+    throw new Error(`Combat overlay did not expose stone-shot projectile and event markers: ${JSON.stringify(state)}`);
+  }
+  if (
+    !state.spriteVisuals ||
+    state.spriteVisuals.projectileTextureTypes < 3 ||
+    state.spriteVisuals.activeProjectileSpriteCount < 1 ||
+    state.spriteVisuals.visibleProjectileSpriteCount < 1
+  ) {
+    throw new Error(`Projectile sprite telemetry did not expose a visible stone-shot sprite: ${JSON.stringify(state)}`);
+  }
+  return state;
+}
+
+async function assertRangedProjectileVisuals(page) {
+  const state = await page.evaluate(() => {
+    if (typeof window.force_ranged_projectiles_for_test !== "function") return { ok: false, reason: "missing ranged projectile hook" };
+    return window.force_ranged_projectiles_for_test();
+  });
+  if (!state.ok || !state.arrowProjectile || !state.turretBoltProjectile || !Array.isArray(state.projectileSnapshots)) {
+    throw new Error(`Ranged projectile hook did not leave arrow and turret-bolt projectiles: ${JSON.stringify(state)}`);
+  }
+  const arrow = state.arrowProjectile;
+  const bolt = state.turretBoltProjectile;
+  if (
+    arrow.projectileType !== "arrow" ||
+    arrow.targetKind !== "unit" ||
+    arrow.targetUnitId !== state.arrowTargetUnitId ||
+    typeof arrow.hp !== "number" ||
+    arrow.hp <= 0 ||
+    typeof arrow.maxHp !== "number" ||
+    arrow.maxHp < arrow.hp ||
+    typeof arrow.armor !== "number" ||
+    typeof arrow.attack !== "number" ||
+    arrow.attack <= 0 ||
+    typeof arrow.range !== "number" ||
+    arrow.range <= 0 ||
+    typeof arrow.attackCooldown !== "number" ||
+    arrow.attackCooldown < 0
+  ) {
+    throw new Error(`Arrow projectile did not expose full combat stats: ${JSON.stringify(state)}`);
+  }
+  if (
+    bolt.projectileType !== "turret_bolt" ||
+    bolt.targetKind !== "unit" ||
+    bolt.targetUnitId !== state.boltTargetUnitId ||
+    typeof bolt.hp !== "number" ||
+    bolt.hp <= 0 ||
+    typeof bolt.maxHp !== "number" ||
+    bolt.maxHp < bolt.hp ||
+    typeof bolt.armor !== "number" ||
+    typeof bolt.attack !== "number" ||
+    bolt.attack <= 0 ||
+    typeof bolt.range !== "number" ||
+    bolt.range <= 0 ||
+    typeof bolt.attackCooldown !== "number" ||
+    bolt.attackCooldown < 0
+  ) {
+    throw new Error(`Turret-bolt projectile did not expose full combat stats: ${JSON.stringify(state)}`);
+  }
+  if (
+    !state.visibleProjectiles?.some((projectile) => projectile.projectileType === "arrow" && projectile.targetUnitId === state.arrowTargetUnitId) ||
+    !state.visibleProjectiles?.some((projectile) => projectile.projectileType === "turret_bolt" && projectile.targetUnitId === state.boltTargetUnitId)
+  ) {
+    throw new Error(`render_game_to_text did not expose both ranged projectiles: ${JSON.stringify(state)}`);
+  }
+  if (!state.recentEvents?.some((event) => event.includes("COMBAT_PROJECTILE_LAUNCHED") && event.includes("arrow"))) {
+    throw new Error(`Arrow projectile launch evidence missing: ${JSON.stringify(state)}`);
+  }
+  if (!state.recentEvents?.some((event) => event.includes("COMBAT_PROJECTILE_LAUNCHED") && event.includes("Turret"))) {
+    throw new Error(`Turret projectile launch evidence missing: ${JSON.stringify(state)}`);
+  }
+  if (
+    !state.recentCombatEvents?.some((event) => event.type === "COMBAT_PROJECTILE_LAUNCHED" && event.projectileType === "arrow" && event.targetId === state.arrowTargetUnitId) ||
+    !state.recentCombatEvents?.some((event) => event.type === "COMBAT_PROJECTILE_LAUNCHED" && event.projectileType === "turret_bolt" && event.targetId === state.boltTargetUnitId)
+  ) {
+    throw new Error(`render_game_to_text did not expose structured recent combat evidence for ranged projectiles: ${JSON.stringify(state)}`);
+  }
+  if (
+    !state.combatOverlay ||
+    state.combatOverlay.activeProjectileMarkers < 2 ||
+    state.combatOverlay.recentCombatEventMarkers < 2 ||
+    !state.combatOverlay.activeProjectileTypes?.includes("arrow") ||
+    !state.combatOverlay.activeProjectileTypes?.includes("turret_bolt")
+  ) {
+    throw new Error(`Combat overlay did not expose arrow and turret-bolt projectile markers: ${JSON.stringify(state)}`);
+  }
+  if (
+    !state.spriteVisuals ||
+    state.spriteVisuals.projectileTextureTypes < 3 ||
+    state.spriteVisuals.activeProjectileSpriteCount < 2 ||
+    state.spriteVisuals.visibleProjectileSpriteCount < 2
+  ) {
+    throw new Error(`Projectile sprite telemetry did not expose visible arrow and turret-bolt sprites: ${JSON.stringify(state)}`);
   }
   return state;
 }
@@ -1044,6 +1528,29 @@ async function assertRepairUnderFire(page) {
   });
   if (overlayState.markers?.warFrontMarkers < 1 || !overlayState.markers?.warFrontPairs?.some((pair) => pair.includes("blue") && pair.includes("red"))) {
     throw new Error(`Defense overlay did not expose the repair-under-fire war front: ${JSON.stringify({ state, overlayState })}`);
+  }
+  return state;
+}
+
+async function assertRepairInterdiction(page) {
+  const state = await page.evaluate(() => {
+    if (typeof window.force_repair_interdiction_for_test !== "function") return { ok: false, reason: "missing repair-interdiction hook" };
+    return window.force_repair_interdiction_for_test();
+  });
+  if (!state.ok || typeof state.repairerBeforeHp !== "number" || typeof state.repairerAfterHp !== "number" || state.repairerAfterHp >= state.repairerBeforeHp) {
+    throw new Error(`Repair-interdiction hook did not damage the hostile repair crew: ${JSON.stringify(state)}`);
+  }
+  if (!state.attackTasks?.some((task) => task.includes("Interdicting repairs on wall test_repair_interdiction_wall"))) {
+    throw new Error(`Repair-interdiction hook did not expose interdiction task text: ${JSON.stringify(state)}`);
+  }
+  if (!JSON.stringify(state.siegePlan ?? {}).includes("interdictRepairs")) {
+    throw new Error(`Repair-interdiction siege plan did not preserve interdictRepairs: ${JSON.stringify(state)}`);
+  }
+  if (!state.recentEvents?.some((event) => event.includes("SIEGE_REPAIR_INTERDICTION_ORDERED") && event.includes("test_repair_interdiction_wall"))) {
+    throw new Error(`Repair-interdiction hook did not emit interdiction-order evidence: ${JSON.stringify(state)}`);
+  }
+  if (!state.recentEvents?.some((event) => event.includes("REPAIR_UNDER_FIRE_INTERRUPTED") && event.includes("test_repair_interdiction_wall"))) {
+    throw new Error(`Repair-interdiction hook did not also interrupt the contested repair: ${JSON.stringify(state)}`);
   }
   return state;
 }

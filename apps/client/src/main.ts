@@ -31,6 +31,7 @@ import {
   getResourceControlSummary,
   getActiveGateAccessTreaties,
   getTownHall,
+  getUnitTypeCombatStats,
   getVictoryPressure,
   getVisibleResourceDepositIntel,
   getVisibleBuildings,
@@ -40,9 +41,11 @@ import {
   isBuildingMovementBlocking,
   isTribeActive,
   isTileWalkable,
+  previewFortificationBuild,
   recordAiDecision,
   renameUnits,
   buildingTypes,
+  projectileTypes,
   resourceTypes,
   scarceMapResourceTypes,
   setGateState,
@@ -69,12 +72,14 @@ import {
   type GateSabotageAction,
   type GateState,
   type GateTollMode,
+  type GameEvent,
   type GameState,
   type Packet,
   type PerimeterDirection,
   type PerimeterPattern,
   type Position,
   type PostGameLearning,
+  type ProjectileType,
   type ResourceCost,
   type ResourceDepletionRecord,
   type ResourceDenialRecord,
@@ -265,6 +270,10 @@ declare global {
       treatyIncidentWitnesses?: TribeId[];
       sabotageAction?: GateSabotageAction;
       sabotageHistoryCount?: number;
+      sabotageRecordId?: string;
+      sabotageSaboteurUnitId?: string;
+      sabotageWitnessObservationCount?: number;
+      sabotageWitnessObservationIds?: string[];
       damageBefore?: number;
       damageAfter?: number;
       eventTypes?: string[];
@@ -283,7 +292,50 @@ declare global {
       gateIndex?: number;
       wallBlocks?: boolean;
       gatePassable?: boolean;
+      prebuildPreviewOk?: boolean;
+      prebuildPreview?: unknown;
+      prebuildPreviewReason?: string;
+      prebuildResourcesUnchanged?: boolean;
+      prebuildBuildingCountUnchanged?: boolean;
+      prebuildPlanCountUnchanged?: boolean;
       placementPreview?: unknown;
+      recentEvents?: string[];
+      reason?: string;
+    };
+    force_corner_perimeter_for_test?: () => {
+      ok: boolean;
+      buildingIds?: string[];
+      wallCount?: number;
+      gateCount?: number;
+      planCount?: number;
+      groupId?: string;
+      pattern?: PerimeterPattern;
+      direction?: PerimeterDirection;
+      length?: number;
+      gateIndex?: number;
+      nonCollinear?: boolean;
+      wallBlocks?: boolean;
+      gatePassable?: boolean;
+      prebuildPreviewOk?: boolean;
+      prebuildPreview?: unknown;
+      prebuildPreviewReason?: string;
+      prebuildResourcesUnchanged?: boolean;
+      prebuildBuildingCountUnchanged?: boolean;
+      prebuildPlanCountUnchanged?: boolean;
+      placementPreview?: unknown;
+      recentEvents?: string[];
+      reason?: string;
+    };
+    force_tower_perimeter_for_test?: () => {
+      ok: boolean;
+      buildingIds?: string[];
+      turretCount?: number;
+      watchtowerCount?: number;
+      planCount?: number;
+      turretGroupId?: string;
+      watchtowerGroupId?: string;
+      turretPreview?: unknown;
+      watchtowerPreview?: unknown;
       recentEvents?: string[];
       reason?: string;
     };
@@ -312,6 +364,18 @@ declare global {
       recentEvents?: string[];
       reason?: string;
     };
+    force_multi_target_siege_for_test?: () => {
+      ok: boolean;
+      targetBuildingIds?: string[];
+      assignedTargets?: string[];
+      guardRoles?: Array<{ unitId: string; role: "cover" | "escort"; task: string }>;
+      destroyedTargets?: string[];
+      attackerTasksBefore?: string[];
+      attackerTasksAfter?: string[];
+      siegePlan?: unknown;
+      recentEvents?: string[];
+      reason?: string;
+    };
     force_siege_engine_for_test?: () => {
       ok: boolean;
       unitId?: string;
@@ -331,7 +395,65 @@ declare global {
       projectileSeen?: boolean;
       impactSeen?: boolean;
       destroyed?: boolean;
-      projectileSnapshots?: Array<{ id: string; x: number; y: number; targetBuildingId: string; impactTick: number }>;
+      projectileSnapshots?: Array<{
+        id: string;
+        projectileType: string;
+        targetKind: "building" | "unit";
+        x: number;
+        y: number;
+        targetBuildingId?: string;
+        targetUnitId?: string;
+        impactTick: number;
+        hp: number;
+        maxHp: number;
+        armor: number;
+        attack: number;
+        range: number;
+        attackCooldown: number;
+      }>;
+      recentEvents?: string[];
+      reason?: string;
+    };
+    force_projectile_visual_for_test?: () => {
+      ok: boolean;
+      unitId?: string;
+      unitType?: UnitType;
+      targetBuildingId?: string;
+      projectileSeen?: boolean;
+      projectileSnapshots?: Array<{
+        id: string;
+        projectileType: string;
+        targetKind: "building" | "unit";
+        x: number;
+        y: number;
+        targetBuildingId?: string;
+        targetUnitId?: string;
+        impactTick: number;
+        hp: number;
+        maxHp: number;
+        armor: number;
+        attack: number;
+        range: number;
+        attackCooldown: number;
+      }>;
+      visibleProjectiles?: unknown[];
+      recentCombatEvents?: unknown[];
+      combatOverlay?: unknown;
+      recentEvents?: string[];
+      reason?: string;
+    };
+    force_ranged_projectiles_for_test?: () => {
+      ok: boolean;
+      archerId?: string;
+      turretId?: string;
+      arrowTargetUnitId?: string;
+      boltTargetUnitId?: string;
+      arrowProjectile?: unknown;
+      turretBoltProjectile?: unknown;
+      projectileSnapshots?: unknown[];
+      visibleProjectiles?: unknown[];
+      recentCombatEvents?: unknown[];
+      combatOverlay?: unknown;
       recentEvents?: string[];
       reason?: string;
     };
@@ -446,15 +568,73 @@ declare global {
       selectedPanel?: string;
       reason?: string;
     };
+    force_repair_interdiction_for_test?: () => {
+      ok: boolean;
+      targetBuildingId?: string;
+      repairerBeforeHp?: number;
+      repairerAfterHp?: number;
+      wallBeforeHp?: number;
+      wallAfterHp?: number | null;
+      attackTasks?: string[];
+      repairerTasks?: string[];
+      siegePlan?: unknown;
+      recentEvents?: string[];
+      reason?: string;
+    };
     force_visual_motion_for_test?: () => { ok: boolean; unitId?: string; reason?: string };
+    render_motion_probe_for_test?: (unitId: string) => MotionProbePayload | null;
+    reset_motion_probe_for_test?: (unitId: string) => boolean;
   }
 }
+
+type MotionProbePayload = {
+  tick: number;
+  clock: {
+    tickRate: number;
+    simulationStepSeconds: number;
+    accumulated: number;
+    renderAlpha: number;
+    measuredFps: number;
+    lastFrameDeltaMs: number;
+    maxFrameDeltaMs: number;
+    lastRenderDurationMs: number;
+    maxRenderDurationMs: number;
+  };
+  unit: {
+    x: number;
+    y: number;
+    visualX: number;
+    visualY: number;
+  } | null;
+  llm: {
+    activeJobCount: number;
+    maxConcurrentJobs: number;
+    pressureActive: boolean;
+  };
+  cadence: MotionCadenceProbePayload;
+};
+
+type MotionCadenceProbePayload = {
+  unitId: string | null;
+  elapsedMs: number;
+  frameCount: number;
+  uniqueTicks: number;
+  averageFramesPerTick: number;
+  maxFramesPerTick: number;
+  repeatedTickFrames: number;
+  sameTickMotionFrames: number;
+  tickChanges: number;
+  snapTickChanges: number;
+  maxTickerDeltaMs: number;
+  minMeasuredFps: number;
+  maxMeasuredFps: number;
+};
 
 const TILE = 22;
 const playerTribe: TribeId = "blue";
 const observerMode = true;
 const llmIntervalTicks = 420;
-const targetConcurrentLlmJobs = 3;
+const targetConcurrentLlmJobs = 2;
 const buildableBuildingTypes: BuildableBuildingType[] = ["farm", "house", "watchtower", "wall", "gate", "turret"];
 const contestedResourceTypes = new Set<ResourceType>(["coal", "iron", "limestone", "clay", "stone", "gold"]);
 const scarceResourceTypes = new Set<ResourceType>(scarceMapResourceTypes);
@@ -464,8 +644,9 @@ const persistentLearningSchema = "sovereign-worlds-learning-v1";
 const maxPersistentLearningGames = 12;
 const simulationStepSeconds = 1 / TICK_RATE;
 const maxSimulationStepsPerFrame = 24;
-const minimumSmoothFps = 24;
-const llmFramePressureCooldownMs = 2500;
+const minimumSmoothFps = 25;
+const llmFramePressureCooldownMs = 4000;
+const llmJobLaunchSpacingMs = 1200;
 
 function initialGameSeed(): number {
   const explicitSeed = new URLSearchParams(window.location.search).get("seed");
@@ -541,6 +722,7 @@ type VisualTextureAtlas = {
   buildings: Record<BuildingType, Record<BuildingVisualState, Texture>>;
   units: Record<UnitType, Record<UnitVisualState, Texture>>;
   diplomacy: Record<DiplomacyTextureType, Texture>;
+  projectiles: Record<ProjectileType, Texture>;
 };
 type BuildingVisualState = "normal" | "damaged" | "critical" | "repairing" | "gate_open" | "gate_closed" | "gate_locked";
 const buildingVisualStates: BuildingVisualState[] = ["normal", "damaged", "critical", "repairing", "gate_open", "gate_closed", "gate_locked"];
@@ -550,6 +732,24 @@ type DiplomacyTextureType = "packet_outbound" | "packet_returning" | "packet_tar
 const diplomacyTextureTypes: DiplomacyTextureType[] = ["packet_outbound", "packet_returning", "packet_target"];
 type DurabilityCondition = "intact" | "worn" | "damaged" | "critical" | "destroyed";
 type RepairState = "none" | "repairing" | "recently_repaired";
+type CombatEventMarker = {
+  id: string;
+  tick: number;
+  type: string;
+  title: string;
+  body: string;
+  x: number;
+  y: number;
+  ageTicks: number;
+  actorTribeId?: TribeId;
+  targetTribeId?: TribeId;
+  subjectId?: string;
+  targetId?: string;
+  projectileType?: SiegeProjectile["projectileType"];
+  severity?: "skirmish" | "impact" | "destroyed" | "raid";
+  screenX: number;
+  screenY: number;
+};
 type CombatStatSnapshot = {
   hp: number;
   maxHp: number;
@@ -937,6 +1137,7 @@ const buildingUnderlayGraphics = new Graphics();
 const buildingSpriteLayer = new Container();
 const buildingGraphics = new Graphics();
 const unitSpriteLayer = new Container();
+const projectileSpriteLayer = new Container();
 const dynamicGraphics = new Graphics();
 const unitOverlayGraphics = new Graphics();
 const labelBackdropGraphics = new Graphics();
@@ -950,6 +1151,7 @@ dynamicLayer.addChild(
   buildingGraphics,
   dynamicGraphics,
   unitSpriteLayer,
+  projectileSpriteLayer,
   unitOverlayGraphics,
   labelBackdropGraphics,
   dynamicLabelLayer
@@ -962,6 +1164,8 @@ const buildingSpritePool: Sprite[] = [];
 let activeBuildingSpriteCount = 0;
 const unitSpritePool: Sprite[] = [];
 let activeUnitSpriteCount = 0;
+const projectileSpritePool: Sprite[] = [];
+let activeProjectileSpriteCount = 0;
 const packetSpritePool: Sprite[] = [];
 let activePacketSpriteCount = 0;
 const mapTextPool: Text[] = [];
@@ -998,6 +1202,21 @@ let maxFrameDeltaMs = 0;
 let lastRenderDurationMs = 0;
 let maxRenderDurationMs = 0;
 let llmFramePressureUntilMs = 0;
+let motionProbeUnitId: string | undefined;
+let motionProbeStartedAtMs = 0;
+let motionProbeFrameCount = 0;
+let motionProbeRepeatedTickFrames = 0;
+let motionProbeSameTickMotionFrames = 0;
+let motionProbeTickChanges = 0;
+let motionProbeSnapTickChanges = 0;
+let motionProbeMaxFramesPerTick = 0;
+let motionProbeFramesForCurrentTick = 0;
+let motionProbeMaxTickerDeltaMs = 0;
+let motionProbeMinMeasuredFps = Number.POSITIVE_INFINITY;
+let motionProbeMaxMeasuredFps = 0;
+let motionProbeLastTick: number | undefined;
+let motionProbeLastVisual: Position | undefined;
+let motionProbeLastLogical: Position | undefined;
 
 void bootstrap();
 
@@ -1005,10 +1224,10 @@ async function bootstrap(): Promise<void> {
   await app.init({
     resizeTo: viewport,
     background: "#11100e",
-    antialias: true,
+    antialias: false,
     autoDensity: true,
     preserveDrawingBuffer: new URLSearchParams(window.location.search).has("qaCanvasReadback"),
-    resolution: window.devicePixelRatio || 1
+    resolution: Math.min(window.devicePixelRatio || 1, 1.5)
   });
   viewport.append(app.canvas);
   app.stage.addChild(world);
@@ -1041,12 +1260,12 @@ async function bootstrap(): Promise<void> {
       }
       if (steps > 0 && visualBefore) {
         updateVisualFrames(visualBefore, state);
-        scheduleLlmReply();
-        scheduleLlmDecision();
+        queueLlmSchedulePump();
       }
       if (steps >= maxSimulationStepsPerFrame) accumulated = 0;
     }
     renderAlpha = paused ? 1 : clamp(accumulated / simulationStepSeconds, 0, 1);
+    recordMotionCadenceProbe(ticker.deltaMS);
     updateFollowCamera();
     render({ frame: true });
   });
@@ -1123,8 +1342,7 @@ function advanceSimulationTicks(ticks: number, options: { render?: boolean; visu
   fogDirty = true;
   recordPersistentLearningIfNeeded();
   if (options.scheduleAi !== false) {
-    scheduleLlmReply();
-    scheduleLlmDecision();
+    queueLlmSchedulePump();
   }
   if (options.render !== false) {
     renderAlpha = 1;
@@ -1185,6 +1403,12 @@ function visualCenterForUnit(unit: Unit): Position {
 
 function installTestHooks(): void {
   window.render_game_to_text = renderGameToText;
+  window.render_motion_probe_for_test = renderMotionProbeForTest;
+  window.reset_motion_probe_for_test = (unitId: string) => {
+    if (!state.units[unitId]) return false;
+    resetMotionCadenceProbe(unitId);
+    return true;
+  };
   window.advanceTime = (ms: number) => {
     const totalMs = Number.isFinite(ms) ? clamp(ms, 0, 30_000) : 0;
     if (totalMs <= 0) {
@@ -1218,10 +1442,15 @@ function installTestHooks(): void {
   window.force_gate_ransom_for_test = forceGateRansomForTest;
   window.force_gate_access_sabotage_for_test = forceGateAccessSabotageForTest;
   window.force_perimeter_for_test = forcePerimeterForTest;
+  window.force_corner_perimeter_for_test = forceCornerPerimeterForTest;
+  window.force_tower_perimeter_for_test = forceTowerPerimeterForTest;
   window.force_damage_building_for_test = forceDamageBuildingForTest;
   window.force_siege_for_test = forceSiegeForTest;
+  window.force_multi_target_siege_for_test = forceMultiTargetSiegeForTest;
   window.force_siege_engine_for_test = forceSiegeEngineForTest;
   window.force_artillery_for_test = forceArtilleryForTest;
+  window.force_projectile_visual_for_test = forceProjectileVisualForTest;
+  window.force_ranged_projectiles_for_test = forceRangedProjectilesForTest;
   window.force_retreat_for_test = forceRetreatForTest;
   window.force_coordinated_feint_for_test = forceCoordinatedFeintForTest;
   window.force_resource_raid_for_test = forceResourceRaidForTest;
@@ -1229,6 +1458,7 @@ function installTestHooks(): void {
   window.force_civilization_merger_for_test = forceCivilizationMergerForTest;
   window.force_repair_for_test = forceRepairForTest;
   window.force_repair_under_fire_for_test = forceRepairUnderFireForTest;
+  window.force_repair_interdiction_for_test = forceRepairInterdictionForTest;
   window.force_visual_motion_for_test = forceVisualMotionForTest;
 }
 
@@ -1860,6 +2090,7 @@ function forceVisualMotionForTest(): { ok: boolean; unitId?: string; reason?: st
     selectedUnitId = unit.id;
     selectedBuildingId = undefined;
     resetVisualFrames(state);
+    resetMotionCadenceProbe(unit.id);
     centerCamera({ x: unit.x, y: unit.y });
     render();
     return { ok: true, unitId: unit.id };
@@ -2036,6 +2267,120 @@ function buildPopulationOutlook(game: GameState, tribeId: TribeId, score?: Victo
   };
 }
 
+function resetMotionCadenceProbe(unitId: string): void {
+  motionProbeUnitId = unitId;
+  motionProbeStartedAtMs = performance.now();
+  motionProbeFrameCount = 0;
+  motionProbeRepeatedTickFrames = 0;
+  motionProbeSameTickMotionFrames = 0;
+  motionProbeTickChanges = 0;
+  motionProbeSnapTickChanges = 0;
+  motionProbeMaxFramesPerTick = 0;
+  motionProbeFramesForCurrentTick = 0;
+  motionProbeMaxTickerDeltaMs = 0;
+  motionProbeMinMeasuredFps = Number.POSITIVE_INFINITY;
+  motionProbeMaxMeasuredFps = 0;
+  motionProbeLastTick = undefined;
+  motionProbeLastVisual = undefined;
+  motionProbeLastLogical = undefined;
+}
+
+function recordMotionCadenceProbe(tickerDeltaMs: number): void {
+  if (!motionProbeUnitId) return;
+  const unit = state.units[motionProbeUnitId];
+  if (!unit || unit.hp <= 0) return;
+  const visual = visualPositionForUnit(unit);
+  const logical = { x: unit.x, y: unit.y };
+  motionProbeFrameCount += 1;
+  motionProbeMaxTickerDeltaMs = Math.max(motionProbeMaxTickerDeltaMs, tickerDeltaMs);
+  if (measuredFps > 0) {
+    motionProbeMinMeasuredFps = Math.min(motionProbeMinMeasuredFps, measuredFps);
+    motionProbeMaxMeasuredFps = Math.max(motionProbeMaxMeasuredFps, measuredFps);
+  }
+
+  if (motionProbeLastTick === undefined || !motionProbeLastVisual || !motionProbeLastLogical) {
+    motionProbeLastTick = state.tick;
+    motionProbeLastVisual = visual;
+    motionProbeLastLogical = logical;
+    motionProbeFramesForCurrentTick = 1;
+    motionProbeMaxFramesPerTick = Math.max(motionProbeMaxFramesPerTick, motionProbeFramesForCurrentTick);
+    return;
+  }
+
+  const visualStep = Math.hypot(visual.x - motionProbeLastVisual.x, visual.y - motionProbeLastVisual.y);
+  const logicalStep = Math.hypot(logical.x - motionProbeLastLogical.x, logical.y - motionProbeLastLogical.y);
+  if (state.tick === motionProbeLastTick) {
+    motionProbeRepeatedTickFrames += 1;
+    motionProbeFramesForCurrentTick += 1;
+    motionProbeMaxFramesPerTick = Math.max(motionProbeMaxFramesPerTick, motionProbeFramesForCurrentTick);
+    if (visualStep > 0.001) motionProbeSameTickMotionFrames += 1;
+  } else {
+    motionProbeTickChanges += 1;
+    motionProbeFramesForCurrentTick = 1;
+    motionProbeMaxFramesPerTick = Math.max(motionProbeMaxFramesPerTick, motionProbeFramesForCurrentTick);
+    if (logicalStep > 0.01 && visualStep >= logicalStep * 0.9 && renderAlpha <= 0.05) {
+      motionProbeSnapTickChanges += 1;
+    }
+  }
+
+  motionProbeLastTick = state.tick;
+  motionProbeLastVisual = visual;
+  motionProbeLastLogical = logical;
+}
+
+function motionCadenceProbePayload(): MotionCadenceProbePayload {
+  const uniqueTicks = motionProbeFrameCount > 0 ? motionProbeTickChanges + 1 : 0;
+  return {
+    unitId: motionProbeUnitId ?? null,
+    elapsedMs: motionProbeStartedAtMs > 0 ? Number((performance.now() - motionProbeStartedAtMs).toFixed(1)) : 0,
+    frameCount: motionProbeFrameCount,
+    uniqueTicks,
+    averageFramesPerTick: uniqueTicks > 0 ? Number((motionProbeFrameCount / uniqueTicks).toFixed(2)) : 0,
+    maxFramesPerTick: motionProbeMaxFramesPerTick,
+    repeatedTickFrames: motionProbeRepeatedTickFrames,
+    sameTickMotionFrames: motionProbeSameTickMotionFrames,
+    tickChanges: motionProbeTickChanges,
+    snapTickChanges: motionProbeSnapTickChanges,
+    maxTickerDeltaMs: Number(motionProbeMaxTickerDeltaMs.toFixed(2)),
+    minMeasuredFps: motionProbeMinMeasuredFps === Number.POSITIVE_INFINITY ? 0 : Number(motionProbeMinMeasuredFps.toFixed(1)),
+    maxMeasuredFps: Number(motionProbeMaxMeasuredFps.toFixed(1))
+  };
+}
+
+function renderMotionProbeForTest(unitId: string): MotionProbePayload | null {
+  const unit = state.units[unitId];
+  const visual = unit && unit.hp > 0 ? visualPositionForUnit(unit) : undefined;
+  return {
+    tick: state.tick,
+    clock: {
+      tickRate: TICK_RATE,
+      simulationStepSeconds,
+      accumulated: Number(accumulated.toFixed(4)),
+      renderAlpha: Number(renderAlpha.toFixed(3)),
+      measuredFps: Number(measuredFps.toFixed(1)),
+      lastFrameDeltaMs: Number(lastFrameDeltaMs.toFixed(2)),
+      maxFrameDeltaMs: Number(maxFrameDeltaMs.toFixed(2)),
+      lastRenderDurationMs: Number(lastRenderDurationMs.toFixed(2)),
+      maxRenderDurationMs: Number(maxRenderDurationMs.toFixed(2))
+    },
+    unit:
+      unit && visual
+        ? {
+            x: Number(unit.x.toFixed(2)),
+            y: Number(unit.y.toFixed(2)),
+            visualX: Number(visual.x.toFixed(2)),
+            visualY: Number(visual.y.toFixed(2))
+          }
+        : null,
+    llm: {
+      activeJobCount: activeLlmJobs.size,
+      maxConcurrentJobs: maxConcurrentLlmJobs(),
+      pressureActive: performance.now() < llmFramePressureUntilMs
+    },
+    cadence: motionCadenceProbePayload()
+  };
+}
+
 function renderGameToText(): string {
   const livingUnits = Object.values(state.units).filter((unit) => unit.hp > 0);
   const visibleUnits = observerMode ? livingUnits : getVisibleUnits(state, playerTribe);
@@ -2046,7 +2391,8 @@ function renderGameToText(): string {
   const leader = tribeIds.slice().sort((a, b) => computeWealth(state, b) - computeWealth(state, a))[0];
   const victory = getVictoryPressure(state);
   const aiStatus = compactAiStatus(state);
-  const boardReadability = buildBoardReadabilitySnapshot(state, visibleUnits, visibleBuildings);
+  const boardReadability = buildBoardReadabilitySnapshot(state, visibleUnits, visibleBuildings, visibleProjectiles);
+  const recentCombatEvents = buildRecentCombatEventMarkers(state, visibleUnits, visibleBuildings, 20);
   const payload = {
     coordinateSystem: "tile coordinates, origin top-left, x increases right, y increases down",
     mode: observerMode ? "observer" : "player",
@@ -2191,6 +2537,7 @@ function renderGameToText(): string {
       defenseOverlay: showDefenseOverlay
     },
     boardReadability,
+    recentCombatEvents,
     developmentCatalog: buildDevelopmentCatalogTelemetry(),
     combatStatCoverage: getCombatStatCoverageReport(state),
     buildingCosts: buildableBuildingTypes.map((type) => ({
@@ -2232,17 +2579,22 @@ function renderGameToText(): string {
       id: projectile.id,
       projectileType: projectile.projectileType,
       tribeId: projectile.tribeId,
-      originUnitId: projectile.originUnitId,
-      targetBuildingId: projectile.targetBuildingId,
+      originUnitId: projectile.originUnitId ?? null,
+      originBuildingId: projectile.originBuildingId ?? null,
+      targetKind: projectile.targetKind,
+      targetBuildingId: projectile.targetBuildingId ?? null,
+      targetUnitId: projectile.targetUnitId ?? null,
       x: Number(projectile.x.toFixed(2)),
       y: Number(projectile.y.toFixed(2)),
       targetX: projectile.targetX,
       targetY: projectile.targetY,
+      appliesDamageOnImpact: projectile.appliesDamageOnImpact,
       hp: projectile.hp,
       maxHp: projectile.maxHp,
       armor: projectile.armor,
       attack: projectile.attack,
       range: projectile.range,
+      attackCooldown: projectile.attackCooldown,
       impactTick: projectile.impactTick,
       screenX: Number((camera.x + (projectile.x * TILE + TILE / 2) * camera.scale).toFixed(2)),
       screenY: Number((camera.y + (projectile.y * TILE + TILE / 2) * camera.scale).toFixed(2))
@@ -2280,20 +2632,73 @@ function renderGameToText(): string {
         screenY: Number((camera.y + (building.y + 0.5) * TILE * camera.scale).toFixed(2))
       };
     }),
-    foreignObservations: (state.foreignObservations?.[playerTribe] ?? []).slice(-20).map((observation) => ({
-      id: observation.id,
-      tick: observation.tick,
-      observerTribeId: observation.observerTribeId,
-      kind: observation.kind,
-      subjectKind: observation.subjectKind,
-      subjectTribeId: observation.subjectTribeId,
-      subjectId: observation.subjectId,
-      subjectType: observation.subjectType,
-      x: observation.x,
-      y: observation.y,
-      hp: observation.hp
-    })),
-    resourceLayoutFingerprint: buildResourceLayoutFingerprint(state),
+	    foreignObservations: (state.foreignObservations?.[playerTribe] ?? []).slice(-20).map((observation) => ({
+	      id: observation.id,
+	      tick: observation.tick,
+	      observerTribeId: observation.observerTribeId,
+	      kind: observation.kind,
+	      subjectKind: observation.subjectKind,
+	      subjectTribeId: observation.subjectTribeId,
+	      subjectId: observation.subjectId,
+	      subjectType: observation.subjectType,
+	      x: observation.x,
+	      y: observation.y,
+	      hp: observation.hp,
+      gateTreatyIncidentId: observation.gateTreatyIncidentId ?? null,
+      gateTreatyId: observation.gateTreatyId ?? null,
+      gateOperationId: observation.gateOperationId ?? null,
+      gateOwnerTribeId: observation.gateOwnerTribeId ?? null,
+      affectedTribeId: observation.affectedTribeId ?? null,
+      packetId: observation.packetId ?? null,
+      gateIncidentAction: observation.gateIncidentAction ?? null,
+      gateBuildingId: observation.gateBuildingId ?? null,
+      gateSabotageId: observation.gateSabotageId ?? null,
+      gateSabotageAction: observation.gateSabotageAction ?? null
+	    })),
+    gateTreatyWitnessObservations: tribeIds
+      .flatMap((tribeId) =>
+        (state.foreignObservations?.[tribeId] ?? [])
+          .filter((observation) => observation.kind === "gate_treaty_incident_witnessed")
+          .map((observation) => ({
+            id: observation.id,
+            tick: observation.tick,
+            observerTribeId: tribeId,
+            gateTreatyIncidentId: observation.gateTreatyIncidentId ?? null,
+            gateTreatyId: observation.gateTreatyId ?? null,
+            gateOperationId: observation.gateOperationId ?? null,
+            gateOwnerTribeId: observation.gateOwnerTribeId ?? observation.subjectTribeId,
+            affectedTribeId: observation.affectedTribeId ?? null,
+            packetId: observation.packetId ?? null,
+            gateIncidentAction: observation.gateIncidentAction ?? null,
+            buildingId: observation.subjectId,
+            x: observation.x,
+            y: observation.y
+          }))
+      )
+      .slice(-20),
+    gateSabotageWitnessObservations: tribeIds
+      .flatMap((tribeId) =>
+        (state.foreignObservations?.[tribeId] ?? [])
+          .filter((observation) => observation.kind === "gate_sabotage_witnessed")
+          .map((observation) => ({
+            id: observation.id,
+            tick: observation.tick,
+            observerTribeId: tribeId,
+            gateOperationId: observation.gateOperationId ?? null,
+            gateOwnerTribeId: observation.gateOwnerTribeId ?? observation.affectedTribeId ?? null,
+            affectedTribeId: observation.affectedTribeId ?? null,
+            gateBuildingId: observation.gateBuildingId ?? null,
+            gateSabotageId: observation.gateSabotageId ?? null,
+            gateSabotageAction: observation.gateSabotageAction ?? null,
+            saboteurTribeId: observation.subjectTribeId,
+            saboteurUnitId: observation.subjectId,
+            saboteurUnitType: observation.subjectType,
+            x: observation.x,
+            y: observation.y
+          }))
+      )
+      .slice(-20),
+	    resourceLayoutFingerprint: buildResourceLayoutFingerprint(state),
     resourceTiles: resourceTypes.map((type) => summarizeResourceTiles(state, type)),
     contestedResourceSites: summarizeContestedResourceSites(state),
     resourceControl: tribeIds.map((tribeId) => getResourceControlSummary(state, tribeId)),
@@ -2382,7 +2787,8 @@ function renderGameToText(): string {
       tick: event.tick,
       type: event.type,
       title: event.title,
-      body: event.body
+      body: event.body,
+      context: event.context ?? null
     }))
   };
   return JSON.stringify(payload);
@@ -2713,11 +3119,21 @@ function forceGateRansomForTest(): {
 function forceGateAccessSabotageForTest(): {
   ok: boolean;
   buildingId?: string;
+  routeGateId?: string;
   grantTreatyId?: string;
+  grantRouteId?: string;
+  grantRouteGateIds?: string[];
+  grantRouteTreatyIds?: string[];
+  grantRouteTerms?: string;
   revokeTreatyId?: string;
+  revokeRouteId?: string;
+  revokeRouteTreatyIds?: string[];
   redPassableBefore?: boolean;
+  redRoutePassableBefore?: boolean;
   redPassableAfterGrant?: boolean;
+  redRoutePassableAfterGrant?: boolean;
   redPassableAfterRevoke?: boolean;
+  redRoutePassableAfterRevoke?: boolean;
   redPassableAfterSabotage?: boolean;
   redPassableAfterSabotageExpires?: boolean;
   treatyPacketId?: string;
@@ -2725,12 +3141,19 @@ function forceGateAccessSabotageForTest(): {
   treatyPacketGateIds?: string[];
   treatyPacketRouteMemory?: string[];
   treatyIncidentId?: string;
+  treatyIncidentIds?: string[];
   treatyIncidentAction?: GatePassageAction;
   treatyIncidentSummary?: string;
   treatyIncidentParticipants?: TribeId[];
   treatyIncidentWitnesses?: TribeId[];
+  treatyWitnessObservationCount?: number;
+  treatyWitnessObservationIds?: string[];
   sabotageAction?: GateSabotageAction;
   sabotageHistoryCount?: number;
+  sabotageRecordId?: string;
+  sabotageSaboteurUnitId?: string;
+  sabotageWitnessObservationCount?: number;
+  sabotageWitnessObservationIds?: string[];
   damageBefore?: number;
   damageAfter?: number;
   eventTypes?: string[];
@@ -2760,6 +3183,28 @@ function forceGateAccessSabotageForTest(): {
     }
     gate = state.buildings[built.buildingId];
   }
+  let routeGate = Object.values(state.buildings)
+    .filter((building) => building.tribeId === "blue" && building.type === "gate" && building.hp > 0 && building.id !== gate.id)
+    .sort((left, right) => Math.hypot(left.x - gate.x, left.y - gate.y) - Math.hypot(right.x - gate.x, right.y - gate.y) || left.id.localeCompare(right.id))[0];
+  if (!routeGate) {
+    const target = {
+      x: clamp(gate.x + 4, 4, MAP_SIZE - 5),
+      y: clamp(gate.y + 2, 4, MAP_SIZE - 5)
+    };
+    for (let y = target.y - 1; y <= target.y + 1; y += 1) {
+      for (let x = target.x - 1; x <= target.x + 1; x += 1) {
+        const tile = state.map[tileIndex(x, y)];
+        tile.terrain = "grass";
+        delete tile.resource;
+      }
+    }
+    const built = buildStructure(state, "blue", "gate", target);
+    if (!built.ok) {
+      render();
+      return { ok: false, buildingId: gate.id, reason: built.reason };
+    }
+    routeGate = state.buildings[built.buildingId];
+  }
   const greenWitness = Object.values(state.units).find((unit) => unit.tribeId === "green" && unit.type === "sentinel" && unit.hp > 0);
   if (!greenWitness) {
     render();
@@ -2773,7 +3218,14 @@ function forceGateAccessSabotageForTest(): {
     render();
     return { ok: false, buildingId: gate.id, reason: reset.reason };
   }
+  const routeReset = setGateState(state, "blue", "open", routeGate.id, "owner_only");
+  if (!routeReset.ok) {
+    render();
+    return { ok: false, buildingId: gate.id, routeGateId: routeGate.id, reason: routeReset.reason };
+  }
   const redPassableBefore = isTileWalkable(state, gate.x, gate.y, "red");
+  const redRoutePassableBefore = isTileWalkable(state, routeGate.x, routeGate.y, "red");
+  const routeTerms = "Red may use both smoke route gates for couriers while the writ is active.";
   const grant = issueSovereignOrder(state, "blue", {
     type: "GATE_OPERATION",
     priority: 1,
@@ -2784,6 +3236,9 @@ function forceGateAccessSabotageForTest(): {
     gateAccessTreatyAction: "grant",
     gateAccessTreatyName: "Smoke road writ",
     gateAccessTreatyTerms: "Red may pass this gate only under this writ.",
+    gateRouteName: "Smoke two-gate road",
+    gateRouteGateIds: [gate.id, routeGate.id],
+    gateRouteTerms: routeTerms,
     gateAccessTreatyDurationTicks: TICK_RATE * 10,
     reason: "Browser smoke explicit access treaty grant."
   });
@@ -2791,8 +3246,16 @@ function forceGateAccessSabotageForTest(): {
     render();
     return { ok: false, buildingId: gate.id, reason: grant.reason };
   }
-  const grantTreatyId = state.gateAccessTreaties.at(-1)?.id;
+  const grantRouteTreaties = state.gateAccessTreaties
+    .filter((treaty) => treaty.action === "grant" && treaty.routeName === "Smoke two-gate road" && treaty.targetTribeId === "red")
+    .slice(-2);
+  const grantTreaty = grantRouteTreaties.find((treaty) => treaty.buildingId === gate.id) ?? grantRouteTreaties[0];
+  const grantTreatyId = grantTreaty?.id;
+  const grantRouteId = grantTreaty?.routeId;
+  const grantRouteGateIds = grantTreaty?.routeGateIds ?? [];
+  const grantRouteTreatyIds = grantRouteTreaties.map((treaty) => treaty.id);
   const redPassableAfterGrant = isTileWalkable(state, gate.x, gate.y, "red");
+  const redRoutePassableAfterGrant = isTileWalkable(state, routeGate.x, routeGate.y, "red");
   let idleRedMessenger = Object.values(state.units).find((unit) => unit.tribeId === "red" && unit.type === "messenger" && unit.hp > 0 && unit.task.kind === "idle");
   if (!idleRedMessenger) {
     const trained = issueSovereignOrder(state, "red", {
@@ -2853,7 +3316,43 @@ function forceGateAccessSabotageForTest(): {
   treatyCarrier.y = treatyPacket.destination.y;
   advanceGameTicks(state, 1);
   const treatyIncident = state.gateTreatyIncidents.at(-1);
+  let secondTreatyIncident = treatyIncident;
+  const secondMessenger = issueSovereignOrder(state, "red", {
+    type: "RECRUIT",
+    priority: 1,
+    unitType: "messenger",
+    reason: "Browser smoke needs a second courier for repeated treaty incident evidence."
+  });
+  if (secondMessenger.ok) {
+    const secondExistingPacketIds = new Set(Object.keys(state.packets));
+    const secondCourier = issueSovereignOrder(state, "red", {
+      type: "SEND_MESSENGER",
+      priority: 1,
+      recipientTribeId: "blue",
+      messageType: "LETTER",
+      diplomacyIntent: "NONE",
+      subject: "Second safe-passage route proof",
+      body: "A second Red courier tests whether the Smoke road writ is honored.",
+      reason: "Browser smoke creates repeated treaty incident evidence."
+    });
+    if (secondCourier.ok) {
+      const secondTreatyPacket = Object.values(state.packets).find(
+        (packet) => !secondExistingPacketIds.has(packet.id) && packet.originTribeId === "red" && packet.recipientTribeId === "blue"
+      );
+      const secondCarrier = secondTreatyPacket?.carrierUnitId ? state.units[secondTreatyPacket.carrierUnitId] : undefined;
+      if (secondTreatyPacket && secondCarrier) {
+        secondCarrier.x = secondTreatyPacket.destination.x;
+        secondCarrier.y = secondTreatyPacket.destination.y;
+        advanceGameTicks(state, 1);
+        secondTreatyIncident = state.gateTreatyIncidents.at(-1);
+      }
+    }
+  }
   const treatyPacketRouteMemory = treatyPacket.routeMemory.slice(-6);
+  const treatyIncidentIds = Array.from(new Set([treatyIncident?.id, secondTreatyIncident?.id].filter((id): id is string => Boolean(id))));
+  const treatyWitnessObservations = (state.foreignObservations.green ?? []).filter(
+    (observation) => observation.kind === "gate_treaty_incident_witnessed" && treatyIncidentIds.includes(observation.gateTreatyIncidentId ?? "")
+  );
   const revoke = issueSovereignOrder(state, "blue", {
     type: "GATE_OPERATION",
     priority: 1,
@@ -2861,14 +3360,24 @@ function forceGateAccessSabotageForTest(): {
     recipientTribeId: "red",
     gateOperationIntent: "revoke Red controlled treaty passage",
     gateAccessTreatyAction: "revoke",
+    gateRouteName: "Smoke two-gate road",
+    gateRouteGateIds: [gate.id, routeGate.id],
+    gateRouteTerms: "The smoke two-gate road is revoked for Red.",
     reason: "Browser smoke explicit access treaty revoke."
   });
   if (!revoke.ok) {
     render();
     return { ok: false, buildingId: gate.id, grantTreatyId, reason: revoke.reason };
   }
-  const revokeTreatyId = state.gateAccessTreaties.at(-1)?.id;
+  const revokeRouteTreaties = state.gateAccessTreaties
+    .filter((treaty) => treaty.action === "revoke" && treaty.routeName === "Smoke two-gate road" && treaty.targetTribeId === "red")
+    .slice(-2);
+  const revokeTreaty = revokeRouteTreaties.find((treaty) => treaty.buildingId === gate.id) ?? revokeRouteTreaties[0];
+  const revokeTreatyId = revokeTreaty?.id;
+  const revokeRouteId = revokeTreaty?.routeId;
+  const revokeRouteTreatyIds = revokeRouteTreaties.map((treaty) => treaty.id);
   const redPassableAfterRevoke = isTileWalkable(state, gate.x, gate.y, "red");
+  const redRoutePassableAfterRevoke = isTileWalkable(state, routeGate.x, routeGate.y, "red");
 
   const redSaboteur = Object.values(state.units).find((unit) => unit.tribeId === "red" && unit.hp > 0 && unit.type === "militia");
   if (!redSaboteur) {
@@ -2914,27 +3423,48 @@ function forceGateAccessSabotageForTest(): {
   if (!damaged.ok) {
     return { ok: false, buildingId: gate.id, grantTreatyId, revokeTreatyId, sabotageAction, reason: damaged.reason };
   }
+  const latestSabotageRecord = state.gateSabotageHistory.at(-1);
+  const sabotageWitnessObservations = (state.foreignObservations.blue ?? []).filter(
+    (observation) => observation.kind === "gate_sabotage_witnessed" && observation.gateSabotageId === latestSabotageRecord?.id
+  );
   return {
     ok: true,
     buildingId: gate.id,
+    routeGateId: routeGate.id,
     grantTreatyId,
+    grantRouteId,
+    grantRouteGateIds,
+    grantRouteTreatyIds,
+    grantRouteTerms: routeTerms,
     revokeTreatyId,
+    revokeRouteId,
+    revokeRouteTreatyIds,
     treatyPacketId: treatyPacket.id,
     treatyPacketState: treatyPacket.state,
     treatyPacketGateIds,
     treatyPacketRouteMemory,
     treatyIncidentId: treatyIncident?.id,
+    treatyIncidentIds,
     treatyIncidentAction: treatyIncident?.action,
     treatyIncidentSummary: treatyIncident?.summary,
     treatyIncidentParticipants: treatyIncident?.participantTribeIds,
     treatyIncidentWitnesses: treatyIncident?.witnessTribeIds,
+    treatyWitnessObservationCount: treatyWitnessObservations.length,
+    treatyWitnessObservationIds: treatyWitnessObservations.map((observation) => observation.id),
     redPassableBefore,
+    redRoutePassableBefore,
     redPassableAfterGrant,
+    redRoutePassableAfterGrant,
     redPassableAfterRevoke,
+    redRoutePassableAfterRevoke,
     redPassableAfterSabotage,
     redPassableAfterSabotageExpires,
     sabotageAction,
     sabotageHistoryCount: state.gateSabotageHistory.length,
+    sabotageRecordId: latestSabotageRecord?.id,
+    sabotageSaboteurUnitId: latestSabotageRecord?.saboteurUnitId,
+    sabotageWitnessObservationCount: sabotageWitnessObservations.length,
+    sabotageWitnessObservationIds: sabotageWitnessObservations.map((observation) => observation.id),
     damageBefore,
     damageAfter: gate.hp,
     eventTypes: state.events.slice(-18).map((event) => event.type)
@@ -2954,6 +3484,12 @@ function forcePerimeterForTest(): {
   gateIndex?: number;
   wallBlocks?: boolean;
   gatePassable?: boolean;
+  prebuildPreviewOk?: boolean;
+  prebuildPreview?: unknown;
+  prebuildPreviewReason?: string;
+  prebuildResourcesUnchanged?: boolean;
+  prebuildBuildingCountUnchanged?: boolean;
+  prebuildPlanCountUnchanged?: boolean;
   placementPreview?: unknown;
   recentEvents?: string[];
   reason?: string;
@@ -2981,8 +3517,7 @@ function forcePerimeterForTest(): {
     }
   }
 
-  const beforeIds = new Set(Object.keys(state.buildings));
-  const result = issueSovereignOrder(state, playerTribe, {
+  const buildOrder: AiStrategicOrder = {
     type: "BUILD",
     priority: 1,
     buildingType: "wall",
@@ -2996,7 +3531,30 @@ function forcePerimeterForTest(): {
     perimeterShape: "straight five-tile line with central gate",
     perimeterStrategy: "Hold a visible border while preserving one gate-controlled passage.",
     reason: "Browser smoke perimeter test."
-  });
+  };
+  const resourcesBeforePreview = { ...tribe.resources };
+  const buildingCountBeforePreview = Object.keys(state.buildings).length;
+  const planCountBeforePreview = state.fortificationPlans.length;
+  const prebuildPreview = previewFortificationBuild(state, playerTribe, buildOrder);
+  const prebuildResourcesUnchanged = resourceTypes.every((type) => tribe.resources[type] === resourcesBeforePreview[type]);
+  const prebuildBuildingCountUnchanged = Object.keys(state.buildings).length === buildingCountBeforePreview;
+  const prebuildPlanCountUnchanged = state.fortificationPlans.length === planCountBeforePreview;
+  if (!prebuildPreview.ok || !prebuildResourcesUnchanged || !prebuildBuildingCountUnchanged || !prebuildPlanCountUnchanged) {
+    render();
+    return {
+      ok: false,
+      prebuildPreviewOk: prebuildPreview.ok,
+      prebuildPreview: prebuildPreview.ok ? prebuildPreview.preview : undefined,
+      prebuildPreviewReason: prebuildPreview.ok ? undefined : prebuildPreview.reason,
+      prebuildResourcesUnchanged,
+      prebuildBuildingCountUnchanged,
+      prebuildPlanCountUnchanged,
+      reason: prebuildPreview.ok ? "pre-build preview mutated state" : prebuildPreview.reason
+    };
+  }
+
+  const beforeIds = new Set(Object.keys(state.buildings));
+  const result = issueSovereignOrder(state, playerTribe, buildOrder);
   if (!result.ok) {
     render();
     return { ok: false, reason: result.reason };
@@ -3027,8 +3585,252 @@ function forcePerimeterForTest(): {
     gateIndex: latestPlan?.perimeterGateIndex,
     wallBlocks,
     gatePassable,
+    prebuildPreviewOk: true,
+    prebuildPreview: prebuildPreview.preview,
+    prebuildResourcesUnchanged,
+    prebuildBuildingCountUnchanged,
+    prebuildPlanCountUnchanged,
     placementPreview: latestPlan?.placementPreview,
     recentEvents: state.events.slice(-10).map((event) => `${event.type}:${event.body}`)
+  };
+}
+
+function forceCornerPerimeterForTest(): {
+  ok: boolean;
+  buildingIds?: string[];
+  wallCount?: number;
+  gateCount?: number;
+  planCount?: number;
+  groupId?: string;
+  pattern?: PerimeterPattern;
+  direction?: PerimeterDirection;
+  length?: number;
+  gateIndex?: number;
+  nonCollinear?: boolean;
+  wallBlocks?: boolean;
+  gatePassable?: boolean;
+  prebuildPreviewOk?: boolean;
+  prebuildPreview?: unknown;
+  prebuildPreviewReason?: string;
+  prebuildResourcesUnchanged?: boolean;
+  prebuildBuildingCountUnchanged?: boolean;
+  prebuildPlanCountUnchanged?: boolean;
+  placementPreview?: unknown;
+  recentEvents?: string[];
+  reason?: string;
+} {
+  const tribe = state.tribes[playerTribe];
+  for (const type of resourceTypes) tribe.resources[type] = Math.max(tribe.resources[type], 1200);
+  for (const developmentId of ["masonry", "ironworking"] as const) {
+    const result = chooseDevelopment(state, playerTribe, developmentId);
+    if (!result.ok && !tribe.developments.includes(developmentId)) {
+      render();
+      return { ok: false, reason: result.reason };
+    }
+  }
+
+  const townHall = getTownHall(state, playerTribe);
+  const target = {
+    x: clamp(townHall.x + 25, 4, MAP_SIZE - 6),
+    y: clamp(townHall.y + 8, 4, MAP_SIZE - 6)
+  };
+  for (let y = target.y - 1; y <= target.y + 3; y += 1) {
+    for (let x = target.x - 1; x <= target.x + 4; x += 1) {
+      const tile = state.map[tileIndex(x, y)];
+      tile.terrain = "grass";
+      delete tile.resource;
+    }
+  }
+
+  const buildOrder: AiStrategicOrder = {
+    type: "BUILD",
+    priority: 1,
+    buildingType: "wall",
+    targetX: target.x,
+    targetY: target.y,
+    perimeterPattern: "gate_corner",
+    perimeterDirection: "east_west",
+    perimeterLength: 5,
+    perimeterGateIndex: 3,
+    fortificationIntent: "browser smoke bent customs wall",
+    perimeterShape: "L-shaped corner wall with the bend gate at the road elbow",
+    perimeterStrategy: "Use a bend to watch two approaches while preserving one controlled passage.",
+    reason: "Browser smoke corner perimeter test."
+  };
+  const resourcesBeforePreview = { ...tribe.resources };
+  const buildingCountBeforePreview = Object.keys(state.buildings).length;
+  const planCountBeforePreview = state.fortificationPlans.length;
+  const prebuildPreview = previewFortificationBuild(state, playerTribe, buildOrder);
+  const prebuildResourcesUnchanged = resourceTypes.every((type) => tribe.resources[type] === resourcesBeforePreview[type]);
+  const prebuildBuildingCountUnchanged = Object.keys(state.buildings).length === buildingCountBeforePreview;
+  const prebuildPlanCountUnchanged = state.fortificationPlans.length === planCountBeforePreview;
+  if (!prebuildPreview.ok || !prebuildResourcesUnchanged || !prebuildBuildingCountUnchanged || !prebuildPlanCountUnchanged) {
+    render();
+    return {
+      ok: false,
+      prebuildPreviewOk: prebuildPreview.ok,
+      prebuildPreview: prebuildPreview.ok ? prebuildPreview.preview : undefined,
+      prebuildPreviewReason: prebuildPreview.ok ? undefined : prebuildPreview.reason,
+      prebuildResourcesUnchanged,
+      prebuildBuildingCountUnchanged,
+      prebuildPlanCountUnchanged,
+      reason: prebuildPreview.ok ? "pre-build preview mutated state" : prebuildPreview.reason
+    };
+  }
+
+  const beforeIds = new Set(Object.keys(state.buildings));
+  const result = issueSovereignOrder(state, playerTribe, buildOrder);
+  if (!result.ok) {
+    render();
+    return { ok: false, reason: result.reason };
+  }
+
+  const built = Object.values(state.buildings).filter((building) => !beforeIds.has(building.id));
+  const walls = built.filter((building) => building.type === "wall");
+  const gates = built.filter((building) => building.type === "gate");
+  const latestPlan = state.fortificationPlans.at(-1);
+  const groupId = latestPlan?.perimeterGroupId;
+  const perimeterPlans = groupId ? state.fortificationPlans.filter((plan) => plan.perimeterGroupId === groupId) : [];
+  const selected = gates[0] ?? built[0];
+  if (selected) selectAndShowBuilding(selected);
+  else render({ forceHud: true, forceLabels: true, forceFog: true });
+
+  const wallBlocks = walls.length > 0 && walls.every((wall) => !isTileWalkable(state, wall.x, wall.y, playerTribe));
+  const gatePassable = gates.length > 0 && gates.every((gate) => isTileWalkable(state, gate.x, gate.y, playerTribe));
+  const nonCollinear = new Set(built.map((building) => building.x)).size > 1 && new Set(built.map((building) => building.y)).size > 1;
+  return {
+    ok: built.length === 5 && walls.length === 4 && gates.length === 1 && perimeterPlans.length === 5 && wallBlocks && gatePassable && nonCollinear,
+    buildingIds: built.map((building) => building.id),
+    wallCount: walls.length,
+    gateCount: gates.length,
+    planCount: perimeterPlans.length,
+    groupId,
+    pattern: latestPlan?.perimeterPattern,
+    direction: latestPlan?.perimeterDirection,
+    length: latestPlan?.perimeterLength,
+    gateIndex: latestPlan?.perimeterGateIndex,
+    nonCollinear,
+    wallBlocks,
+    gatePassable,
+    prebuildPreviewOk: true,
+    prebuildPreview: prebuildPreview.preview,
+    prebuildResourcesUnchanged,
+    prebuildBuildingCountUnchanged,
+    prebuildPlanCountUnchanged,
+    placementPreview: latestPlan?.placementPreview,
+    recentEvents: state.events.slice(-10).map((event) => `${event.type}:${event.body}`)
+  };
+}
+
+function forceTowerPerimeterForTest(): {
+  ok: boolean;
+  buildingIds?: string[];
+  turretCount?: number;
+  watchtowerCount?: number;
+  planCount?: number;
+  turretGroupId?: string;
+  watchtowerGroupId?: string;
+  turretPreview?: unknown;
+  watchtowerPreview?: unknown;
+  recentEvents?: string[];
+  reason?: string;
+} {
+  const tribe = state.tribes[playerTribe];
+  for (const type of resourceTypes) tribe.resources[type] = Math.max(tribe.resources[type], 1800);
+  for (const developmentId of ["ironworking", "ballistics"] as const) {
+    const result = chooseDevelopment(state, playerTribe, developmentId);
+    if (!result.ok && !tribe.developments.includes(developmentId)) {
+      render();
+      return { ok: false, reason: result.reason };
+    }
+  }
+
+  const townHall = getTownHall(state, playerTribe);
+  const turretTarget = {
+    x: clamp(townHall.x + 22, 5, MAP_SIZE - 6),
+    y: clamp(townHall.y + 12, 5, MAP_SIZE - 6)
+  };
+  const watchtowerTarget = {
+    x: clamp(townHall.x + 22, 5, MAP_SIZE - 6),
+    y: clamp(townHall.y + 16, 5, MAP_SIZE - 6)
+  };
+  for (const target of [turretTarget, watchtowerTarget]) {
+    for (let y = target.y - 1; y <= target.y + 1; y += 1) {
+      for (let x = target.x - 3; x <= target.x + 3; x += 1) {
+        const tile = state.map[tileIndex(x, y)];
+        tile.terrain = "grass";
+        delete tile.resource;
+      }
+    }
+  }
+
+  const beforeIds = new Set(Object.keys(state.buildings));
+  const turretResult = issueSovereignOrder(state, playerTribe, {
+    type: "BUILD",
+    priority: 1,
+    buildingType: "turret",
+    targetX: turretTarget.x,
+    targetY: turretTarget.y,
+    perimeterPattern: "line",
+    perimeterDirection: "east_west",
+    perimeterLength: 3,
+    fortificationIntent: "browser smoke turret battery",
+    perimeterShape: "three-turret line",
+    perimeterStrategy: "Create three overlapping fields of fire along the road without blocking friendly movement.",
+    reason: "Browser smoke turret perimeter test."
+  });
+  if (!turretResult.ok) {
+    render();
+    return { ok: false, reason: turretResult.reason };
+  }
+  const turretPlans = state.fortificationPlans.slice(-3);
+  const turretGroupId = turretPlans.at(-1)?.perimeterGroupId;
+
+  const watchtowerResult = issueSovereignOrder(state, playerTribe, {
+    type: "BUILD",
+    priority: 1,
+    buildingType: "watchtower",
+    targetX: watchtowerTarget.x,
+    targetY: watchtowerTarget.y,
+    perimeterPattern: "line",
+    perimeterDirection: "east_west",
+    perimeterLength: 3,
+    fortificationIntent: "browser smoke lookout chain",
+    perimeterShape: "three-watchtower line",
+    perimeterStrategy: "Extend sight along the same frontier without creating a movement barrier.",
+    reason: "Browser smoke watchtower perimeter test."
+  });
+  if (!watchtowerResult.ok) {
+    render();
+    return { ok: false, reason: watchtowerResult.reason };
+  }
+
+  const newBuildings = Object.values(state.buildings).filter((building) => !beforeIds.has(building.id));
+  const turretBuildings = newBuildings.filter((building) => building.type === "turret");
+  const watchtowerBuildings = newBuildings.filter((building) => building.type === "watchtower");
+  const watchtowerPlans = state.fortificationPlans.slice(-3);
+  const watchtowerGroupId = watchtowerPlans.at(-1)?.perimeterGroupId;
+  const planCount = state.fortificationPlans.filter((plan) => plan.perimeterGroupId === turretGroupId || plan.perimeterGroupId === watchtowerGroupId).length;
+  const selected = turretBuildings[0] ?? watchtowerBuildings[0];
+  if (selected) selectAndShowBuilding(selected);
+  else render({ forceHud: true, forceLabels: true, forceFog: true });
+
+  return {
+    ok:
+      turretBuildings.length === 3 &&
+      watchtowerBuildings.length === 3 &&
+      planCount === 6 &&
+      turretPlans.every((plan) => plan.buildingType === "turret" && plan.perimeterPattern === "line") &&
+      watchtowerPlans.every((plan) => plan.buildingType === "watchtower" && plan.perimeterPattern === "line"),
+    buildingIds: newBuildings.map((building) => building.id),
+    turretCount: turretBuildings.length,
+    watchtowerCount: watchtowerBuildings.length,
+    planCount,
+    turretGroupId,
+    watchtowerGroupId,
+    turretPreview: turretPlans[0]?.placementPreview,
+    watchtowerPreview: watchtowerPlans[0]?.placementPreview,
+    recentEvents: state.events.slice(-16).map((event) => `${event.type}:${event.body}`)
   };
 }
 
@@ -3182,6 +3984,124 @@ function forceSiegeForTest(buildingType: "wall" | "gate" | "turret" = "wall"): {
   };
 }
 
+function forceMultiTargetSiegeForTest(): {
+  ok: boolean;
+  targetBuildingIds?: string[];
+  assignedTargets?: string[];
+  guardRoles?: Array<{ unitId: string; role: "cover" | "escort"; task: string }>;
+  destroyedTargets?: string[];
+  attackerTasksBefore?: string[];
+  attackerTasksAfter?: string[];
+  siegePlan?: unknown;
+  recentEvents?: string[];
+  reason?: string;
+} {
+  const tribe = state.tribes[playerTribe];
+  for (const type of resourceTypes) tribe.resources[type] = Math.max(tribe.resources[type], 800);
+  const targetBuildingIds = ["test_multi_siege_wall_a", "test_multi_siege_wall_b"];
+  const targetPositions = [
+    { id: targetBuildingIds[0], x: 62, y: 50, hp: 2 },
+    { id: targetBuildingIds[1], x: 62, y: 52, hp: 120 }
+  ];
+  const stats = getBuildingTypeCombatStats("wall");
+  for (const target of targetPositions) {
+    state.buildings[target.id] = {
+      id: target.id,
+      type: "wall",
+      tribeId: "red",
+      x: target.x,
+      y: target.y,
+      hp: target.hp,
+      maxHp: stats.maxHp,
+      armor: 0,
+      attack: 0,
+      range: 0,
+      attackCooldown: 0
+    };
+    for (const pos of [
+      { x: target.x - 2, y: target.y },
+      { x: target.x - 1, y: target.y },
+      { x: target.x, y: target.y },
+      { x: target.x - 2, y: target.y + 1 }
+    ]) {
+      state.map[tileIndex(pos.x, pos.y)].terrain = "grass";
+      delete state.map[tileIndex(pos.x, pos.y)].resource;
+    }
+  }
+  const attackers = Object.values(state.units)
+    .filter((unit) => unit.tribeId === playerTribe && unit.hp > 0 && unit.type === "militia")
+    .sort((left, right) => left.id.localeCompare(right.id))
+    .slice(0, 4);
+  while (attackers.length < 4) {
+    const trained = trainUnit(state, playerTribe, "militia");
+    if (!trained.ok) return { ok: false, targetBuildingIds, reason: trained.reason };
+    const unit = state.units[trained.unitId];
+    if (unit) attackers.push(unit);
+  }
+  for (const [index, attacker] of attackers.entries()) {
+    attacker.x = targetPositions[0].x - 2;
+    attacker.y = targetPositions[0].y + index;
+    attacker.hp = attacker.maxHp;
+    attacker.attackCooldown = 0;
+    attacker.task = { kind: "idle" };
+  }
+  const coverUnit = attackers[0];
+  const escortUnit = attackers[1];
+  const result = issueSovereignOrder(state, playerTribe, {
+    type: "ATTACK",
+    priority: 1,
+    recipientTribeId: "red",
+    targetBuildingIds,
+    coverUnitIds: [coverUnit.id],
+    escortUnitIds: [escortUnit.id],
+    coverX: targetPositions[0].x - 1,
+    coverY: targetPositions[0].y,
+    coverRadius: 4,
+    coverPlan: "screen hostile defenders near the first breach point",
+    escortX: targetPositions[1].x - 1,
+    escortY: targetPositions[1].y,
+    escortRadius: 5,
+    escortPlan: "escort the second breach group and intercept nearby defenders",
+    siegeIntent: "browser smoke multi-target siege group",
+    assaultPlan: "Split attackers across both named walls, then keep pressure on the surviving target.",
+    reason: "Browser smoke multi-target siege test."
+  });
+  if (!result.ok) {
+    render();
+    return { ok: false, targetBuildingIds, reason: result.reason };
+  }
+  const siegePlan = state.siegePlans.at(-1);
+  const assigned = Object.values(state.units).filter((unit) => unit.task.kind === "attackBuilding" && unit.task.siegePlanId === siegePlan?.id);
+  const assignedTargets = assigned.flatMap((unit) => (unit.task.kind === "attackBuilding" ? [unit.task.targetBuildingId] : []));
+  const guards = Object.values(state.units).filter((unit) => unit.task.kind === "guardSiege" && unit.task.siegePlanId === siegePlan?.id);
+  const guardRoles = guards.flatMap((unit) =>
+    unit.task.kind === "guardSiege" ? [{ unitId: unit.id, role: unit.task.guardRole, task: describeUnitTask(state, unit) }] : []
+  );
+  const attackerTasksBefore = assigned.map((unit) => describeUnitTask(state, unit));
+  const orderEvents = state.events.slice(-12).map((event) => `${event.type}:${event.body}`);
+  advanceSimulationTicks(220, { scheduleAi: false, render: false });
+  render({ forceHud: true, forceLabels: true, forceFog: true });
+  const attackerTasksAfter = assigned.map((unit) => describeUnitTask(state, unit));
+  const destroyedTargets = targetBuildingIds.filter((id) => !state.buildings[id]);
+  const recentEvents = [...orderEvents, ...state.events.slice(-36).map((event) => `${event.type}:${event.body}`)];
+  return {
+    ok:
+      destroyedTargets.length === targetBuildingIds.length &&
+      targetBuildingIds.every((id) => assignedTargets.includes(id)) &&
+      guardRoles.some((role) => role.role === "cover" && role.unitId === coverUnit.id) &&
+      guardRoles.some((role) => role.role === "escort" && role.unitId === escortUnit.id) &&
+      recentEvents.some((event) => event.includes("SIEGE_GROUP_RETARGETED") && event.includes(targetBuildingIds[1])),
+    targetBuildingIds,
+    assignedTargets,
+    guardRoles,
+    destroyedTargets,
+    attackerTasksBefore,
+    attackerTasksAfter,
+    siegePlan,
+    recentEvents
+  };
+}
+
 function forceSiegeEngineForTest(): {
   ok: boolean;
   unitId?: string;
@@ -3266,7 +4186,22 @@ function forceArtilleryForTest(): {
   projectileSeen?: boolean;
   impactSeen?: boolean;
   destroyed?: boolean;
-  projectileSnapshots?: Array<{ id: string; x: number; y: number; targetBuildingId: string; impactTick: number }>;
+  projectileSnapshots?: Array<{
+    id: string;
+    projectileType: string;
+    targetKind: "building" | "unit";
+    x: number;
+    y: number;
+    targetBuildingId?: string;
+    targetUnitId?: string;
+    impactTick: number;
+    hp: number;
+    maxHp: number;
+    armor: number;
+    attack: number;
+    range: number;
+    attackCooldown: number;
+  }>;
   recentEvents?: string[];
   reason?: string;
 } {
@@ -3321,13 +4256,7 @@ function forceArtilleryForTest(): {
     return { ok: false, unitId: catapult.id, unitType: catapult.type, targetBuildingId, reason: result.reason };
   }
   advanceSimulationTicks(1, { scheduleAi: false, render: false });
-  const projectileSnapshots = Object.values(state.projectiles).map((projectile) => ({
-    id: projectile.id,
-    x: Number(projectile.x.toFixed(2)),
-    y: Number(projectile.y.toFixed(2)),
-    targetBuildingId: projectile.targetBuildingId,
-    impactTick: projectile.impactTick
-  }));
+  const projectileSnapshots = Object.values(state.projectiles).map(projectileSnapshotForTest);
   const projectileSeen = projectileSnapshots.length > 0;
   advanceSimulationTicks(120, { scheduleAi: false, render: false });
   render({ forceHud: true, forceLabels: true, forceFog: true });
@@ -3344,6 +4273,228 @@ function forceArtilleryForTest(): {
     destroyed: !remaining,
     projectileSnapshots,
     recentEvents
+  };
+}
+
+function projectileSnapshotForTest(projectile: SiegeProjectile) {
+  return {
+    id: projectile.id,
+    projectileType: projectile.projectileType,
+    targetKind: projectile.targetKind,
+    x: Number(projectile.x.toFixed(2)),
+    y: Number(projectile.y.toFixed(2)),
+    targetBuildingId: projectile.targetBuildingId,
+    targetUnitId: projectile.targetUnitId,
+    impactTick: projectile.impactTick,
+    hp: projectile.hp,
+    maxHp: projectile.maxHp,
+    armor: projectile.armor,
+    attack: projectile.attack,
+    range: projectile.range,
+    attackCooldown: projectile.attackCooldown
+  };
+}
+
+function forceProjectileVisualForTest(): {
+  ok: boolean;
+  unitId?: string;
+  unitType?: UnitType;
+  targetBuildingId?: string;
+  projectileSeen?: boolean;
+  projectileSnapshots?: ReturnType<typeof projectileSnapshotForTest>[];
+  visibleProjectiles?: unknown[];
+  recentCombatEvents?: unknown[];
+  combatOverlay?: unknown;
+  spriteVisuals?: unknown;
+  recentEvents?: string[];
+  reason?: string;
+} {
+  const tribe = state.tribes[playerTribe];
+  for (const type of resourceTypes) tribe.resources[type] = Math.max(tribe.resources[type], 1200);
+  for (const developmentId of ["ironworking", "public_works", "ballistics", "siege_engineering"] as const) {
+    const result = chooseDevelopment(state, playerTribe, developmentId);
+    if (!result.ok && !tribe.developments.includes(developmentId)) return { ok: false, reason: result.reason };
+  }
+  const trained = trainUnit(state, playerTribe, "catapult");
+  if (!trained.ok) return { ok: false, reason: trained.reason };
+  const catapult = Object.values(state.units).find((unit) => unit.id === trained.unitId);
+  if (!catapult) return { ok: false, reason: "trained catapult missing" };
+  const targetBuildingId = "test_projectile_visual_wall";
+  const stats = getBuildingTypeCombatStats("wall");
+  state.buildings[targetBuildingId] = {
+    id: targetBuildingId,
+    type: "wall",
+    tribeId: "red",
+    x: 52,
+    y: 50,
+    hp: 70,
+    maxHp: stats.maxHp,
+    armor: stats.armor,
+    attack: stats.attack,
+    range: stats.range,
+    attackCooldown: 0
+  };
+  for (const pos of [
+    { x: 45, y: 50 },
+    { x: 46, y: 50 },
+    { x: 52, y: 50 }
+  ]) {
+    state.map[tileIndex(pos.x, pos.y)].terrain = "grass";
+    delete state.map[tileIndex(pos.x, pos.y)].resource;
+  }
+  catapult.x = 45;
+  catapult.y = 50;
+  catapult.attackCooldown = 0;
+  catapult.task = { kind: "idle" };
+  const result = issueSovereignOrder(state, playerTribe, {
+    type: "ATTACK",
+    priority: 1,
+    targetBuildingId,
+    siegeIntent: "show an in-flight stone shot clearly on the board.",
+    assaultPlan: "Fire once and keep the projectile visible for observer QA.",
+    reason: "Browser smoke projectile visual test."
+  });
+  if (!result.ok) {
+    render();
+    return { ok: false, unitId: catapult.id, unitType: catapult.type, targetBuildingId, reason: result.reason };
+  }
+  advanceSimulationTicks(7, { scheduleAi: false, render: false });
+  render({ forceHud: true, forceLabels: true, forceFog: true });
+  const projectileSnapshots = Object.values(state.projectiles).map(projectileSnapshotForTest);
+  const parsed = JSON.parse(renderGameToText());
+  return {
+    ok: projectileSnapshots.some((projectile) => projectile.targetBuildingId === targetBuildingId),
+    unitId: catapult.id,
+    unitType: catapult.type,
+    targetBuildingId,
+    projectileSeen: projectileSnapshots.length > 0,
+    projectileSnapshots,
+    visibleProjectiles: parsed.visibleProjectiles,
+    recentCombatEvents: parsed.recentCombatEvents,
+    combatOverlay: parsed.boardReadability?.combatOverlay,
+    spriteVisuals: parsed.boardReadability?.spriteVisuals,
+    recentEvents: state.events.slice(-24).map((event) => `${event.type}:${event.body}`)
+  };
+}
+
+function forceRangedProjectilesForTest(): {
+  ok: boolean;
+  archerId?: string;
+  turretId?: string;
+  arrowTargetUnitId?: string;
+  boltTargetUnitId?: string;
+  arrowProjectile?: ReturnType<typeof projectileSnapshotForTest>;
+  turretBoltProjectile?: ReturnType<typeof projectileSnapshotForTest>;
+  projectileSnapshots?: ReturnType<typeof projectileSnapshotForTest>[];
+  visibleProjectiles?: unknown[];
+  recentCombatEvents?: unknown[];
+  combatOverlay?: unknown;
+  spriteVisuals?: unknown;
+  recentEvents?: string[];
+  reason?: string;
+} {
+  state.wars.blue.red = true;
+  state.wars.red.blue = true;
+  for (const pos of [
+    { x: 40, y: 53 },
+    { x: 43, y: 53 },
+    { x: 50, y: 55 },
+    { x: 56, y: 55 }
+  ]) {
+    state.map[tileIndex(pos.x, pos.y)].terrain = "grass";
+    delete state.map[tileIndex(pos.x, pos.y)].resource;
+  }
+  const archerStats = getUnitTypeCombatStats("archer");
+  const militiaStats = getUnitTypeCombatStats("militia");
+  const turretStats = getBuildingTypeCombatStats("turret");
+  const archer: Unit = {
+    id: "test_ranged_arrow_archer",
+    name: "Arrow Visual Archer",
+    type: "archer",
+    tribeId: playerTribe,
+    x: 40,
+    y: 53,
+    speed: 1.0,
+    visionRadius: 6,
+    hp: archerStats.hp,
+    maxHp: archerStats.maxHp,
+    armor: archerStats.armor,
+    attack: archerStats.attack,
+    range: archerStats.range,
+    attackCooldown: 0,
+    task: { kind: "idle" }
+  };
+  const arrowTarget: Unit = {
+    id: "test_ranged_arrow_target",
+    name: "Arrow Target Militia",
+    type: "militia",
+    tribeId: "red",
+    x: 43,
+    y: 53,
+    speed: 1.05,
+    visionRadius: 5,
+    hp: militiaStats.hp,
+    maxHp: militiaStats.maxHp,
+    armor: militiaStats.armor,
+    attack: militiaStats.attack,
+    range: militiaStats.range,
+    attackCooldown: 0,
+    task: { kind: "idle" }
+  };
+  const boltTarget: Unit = {
+    ...arrowTarget,
+    id: "test_ranged_bolt_target",
+    name: "Bolt Target Militia",
+    x: 56,
+    y: 55,
+    hp: militiaStats.hp,
+    maxHp: militiaStats.maxHp,
+    task: { kind: "idle" }
+  };
+  const turret: Building = {
+    id: "test_ranged_turret",
+    type: "turret",
+    tribeId: playerTribe,
+    x: 50,
+    y: 55,
+    hp: turretStats.maxHp,
+    maxHp: turretStats.maxHp,
+    armor: turretStats.armor,
+    attack: turretStats.attack,
+    range: turretStats.range,
+    attackCooldown: 0
+  };
+  state.units[archer.id] = archer;
+  state.units[arrowTarget.id] = arrowTarget;
+  state.units[boltTarget.id] = boltTarget;
+  state.buildings[turret.id] = turret;
+  advanceSimulationTicks(1, { scheduleAi: false, render: false });
+  archer.attack = 0;
+  turret.attackCooldown = TICKS_PER_GAME_YEAR;
+  selectAndShowBuilding(turret);
+  render({ forceHud: true, forceLabels: true, forceFog: true });
+  const projectileSnapshots = Object.values(state.projectiles).map(projectileSnapshotForTest);
+  const arrowProjectile = projectileSnapshots.find((projectile) => projectile.projectileType === "arrow" && projectile.targetUnitId === arrowTarget.id);
+  const turretBoltProjectile = projectileSnapshots.find((projectile) => projectile.projectileType === "turret_bolt" && projectile.targetUnitId === boltTarget.id);
+  const parsed = JSON.parse(renderGameToText());
+  archer.hp = 0;
+  arrowTarget.hp = 0;
+  boltTarget.hp = 0;
+  turret.hp = 0;
+  return {
+    ok: Boolean(arrowProjectile && turretBoltProjectile),
+    archerId: archer.id,
+    turretId: turret.id,
+    arrowTargetUnitId: arrowTarget.id,
+    boltTargetUnitId: boltTarget.id,
+    arrowProjectile,
+    turretBoltProjectile,
+    projectileSnapshots,
+    visibleProjectiles: parsed.visibleProjectiles,
+    recentCombatEvents: parsed.recentCombatEvents,
+    combatOverlay: parsed.boardReadability?.combatOverlay,
+    spriteVisuals: parsed.boardReadability?.spriteVisuals,
+    recentEvents: state.events.slice(-24).map((event) => `${event.type}:${event.body}`)
   };
 }
 
@@ -4105,6 +5256,133 @@ function forceRepairUnderFireForTest(): {
   };
 }
 
+function forceRepairInterdictionForTest(): {
+  ok: boolean;
+  targetBuildingId?: string;
+  repairerBeforeHp?: number;
+  repairerAfterHp?: number;
+  wallBeforeHp?: number;
+  wallAfterHp?: number | null;
+  attackTasks?: string[];
+  repairerTasks?: string[];
+  siegePlan?: unknown;
+  recentEvents?: string[];
+  reason?: string;
+} {
+  const redTribe = state.tribes.red;
+  const blueTribe = state.tribes[playerTribe];
+  for (const type of resourceTypes) {
+    redTribe.resources[type] = Math.max(redTribe.resources[type], 700);
+    blueTribe.resources[type] = Math.max(blueTribe.resources[type], 700);
+  }
+  if (!redTribe.developments.includes("masonry")) redTribe.developments.push("masonry");
+  const stats = getBuildingTypeCombatStats("wall");
+  const targetBuildingId = "test_repair_interdiction_wall";
+  state.buildings[targetBuildingId] = {
+    id: targetBuildingId,
+    type: "wall",
+    tribeId: "red",
+    x: 42,
+    y: 31,
+    hp: stats.maxHp - 100,
+    maxHp: stats.maxHp,
+    armor: stats.armor,
+    attack: stats.attack,
+    range: stats.range,
+    attackCooldown: 0
+  };
+  for (const pos of [
+    { x: 40, y: 31 },
+    { x: 41, y: 31 },
+    { x: 41, y: 32 },
+    { x: 42, y: 31 },
+    { x: 42, y: 32 },
+    { x: 43, y: 31 },
+    { x: 43, y: 32 }
+  ]) {
+    state.map[tileIndex(pos.x, pos.y)].terrain = "grass";
+    delete state.map[tileIndex(pos.x, pos.y)].resource;
+  }
+  const repairers = Object.values(state.units)
+    .filter((unit) => unit.tribeId === "red" && unit.type === "peon" && unit.hp > 0)
+    .slice(0, 2);
+  if (repairers.length === 0) return { ok: false, targetBuildingId, reason: "no red peon available" };
+  for (const [index, peon] of repairers.entries()) {
+    peon.x = 42;
+    peon.y = 32 + index * 0.2;
+    peon.hp = peon.maxHp;
+    peon.task = { kind: "idle" };
+  }
+  const repairResult = issueSovereignOrder(state, "red", {
+    type: "REPAIR",
+    priority: 1,
+    targetBuildingId,
+    repairPlan: "Keep workers on the breach unless Blue physically stops them.",
+    reason: "Browser smoke contested repair target."
+  });
+  if (!repairResult.ok) {
+    render();
+    return { ok: false, targetBuildingId, reason: repairResult.reason };
+  }
+  let militia = Object.values(state.units)
+    .filter((unit) => unit.tribeId === playerTribe && unit.type === "militia" && unit.hp > 0)
+    .sort((left, right) => left.id.localeCompare(right.id))[0];
+  if (!militia) {
+    const trained = trainUnit(state, playerTribe, "militia");
+    if (!trained.ok) return { ok: false, targetBuildingId, reason: trained.reason };
+    militia = state.units[trained.unitId];
+  }
+  militia.x = 41;
+  militia.y = 32;
+  militia.hp = militia.maxHp;
+  militia.attackCooldown = 0;
+  militia.task = { kind: "idle" };
+  const repairerBeforeHp = repairers[0].hp;
+  const wallBeforeHp = state.buildings[targetBuildingId]?.hp ?? 0;
+  const attackResult = issueSovereignOrder(state, playerTribe, {
+    type: "ATTACK",
+    priority: 1,
+    recipientTribeId: "red",
+    targetBuildingId,
+    interdictRepairs: true,
+    repairInterdictionRadius: 4,
+    repairInterdictionPlan: "Stop the repair crew at the breach before resuming wall damage.",
+    siegeIntent: "counter Red's repair attempt at the exact wall.",
+    reason: "Browser smoke repair interdiction test."
+  });
+  if (!attackResult.ok) {
+    render();
+    return { ok: false, targetBuildingId, repairerBeforeHp, wallBeforeHp: Math.ceil(wallBeforeHp), reason: attackResult.reason };
+  }
+  const siegePlan = state.siegePlans.at(-1);
+  const attackers = Object.values(state.units).filter((unit) => unit.task.kind === "attackBuilding" && unit.task.siegePlanId === siegePlan?.id);
+  const attackTasks = attackers.map((unit) => describeUnitTask(state, unit));
+  const repairerTasks = repairers.map((unit) => describeUnitTask(state, unit));
+  const orderEvents = state.events.slice(-12).map((event) => `${event.type}:${event.body}`);
+  advanceSimulationTicks(4, { scheduleAi: false, render: false });
+  const wall = state.buildings[targetBuildingId];
+  if (wall) selectAndShowBuilding(wall);
+  else render({ forceHud: true, forceLabels: true, forceFog: true });
+  const recentEvents = [...orderEvents, ...state.events.slice(-16).map((event) => `${event.type}:${event.body}`)];
+  const repairerAfterHp = repairers[0].hp;
+  return {
+    ok:
+      repairerAfterHp < repairerBeforeHp &&
+      Boolean(siegePlan?.interdictRepairs) &&
+      recentEvents.some((event) => event.includes("SIEGE_REPAIR_INTERDICTION_ORDERED")) &&
+      recentEvents.some((event) => event.includes("REPAIR_UNDER_FIRE_INTERRUPTED")),
+    targetBuildingId,
+    repairerBeforeHp: Math.ceil(repairerBeforeHp),
+    repairerAfterHp: Math.ceil(repairerAfterHp),
+    wallBeforeHp: Math.ceil(wallBeforeHp),
+    wallAfterHp: wall ? Math.ceil(wall.hp) : null,
+    attackTasks,
+    repairerTasks,
+    siegePlan,
+    recentEvents
+  };
+}
+
 function summarizeResourceTiles(game: GameState, type: ResourceType): {
   type: ResourceType;
   tiles: number;
@@ -4390,7 +5668,12 @@ function maxConcurrentLlmJobs(): number {
       .filter((model): model is string => Boolean(model && model !== "fallback"))
   );
   const availableModelCount = assignedModels.size || rankedOllamaModels(ollamaModels).length;
-  return Math.max(1, Math.min(targetConcurrentLlmJobs, availableModelCount || targetConcurrentLlmJobs));
+  const base = Math.max(1, Math.min(targetConcurrentLlmJobs, availableModelCount || targetConcurrentLlmJobs));
+  const frameBudgetMs = 1000 / minimumSmoothFps;
+  if (measuredFps > 0 && (measuredFps < 50 || lastRenderDurationMs > frameBudgetMs * 0.5 || maxFrameDeltaMs > frameBudgetMs * 1.25)) {
+    return 1;
+  }
+  return base;
 }
 
 function hasLlmCapacity(ignoreFramePressure = false): boolean {
@@ -4449,12 +5732,22 @@ function finishLlmJob(tribeId: TribeId): void {
 function queueLlmSchedulePump(): void {
   if (llmSchedulePumpPending) return;
   llmSchedulePumpPending = true;
-  window.setTimeout(() => {
-    llmSchedulePumpPending = false;
-    scheduleLlmReply();
-    scheduleLlmDecision();
-    render();
-  }, 0);
+  window.requestAnimationFrame(() => {
+    window.setTimeout(() => {
+      llmSchedulePumpPending = false;
+      const startedJob = scheduleOneLlmJob();
+      if (startedJob && activeLlmJobs.size < maxConcurrentLlmJobs()) {
+        window.setTimeout(() => queueLlmSchedulePump(), llmJobLaunchSpacingMs);
+      }
+    }, 0);
+  });
+}
+
+function scheduleOneLlmJob(): boolean {
+  const activeBefore = activeLlmJobs.size;
+  if (scheduleLlmReply()) return true;
+  if (scheduleLlmDecision()) return true;
+  return activeLlmJobs.size > activeBefore;
 }
 
 function modelAssignmentSummary(): string {
@@ -4497,13 +5790,10 @@ async function initializeLlm(): Promise<void> {
   render();
 }
 
-function scheduleLlmDecision(): void {
-  if (!llmSchedulingStarted) return;
-  while (activeLlmJobs.size < maxConcurrentLlmJobs()) {
-    if (tryScheduleSovereignIdentity()) continue;
-    if (tryScheduleSovereignDecision()) continue;
-    break;
-  }
+function scheduleLlmDecision(): boolean {
+  if (!llmSchedulingStarted || activeLlmJobs.size >= maxConcurrentLlmJobs()) return false;
+  if (tryScheduleSovereignIdentity()) return true;
+  return tryScheduleSovereignDecision();
 }
 
 function tryScheduleSovereignIdentity(): boolean {
@@ -4516,7 +5806,7 @@ function tryScheduleSovereignIdentity(): boolean {
           isTribeActive(state, tribeId) &&
           !state.tribes[tribeId].identityChosen &&
           state.tick >= nextIdentityRetryTick[tribeId] &&
-          canStartLlmJob(tribeId, model, true, true)
+          canStartLlmJob(tribeId, model, true, false)
         );
       }
     )
@@ -4539,7 +5829,7 @@ function tryScheduleSovereignDecision(): boolean {
           (firstDoctrine || !firstDoctrineSetupPending()) &&
           (firstDoctrine || !llmFollowupStrategyHoldForTest) &&
           state.tick >= nextLlmDecisionTick[tribeId] &&
-          canStartLlmJob(tribeId, model, firstDoctrine, firstDoctrine) &&
+          canStartLlmJob(tribeId, model, firstDoctrine, false) &&
           (!ollamaModels.length || state.tribes[tribeId].identityChosen || identitySetupComplete)
         );
       }
@@ -4560,9 +5850,9 @@ function describeActiveLlmJobs(): string {
   return active || "no active AI lanes";
 }
 
-function scheduleLlmReply(): void {
-  if (!llmSchedulingStarted) return;
-  if (!hasLlmCapacity(true)) return;
+function scheduleLlmReply(): boolean {
+  if (!llmSchedulingStarted) return false;
+  if (!hasLlmCapacity(true)) return false;
   const packet = Object.values(state.packets)
     .filter(
       (candidate) =>
@@ -4571,11 +5861,12 @@ function scheduleLlmReply(): void {
         state.tribes[candidate.recipientTribeId].controller === "llm" &&
         isTribeActive(state, candidate.recipientTribeId) &&
         !pendingReplyPacketIds.has(candidate.id) &&
-        canStartLlmJob(candidate.recipientTribeId, modelForTribe(candidate.recipientTribeId), false, true)
+          canStartLlmJob(candidate.recipientTribeId, modelForTribe(candidate.recipientTribeId), false, false)
     )
     .sort((a, b) => a.lastStateChangeTick - b.lastStateChangeTick)[0];
-  if (!packet) return;
+  if (!packet) return false;
   void runSovereignReply(packet.id);
+  return true;
 }
 
 async function runInitialIdentitySetup(): Promise<void> {
@@ -4590,7 +5881,7 @@ async function runInitialIdentitySetup(): Promise<void> {
   llmStatus = `Initial sovereign identities queued with ${identityBootstrapSummary()}.`;
   identityStatus = "AI sovereign identities and first doctrines start on each tribe's assigned model; fallback routing is only used if a model fails.";
   render();
-  scheduleLlmDecision();
+  queueLlmSchedulePump();
 }
 
 async function runSovereignIdentity(tribeId: TribeId): Promise<void> {
@@ -4598,7 +5889,7 @@ async function runSovereignIdentity(tribeId: TribeId): Promise<void> {
   const identityModels = identityModelsForTribe(tribeId);
   const primaryModel = identityModels[0];
   if (!primaryModel) return;
-  if (!beginLlmJob(tribeId, "identity", primaryModel, true, true)) return;
+  if (!beginLlmJob(tribeId, "identity", primaryModel, true, false)) return;
   llmStatus = `${state.tribes[tribeId].defaultName} is choosing a historical or literary identity with ${primaryModel}...`;
   render();
 
@@ -4858,7 +6149,7 @@ async function runSovereignReply(packetId: string): Promise<void> {
   }
   const tribeId = packet.recipientTribeId;
   const tribeModel = modelForTribe(tribeId);
-  if (!beginLlmJob(tribeId, "reply", tribeModel, false, true)) return;
+  if (!beginLlmJob(tribeId, "reply", tribeModel, false, false)) return;
   pendingReplyPacketIds.add(packetId);
   const original = state.messages[packet.messageIds[0]];
   llmStatus = tribeModel
@@ -4980,7 +6271,7 @@ async function runSovereignDecision(tribeId: TribeId, immediate: boolean): Promi
   const assignedModel = modelForTribe(tribeId);
   const firstDoctrine = !hasDoctrineDecision(tribeId);
   const tribeModel = strategyModelForTribe(tribeId);
-  if (!beginLlmJob(tribeId, "strategy", tribeModel, firstDoctrine, firstDoctrine)) return;
+  if (!beginLlmJob(tribeId, "strategy", tribeModel, firstDoctrine, false)) return;
   if (!isTribeActive(state, tribeId)) {
     nextLlmDecisionTick[tribeId] = Number.POSITIVE_INFINITY;
     finishLlmJob(tribeId);
@@ -5393,6 +6684,9 @@ function buildAiReportSnapshot(
       winnerTribeId: victory.winnerTribeId,
       winnerName: victory.winnerName,
       winnerSurvivalScore: victory.winnerSurvivalScore,
+      poorestTribeId: victory.poorestTribeId,
+      poorestName: victory.poorestName,
+      poorestWealth: victory.poorestWealth,
       scoreByTribe: victory.scoreByTribe,
       publicText: victory.publicText
     },
@@ -6069,7 +7363,101 @@ function shouldRenderUnitLabel(unit: Unit, tier: LabelTier): boolean {
   return false;
 }
 
-function buildBoardReadabilitySnapshot(game: GameState, visibleUnits: Unit[], visibleBuildings: Building[]) {
+const combatNoticeEventTypes = new Set([
+  "COMBAT_PROJECTILE_LAUNCHED",
+  "SIEGE_PROJECTILE_LAUNCHED",
+  "SIEGE_PROJECTILE_IMPACT",
+  "STRUCTURE_DESTROYED",
+  "RESOURCE_DEPOSIT_DESTROYED",
+  "RESOURCE_RAID_ORDER",
+  "REPAIR_UNDER_FIRE_INTERRUPTED",
+  "SIEGE_REPAIR_CREW_INTERDICTED",
+  "MESSENGER_KILLED"
+]);
+
+function isCombatNoticeEvent(event: GameEvent): boolean {
+  return combatNoticeEventTypes.has(event.type) || event.type.startsWith("WAR_") || event.type.startsWith("SIEGE_");
+}
+
+function combatEventsVisibleToClient(game: GameState, count = 80): GameEvent[] {
+  const events = observerMode ? game.events.slice(-count).reverse() : getRecentVisibleEvents(game, playerTribe, count);
+  return events.filter(isCombatNoticeEvent);
+}
+
+function buildRecentCombatEventMarkers(game: GameState, visibleUnits: Unit[], visibleBuildings: Building[], count = 20): CombatEventMarker[] {
+  const visibleUnitById = new Map(visibleUnits.map((unit) => [unit.id, unit]));
+  const visibleBuildingById = new Map(visibleBuildings.map((building) => [building.id, building]));
+  return combatEventsVisibleToClient(game, 90)
+    .flatMap((event): CombatEventMarker[] => {
+      const context = event.context;
+      let x = context?.x;
+      let y = context?.y;
+      if ((x === undefined || y === undefined) && context?.targetId) {
+        const unit = visibleUnitById.get(context.targetId);
+        const building = visibleBuildingById.get(context.targetId);
+        if (unit) {
+          x = unit.x;
+          y = unit.y;
+        } else if (building) {
+          x = building.x;
+          y = building.y;
+        }
+      }
+      if (typeof x !== "number" || typeof y !== "number" || !Number.isFinite(x) || !Number.isFinite(y)) return [];
+      return [
+        {
+          id: event.id,
+          tick: event.tick,
+          type: event.type,
+          title: event.title,
+          body: event.body,
+          x: Number(x.toFixed(2)),
+          y: Number(y.toFixed(2)),
+          ageTicks: Math.max(0, game.tick - event.tick),
+          actorTribeId: context?.actorTribeId,
+          targetTribeId: context?.targetTribeId,
+          subjectId: context?.subjectId,
+          targetId: context?.targetId,
+          projectileType: context?.projectileType,
+          severity: context?.severity,
+          screenX: Number((camera.x + (x * TILE + TILE / 2) * camera.scale).toFixed(2)),
+          screenY: Number((camera.y + (y * TILE + TILE / 2) * camera.scale).toFixed(2))
+        }
+      ];
+    })
+    .filter((marker) => marker.ageTicks <= Math.round(TICK_RATE * 24))
+    .slice(0, count);
+}
+
+function buildCombatOverlayTelemetry(game: GameState, visibleUnits: Unit[], visibleBuildings: Building[], visibleProjectiles: SiegeProjectile[]) {
+  const recentEventMarkers = buildRecentCombatEventMarkers(game, visibleUnits, visibleBuildings, 20);
+  const activeProjectileMarkers = visibleProjectiles.slice(0, 20).map((projectile) => ({
+    id: projectile.id,
+    projectileType: projectile.projectileType,
+    tribeId: projectile.tribeId,
+    x: Number(projectile.x.toFixed(2)),
+    y: Number(projectile.y.toFixed(2)),
+    targetKind: projectile.targetKind,
+    targetBuildingId: projectile.targetBuildingId ?? null,
+    targetUnitId: projectile.targetUnitId ?? null,
+    screenX: Number((camera.x + (projectile.x * TILE + TILE / 2) * camera.scale).toFixed(2)),
+    screenY: Number((camera.y + (projectile.y * TILE + TILE / 2) * camera.scale).toFixed(2))
+  }));
+  return {
+    enabled: true,
+    recentCombatEventMarkers: recentEventMarkers.length,
+    activeProjectileMarkers: activeProjectileMarkers.length,
+    activeProjectileTypes: Array.from(new Set(activeProjectileMarkers.map((marker) => marker.projectileType))).sort(),
+    recentEventTypes: Array.from(new Set(recentEventMarkers.map((marker) => marker.type))).sort(),
+    markerIds: recentEventMarkers.map((marker) => marker.id).slice(0, 20),
+    markers: recentEventMarkers,
+    activeProjectiles: activeProjectileMarkers,
+    markerPolicy:
+      "observer combat overlay marks recent visible combat events with structured coordinates and live visible projectiles; it does not create wars, targets, retaliation, or AI strategy"
+  };
+}
+
+function buildBoardReadabilitySnapshot(game: GameState, visibleUnits: Unit[], visibleBuildings: Building[], visibleProjectiles: SiegeProjectile[]) {
   const tier = currentLabelTier();
   const viewportTiles = currentViewportTileBounds();
   const resources = countResourceLabelTelemetry(game, tier, viewportTiles);
@@ -6095,6 +7483,9 @@ function buildBoardReadabilitySnapshot(game: GameState, visibleUnits: Unit[], vi
   const visibleUnitSpriteCount = visibleUnits.filter((unit) => {
     const visual = visualPositionForUnit(unit);
     return isWorldPointInViewport(visual.x * TILE + TILE / 2, visual.y * TILE + TILE / 2, TILE * 2);
+  }).length;
+  const visibleProjectileSpriteCount = visibleProjectiles.filter((projectile) => {
+    return isWorldPointInViewport(projectile.x * TILE + TILE / 2, projectile.y * TILE + TILE / 2, TILE * 3);
   }).length;
   const constructionLabelCount = showResourceLabels
     ? activeConstructionFlashes(game).filter((flash) => {
@@ -6142,6 +7533,9 @@ function buildBoardReadabilitySnapshot(game: GameState, visibleUnits: Unit[], vi
       visibleUnitSpriteCount,
       activeUnitSpriteCount,
       unitSpritePoolSize: unitSpritePool.length,
+      visibleProjectileSpriteCount,
+      activeProjectileSpriteCount,
+      projectileSpritePoolSize: projectileSpritePool.length,
       activeMapTextCount,
       mapTextPoolSize: mapTextPool.length,
       activeRouteVisualCount,
@@ -6154,6 +7548,7 @@ function buildBoardReadabilitySnapshot(game: GameState, visibleUnits: Unit[], vi
       unitTextureTypes: unitTypes.length,
       unitStateTextureTypes: unitTypes.length * unitVisualStates.length,
       diplomacyPacketTextureTypes: diplomacyTextureTypes.length,
+      projectileTextureTypes: projectileTypes.length,
       activePacketSpriteCount,
       packetSpritePoolSize: packetSpritePool.length,
       siegeEngineTexture: Boolean(visualTextures?.units.siege_engine?.idle),
@@ -6162,6 +7557,7 @@ function buildBoardReadabilitySnapshot(game: GameState, visibleUnits: Unit[], vi
       unitAnimation: "pooled sprites with idle/move/scout/gather/deliver/repair/attack texture frames, frame-time bob, task cues, team base rings, and packet pulse",
       buildingAnimation: "pooled building sprites with normal/damaged/critical/repairing/open/closed/locked state textures, turret recoil, fortification joins, and construction focus pulse",
       diplomacyAnimation: "pooled scroll, reply, and destination-seal sprites riding courier routes with frame-time bob and viewport culling",
+      projectileAnimation: "pooled arrow, turret-bolt, and stone-shot sprites with frame-time pulse, rotation toward target, team tint for arrows, and combat-event halos",
       ambientTerrainAnimation: "single bounded Graphics pass for viewport-culled water shimmer, road dust, canopy drift, grass wind strokes, and hill glints",
       fogAnimation: "dirty-only fog redraw with softened explored haze and edge cues in player-visibility mode",
       terrainTexture: "cached chunk terrain with road shoulders, water ripples, forest canopy marks, hill contours, mountain caps, and sparse grass flecks"
@@ -6180,10 +7576,12 @@ function buildBoardReadabilitySnapshot(game: GameState, visibleUnits: Unit[], vi
       resources: "higher-resolution pooled sprite-textured deposits drawn from live resource health, exhausted-resource decals for recent depletions, and viewport culling",
 	      labels: "debug-only map text, disabled by default",
 	      forts: "pooled textured walls, gates, and turrets with sprite-state damage, repair, gate passage/lock, and range overlays",
-	      units: "untinted textured unit silhouettes with team base rings, frame-time movement bob, packet satchels, and task-state cues"
+	      units: "untinted textured unit silhouettes with team base rings, frame-time movement bob, packet satchels, and task-state cues",
+	      projectiles: "pooled textured arrows, turret bolts, and stone shots rendered as rotated sprites with combat halos"
 	    },
 	    resourcePressureOverlay: buildResourcePressureOverlayTelemetry(game),
-	    fortificationOverlay: buildFortificationOverlayTelemetry(game, visibleUnits, visibleBuildings)
+	    fortificationOverlay: buildFortificationOverlayTelemetry(game, visibleUnits, visibleBuildings),
+    combatOverlay: buildCombatOverlayTelemetry(game, visibleUnits, visibleBuildings, visibleProjectiles)
 	  };
 	}
 
@@ -6425,6 +7823,44 @@ function buildFortificationVisualMarkerTelemetry(
   const safePassageGateIds = visibleGates.filter((building) => isSafePassageGate(game, building)).map((building) => building.id);
   const operatedGateIds = visibleGates.filter((building) => Boolean(building.gateOperation)).map((building) => building.id);
   const warFrontMarkers = buildWarFrontOverlayMarkers(game, visibleUnits, visibleBuildings);
+  const activeWritGateIds = visibleGates
+    .filter((building) => getActiveGateAccessTreaties(game, building.id).length > 0)
+    .map((building) => building.id);
+  const revokedWritGateIds = boundedUniqueGateIds(
+    game.gateAccessTreaties
+      .filter((record) => record.action === "revoke")
+      .filter((record) => visibleGates.some((gate) => gate.id === record.buildingId))
+      .map((record) => record.buildingId)
+      .reverse()
+  );
+  const detainedCourierGateIds = visibleGates
+    .filter((building) => gateHasDetainedCourierEvidence(game, building.id))
+    .map((building) => building.id);
+  const tollGateIds = visibleGates.filter((building) => gateHasTollEvidence(game, building.id)).map((building) => building.id);
+  const treatyIncidentGateIds = boundedUniqueGateIds(
+    game.gateTreatyIncidents
+      .filter((incident) => visibleGates.some((gate) => gate.id === incident.buildingId))
+      .map((incident) => incident.buildingId)
+      .reverse()
+  );
+  const sabotageGateIds = boundedUniqueGateIds(
+    [
+      ...visibleGates.filter((building) => Boolean(building.gateSabotage)).map((building) => building.id),
+      ...game.gateSabotageHistory
+        .filter((record) => visibleGates.some((gate) => gate.id === record.buildingId))
+        .map((record) => record.buildingId)
+        .reverse()
+    ],
+    20
+  );
+  const discoveryGateIds = boundedUniqueGateIds(
+    tribeIds
+      .flatMap((tribeId) => game.foreignObservations[tribeId] ?? [])
+      .filter((observation) => observation.kind === "gate_treaty_incident_witnessed" || observation.kind === "gate_sabotage_witnessed")
+      .map((observation) => observation.gateBuildingId ?? observation.subjectId)
+      .filter((id): id is string => Boolean(id) && visibleGates.some((gate) => gate.id === id))
+      .reverse()
+  );
 
   return {
     enabled: showDefenseOverlay,
@@ -6434,6 +7870,20 @@ function buildFortificationVisualMarkerTelemetry(
     safePassageGateIds: safePassageGateIds.slice(0, 20),
     operatedGateMarkers: operatedGateIds.length,
     operatedGateIds: operatedGateIds.slice(0, 20),
+    activeWritMarkers: activeWritGateIds.length,
+    activeWritGateIds: activeWritGateIds.slice(0, 20),
+    revokedWritMarkers: revokedWritGateIds.length,
+    revokedWritGateIds,
+    detainedCourierMarkers: detainedCourierGateIds.length,
+    detainedCourierGateIds: detainedCourierGateIds.slice(0, 20),
+    tollMarkers: tollGateIds.length,
+    tollGateIds: tollGateIds.slice(0, 20),
+    treatyIncidentMarkers: treatyIncidentGateIds.length,
+    treatyIncidentGateIds,
+    sabotageMarkers: sabotageGateIds.length,
+    sabotageGateIds,
+    discoveryMarkers: discoveryGateIds.length,
+    discoveryGateIds,
     perimeterCenterMarkers: perimeterGroups.length,
     perimeterGroupIds: perimeterGroups.map((group) => group.groupId).slice(0, 20),
     warFrontMarkers: warFrontMarkers.length,
@@ -6441,8 +7891,69 @@ function buildFortificationVisualMarkerTelemetry(
       .slice(0, 20)
       .map((marker) => `${marker.a}:${marker.b}@${Number(marker.x.toFixed(1))},${Number(marker.y.toFixed(1))}`),
     markerPolicy:
-      "visual defense overlay marks player-blocking walls/gates, negotiated or open safe-passage gates, operated gate writ/toll/detention/release/sabotage badges, authored perimeter centers, and visible war-front contact"
+      "visual defense overlay marks player-blocking walls/gates, negotiated or open safe-passage gates, active/revoked writs, tolls, detained couriers, incidents, sabotage/discovery evidence, authored perimeter centers, and visible war-front contact"
   };
+}
+
+function boundedUniqueGateIds(values: string[], limit = 20): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    if (seen.has(value)) continue;
+    seen.add(value);
+    result.push(value);
+    if (result.length >= limit) break;
+  }
+  return result;
+}
+
+function recentGateOperationsForGate(game: GameState, buildingId: string, limit = 8) {
+  return game.gateOperations.filter((operation) => operation.buildingId === buildingId).slice(-limit);
+}
+
+function gateHasDetainedCourierEvidence(game: GameState, buildingId: string): boolean {
+  return (
+    Object.values(game.packets).some((packet) => packet.state === "DETAINED" && packet.outboundGateBuildingIds?.includes(buildingId)) ||
+    recentGateOperationsForGate(game, buildingId).some(
+      (operation) =>
+        operation.entryAction === "detain" ||
+        operation.unpaidAction === "detain" ||
+        Boolean(operation.detainedPacketAction) ||
+        Boolean(operation.detainedPacketId)
+    )
+  );
+}
+
+function gateHasTollEvidence(game: GameState, buildingId: string): boolean {
+  return recentGateOperationsForGate(game, buildingId).some(
+    (operation) => (operation.tollGold ?? 0) > 0 || (operation.tollMode !== undefined && operation.tollMode !== "none") || (operation.ransomGold ?? 0) > 0
+  );
+}
+
+function gateHasRecentRevokedWrit(game: GameState, buildingId: string): boolean {
+  return game.gateAccessTreaties
+    .slice(-30)
+    .some((record) => record.buildingId === buildingId && record.action === "revoke");
+}
+
+function gateHasTreatyIncidentEvidence(game: GameState, buildingId: string): boolean {
+  return game.gateTreatyIncidents.slice(-30).some((incident) => incident.buildingId === buildingId);
+}
+
+function gateHasDiscoveryEvidence(game: GameState, buildingId: string): boolean {
+  return tribeIds.some((tribeId) =>
+    (game.foreignObservations[tribeId] ?? [])
+      .slice(-30)
+      .some(
+        (observation) =>
+          (observation.kind === "gate_treaty_incident_witnessed" || observation.kind === "gate_sabotage_witnessed") &&
+          (observation.gateBuildingId === buildingId || observation.subjectId === buildingId)
+      )
+  );
+}
+
+function gateHasSabotageHistoryEvidence(game: GameState, buildingId: string): boolean {
+  return game.gateSabotageHistory.slice(-30).some((record) => record.buildingId === buildingId);
 }
 
 function isSafePassageGate(game: GameState, building: Building): boolean {
@@ -6653,6 +8164,26 @@ function acquireUnitSprite(texture: Texture): Sprite {
   return sprite;
 }
 
+function resetProjectileSpritePool(): void {
+  activeProjectileSpriteCount = 0;
+  for (const sprite of projectileSpritePool) sprite.visible = false;
+}
+
+function acquireProjectileSprite(texture: Texture): Sprite {
+  let sprite = projectileSpritePool[activeProjectileSpriteCount];
+  if (!sprite) {
+    sprite = new Sprite({ texture });
+    sprite.anchor.set(0.5);
+    projectileSpritePool.push(sprite);
+    projectileSpriteLayer.addChild(sprite);
+  } else if (sprite.texture !== texture) {
+    sprite.texture = texture;
+  }
+  sprite.visible = true;
+  activeProjectileSpriteCount += 1;
+  return sprite;
+}
+
 function resetPacketSpritePool(): void {
   activePacketSpriteCount = 0;
   for (const sprite of packetSpritePool) sprite.visible = false;
@@ -6725,7 +8256,10 @@ function createVisualTextureAtlas(): VisualTextureAtlas {
     ) as Record<UnitType, Record<UnitVisualState, Texture>>,
     diplomacy: Object.fromEntries(
       diplomacyTextureTypes.map((type) => [type, makeAtlasTexture((graphics, size) => drawDiplomacyTexture(graphics, type, size))])
-    ) as Record<DiplomacyTextureType, Texture>
+    ) as Record<DiplomacyTextureType, Texture>,
+    projectiles: Object.fromEntries(
+      projectileTypes.map((type) => [type, makeAtlasTexture((graphics, size) => drawProjectileTexture(graphics, type, size))])
+    ) as Record<ProjectileType, Texture>
   };
 }
 
@@ -6780,6 +8314,39 @@ function drawDiplomacyTexture(graphics: Graphics, type: DiplomacyTextureType, si
   }
   graphics.circle(cx + 5, cy + 3, 4.4).fill({ color: ribbon, alpha: 0.92 }).stroke({ color: 0x3f1e17, width: 1, alpha: 0.78 });
   drawAtlasSparkle(graphics, cx - 9, cy - 9, returning ? 2.1 : 1.6, 0xfff6ce, returning ? 0.74 : 0.5);
+}
+
+function drawProjectileTexture(graphics: Graphics, type: ProjectileType, size: number): void {
+  const cx = size / 2;
+  const cy = size / 2;
+  if (type === "arrow") {
+    graphics.moveTo(cx - 22, cy).lineTo(cx + 16, cy).stroke({ color: 0x21150c, width: 5, alpha: 0.82 });
+    graphics.moveTo(cx - 22, cy).lineTo(cx + 15, cy).stroke({ color: 0xe9d2a2, width: 2.4, alpha: 0.98 });
+    graphics
+      .moveTo(cx + 20, cy)
+      .lineTo(cx + 10, cy - 6)
+      .lineTo(cx + 12, cy)
+      .lineTo(cx + 10, cy + 6)
+      .closePath()
+      .fill({ color: 0xf7e6b7, alpha: 0.96 })
+      .stroke({ color: 0x24130a, width: 1.2, alpha: 0.86 });
+    graphics.moveTo(cx - 18, cy).lineTo(cx - 25, cy - 5).moveTo(cx - 18, cy).lineTo(cx - 25, cy + 5).stroke({ color: 0xb86d4b, width: 2, alpha: 0.72 });
+    return;
+  }
+  if (type === "turret_bolt") {
+    graphics.moveTo(cx - 24, cy).lineTo(cx + 18, cy).stroke({ color: 0x07121b, width: 8, alpha: 0.62 });
+    graphics.moveTo(cx - 21, cy).lineTo(cx + 15, cy).stroke({ color: 0x68ccff, width: 5, alpha: 0.92 });
+    graphics.moveTo(cx - 5, cy).lineTo(cx + 22, cy).stroke({ color: 0xf7fbff, width: 2.4, alpha: 0.98 });
+    graphics.circle(cx + 19, cy, 5.5).fill({ color: 0xe8f5ff, alpha: 0.8 }).stroke({ color: 0x53b9ff, width: 1.8, alpha: 0.92 });
+    graphics.circle(cx + 22, cy - 1.5, 2.3).fill({ color: 0xffffff, alpha: 0.86 });
+    return;
+  }
+  graphics.moveTo(cx - 24, cy).lineTo(cx + 8, cy).stroke({ color: 0x1b1208, width: 10, alpha: 0.5 });
+  graphics.moveTo(cx - 22, cy).lineTo(cx + 9, cy).stroke({ color: 0xff7a2f, width: 6, alpha: 0.7 });
+  graphics.moveTo(cx - 8, cy).lineTo(cx + 22, cy).stroke({ color: 0xfff0a4, width: 3, alpha: 0.92 });
+  graphics.circle(cx + 5, cy, 12).fill({ color: 0x2b2925, alpha: 0.98 }).stroke({ color: 0xffed9a, width: 3, alpha: 0.96 });
+  graphics.circle(cx + 1, cy - 3, 3).fill({ color: 0xded7c5, alpha: 0.96 });
+  graphics.circle(cx + 22, cy, 4).fill({ color: 0xfff0a4, alpha: 0.78 });
 }
 
 function drawResourceTexture(graphics: Graphics, type: ResourceType, size: number): void {
@@ -7370,6 +8937,7 @@ function drawDynamic(game: GameState, _layer: Container, options: { updateLabels
   graphics.clear();
   unitOverlayGraphics.clear();
   resetUnitSpritePool();
+  resetProjectileSpritePool();
   const updateLabels = options.updateLabels !== false;
   const labelTier = currentLabelTier();
   if (updateLabels) {
@@ -7413,7 +8981,8 @@ function drawDynamic(game: GameState, _layer: Container, options: { updateLabels
     }
   }
   if (updateLabels && showResourceLabels) addConstructionFocusLabels(game, dynamicLabelLayer);
-  for (const projectile of projectiles) drawProjectile(graphics, projectile);
+  for (const projectile of projectiles) drawProjectileSprite(graphics, projectile);
+  drawCombatEventOverlay(game, graphics, units, buildings, projectiles);
   for (const unit of units) {
     const visual = visualPositionForUnit(unit);
     const unitWorldX = visual.x * TILE + TILE / 2;
@@ -7748,6 +9317,31 @@ function drawGateReleaseBadge(graphics: Graphics, x: number, y: number, color: n
   graphics.moveTo(x - 7, y + 3).lineTo(x + 5, y + 3).lineTo(x + 1, y - 1).moveTo(x + 5, y + 3).lineTo(x + 1, y + 7).stroke({ color, width: 2, alpha: 0.9 });
 }
 
+function drawGateRevokedWritBadge(graphics: Graphics, x: number, y: number): void {
+  drawGateScrollBadge(graphics, x, y, 0xff6b52, 0.82);
+  graphics.moveTo(x - 8, y - 6).lineTo(x + 8, y + 6).stroke({ color: 0xff6b52, width: 2.1, alpha: 0.9 });
+}
+
+function drawGateIncidentBadge(graphics: Graphics, x: number, y: number, pulse: number): void {
+  graphics
+    .moveTo(x, y - 8)
+    .lineTo(x + 8, y)
+    .lineTo(x, y + 8)
+    .lineTo(x - 8, y)
+    .closePath()
+    .fill({ color: 0x2b1b12, alpha: 0.7 })
+    .stroke({ color: 0xff8a52, width: 1.7, alpha: 0.88 });
+  graphics.circle(x, y, 10 + pulse * 2).stroke({ color: 0xff8a52, width: 1.2, alpha: 0.28 + pulse * 0.16 });
+  graphics.moveTo(x, y - 5).lineTo(x, y + 1).stroke({ color: 0xffe0b5, width: 1.6, alpha: 0.9 });
+  graphics.circle(x, y + 4, 1.4).fill({ color: 0xffe0b5, alpha: 0.9 });
+}
+
+function drawGateDiscoveryBadge(graphics: Graphics, x: number, y: number, pulse: number): void {
+  graphics.ellipse(x, y, 8, 5).fill({ color: 0x101923, alpha: 0.68 }).stroke({ color: 0x9ae8ff, width: 1.5, alpha: 0.82 });
+  graphics.circle(x, y, 2.6 + pulse * 0.8).fill({ color: 0x9ae8ff, alpha: 0.86 }).stroke({ color: 0x061017, width: 0.8, alpha: 0.76 });
+  graphics.circle(x, y, 11 + pulse * 2).stroke({ color: 0x9ae8ff, width: 1, alpha: 0.22 + pulse * 0.12 });
+}
+
 function drawGateSabotageGlyph(graphics: Graphics, x: number, y: number, pulse: number): void {
   graphics.circle(x, y, 7 + pulse * 2).stroke({ color: 0xff6bd6, width: 1.6, alpha: 0.42 + pulse * 0.18 });
   graphics
@@ -7761,6 +9355,12 @@ function drawGateSabotageGlyph(graphics: Graphics, x: number, y: number, pulse: 
 
 function drawGateOperationOverlay(game: GameState, graphics: Graphics, building: Building, cx: number, cy: number, color: number): void {
   const activeTreaties = getActiveGateAccessTreaties(game, building.id);
+  const hasRecentRevoke = gateHasRecentRevokedWrit(game, building.id);
+  const hasDetainedCourier = gateHasDetainedCourierEvidence(game, building.id);
+  const hasToll = gateHasTollEvidence(game, building.id);
+  const hasIncident = gateHasTreatyIncidentEvidence(game, building.id);
+  const hasDiscovery = gateHasDiscoveryEvidence(game, building.id);
+  const hasSabotageHistory = gateHasSabotageHistoryEvidence(game, building.id);
   const now = renderClockMs || performance.now();
   const pulse = 0.5 + Math.sin(now / 240 + building.x * 0.6 + building.y * 0.3) * 0.5;
   if ((building.gateState ?? "open") === "open" && !building.gateSabotage) {
@@ -7780,6 +9380,21 @@ function drawGateOperationOverlay(game: GameState, graphics: Graphics, building:
     activeTreaties.slice(0, 3).forEach((_, index) => {
       drawGateScrollBadge(graphics, cx - TILE * 0.42 + index * 8, cy - TILE * 0.55, 0x7bd8ff, 0.82);
     });
+  }
+  if (hasRecentRevoke && building.gateOperation?.accessTreatyAction !== "revoke") {
+    drawGateRevokedWritBadge(graphics, cx - TILE * 0.28, cy + TILE * 0.62);
+  }
+  if (hasToll && !building.gateOperation) {
+    drawGateCoinBadge(graphics, cx + TILE * 0.48, cy - TILE * 0.38, pulse);
+  }
+  if (hasDetainedCourier && !building.gateOperation) {
+    drawGateDetainBadge(graphics, cx - TILE * 0.48, cy + TILE * 0.34, color);
+  }
+  if (hasIncident) {
+    drawGateIncidentBadge(graphics, cx + TILE * 0.5, cy + TILE * 0.56, pulse);
+  }
+  if (hasDiscovery) {
+    drawGateDiscoveryBadge(graphics, cx - TILE * 0.5, cy - TILE * 0.58, pulse);
   }
   if (building.gateOperation) {
     graphics
@@ -7818,6 +9433,8 @@ function drawGateOperationOverlay(game: GameState, graphics: Graphics, building:
   if (building.gateSabotage) {
     graphics.circle(cx, cy, TILE * 0.86).stroke({ color: 0xff6bd6, width: 3, alpha: 0.82 });
     drawGateSabotageGlyph(graphics, cx, cy, pulse);
+  } else if (hasSabotageHistory) {
+    drawGateSabotageGlyph(graphics, cx - TILE * 0.34, cy - TILE * 0.34, pulse * 0.5);
   }
 }
 
@@ -8065,7 +9682,7 @@ function unitVisualState(unit: Unit): UnitVisualState {
   if (unit.task.kind === "gather") return "gather";
   if (unit.task.kind === "deliver") return "deliver";
   if (unit.task.kind === "repair") return "repair";
-  if (unit.task.kind === "attack" || unit.task.kind === "attackBuilding" || unit.task.kind === "attackResource") return "attack";
+  if (unit.task.kind === "attack" || unit.task.kind === "attackBuilding" || unit.task.kind === "attackResource" || unit.task.kind === "guardSiege") return "attack";
   return "idle";
 }
 
@@ -8166,6 +9783,12 @@ function drawUnitActionCue(graphics: Graphics, unit: Unit, x: number, y: number,
     graphics.moveTo(x + 9, y - 9).lineTo(x + 16, y - 2).moveTo(x + 16, y - 9).lineTo(x + 9, y - 2).stroke({ color: 0x7bd8ff, width: 1.8, alpha: 0.78 });
     return;
   }
+  if (unit.task.kind === "guardSiege") {
+    const alpha = 0.4 + Math.max(0, phase) * 0.25;
+    graphics.circle(x, y, radius + 8).stroke({ color: 0x67d9ff, width: 1.8, alpha });
+    graphics.moveTo(x - 11, y - 12).lineTo(x + 11, y - 12).lineTo(x + 7, y - 5).lineTo(x - 7, y - 5).closePath().stroke({ color: 0x9ee8ff, width: 1.5, alpha: 0.75 });
+    return;
+  }
   if (unit.task.kind === "attack" || unit.task.kind === "attackBuilding" || unit.task.kind === "attackResource") {
     const alpha = 0.42 + Math.max(0, phase) * 0.28;
     graphics.circle(x, y, radius + 7).stroke({ color: 0xff6b52, width: 1.8, alpha });
@@ -8189,20 +9812,156 @@ function drawMovementHeading(graphics: Graphics, unit: Unit, x: number, y: numbe
   graphics.moveTo(tipX, tipY).lineTo(leftX, leftY).lineTo(rightX, rightY).closePath().fill({ color, alpha: 0.72 }).stroke({ color: 0x080706, width: 1, alpha: 0.64 });
 }
 
+function drawCombatEventOverlay(
+  game: GameState,
+  graphics: Graphics,
+  visibleUnits: Unit[],
+  visibleBuildings: Building[],
+  visibleProjectiles: SiegeProjectile[]
+): void {
+  const now = renderClockMs || performance.now();
+  for (const projectile of visibleProjectiles.slice(0, 20)) {
+    const x = projectile.x * TILE + TILE / 2;
+    const y = projectile.y * TILE + TILE / 2;
+    if (!isWorldPointInViewport(x, y, TILE * 4)) continue;
+    const color = combatMarkerColor(projectile.projectileType, undefined);
+    const pulse = 0.5 + Math.sin(now / 105 + projectile.x * 0.7 + projectile.y * 0.3) * 0.5;
+    const radius = projectile.projectileType === "stone_shot" ? 23 + pulse * 4 : 16 + pulse * 3;
+    graphics.circle(x, y, radius).stroke({ color, width: projectile.projectileType === "stone_shot" ? 2.4 : 1.8, alpha: 0.34 + pulse * 0.22 });
+    graphics
+      .moveTo(x - radius * 0.42, y)
+      .lineTo(x - radius * 0.16, y)
+      .moveTo(x + radius * 0.16, y)
+      .lineTo(x + radius * 0.42, y)
+      .moveTo(x, y - radius * 0.42)
+      .lineTo(x, y - radius * 0.16)
+      .moveTo(x, y + radius * 0.16)
+      .lineTo(x, y + radius * 0.42)
+      .stroke({ color: 0xfff2ba, width: 1.2, alpha: 0.38 + pulse * 0.22 });
+  }
+
+  const maxAge = Math.round(TICK_RATE * 24);
+  for (const marker of buildRecentCombatEventMarkers(game, visibleUnits, visibleBuildings, 16)) {
+    const x = marker.x * TILE + TILE / 2;
+    const y = marker.y * TILE + TILE / 2;
+    if (!isWorldPointInViewport(x, y, TILE * 4)) continue;
+    const freshness = Math.max(0, 1 - marker.ageTicks / maxAge);
+    const beat = 0.5 + Math.sin(now / 165 + marker.tick * 0.31) * 0.5;
+    const radius = 18 + freshness * 18 + beat * 5;
+    const color = combatMarkerColor(marker.projectileType, marker.severity);
+    graphics.circle(x, y, radius).stroke({ color: 0x130804, width: 4, alpha: 0.16 + freshness * 0.16 });
+    graphics.circle(x, y, radius).stroke({ color, width: 2.2, alpha: 0.22 + freshness * 0.44 });
+    graphics
+      .moveTo(x, y - radius * 0.72)
+      .lineTo(x + radius * 0.26, y)
+      .lineTo(x, y + radius * 0.72)
+      .lineTo(x - radius * 0.26, y)
+      .closePath()
+      .stroke({ color: 0xfff0b6, width: 1.2, alpha: 0.16 + freshness * 0.28 });
+  }
+}
+
+function combatMarkerColor(projectileType?: SiegeProjectile["projectileType"], severity?: CombatEventMarker["severity"]): number {
+  if (severity === "destroyed") return 0xff5a3d;
+  if (severity === "raid") return 0xffbf47;
+  if (projectileType === "stone_shot") return 0xff7a2f;
+  if (projectileType === "turret_bolt") return 0x85dcff;
+  if (projectileType === "arrow") return 0xf4d37b;
+  return 0xff6b52;
+}
+
+function drawProjectileSprite(graphics: Graphics, projectile: SiegeProjectile): void {
+  const x = projectile.x * TILE + TILE / 2;
+  const y = projectile.y * TILE + TILE / 2;
+  if (!isWorldPointInViewport(x, y, TILE * 3)) return;
+  const texture = visualTextures?.projectiles[projectile.projectileType];
+  if (!texture) {
+    drawProjectile(graphics, projectile);
+    return;
+  }
+  const startX = projectile.startX * TILE + TILE / 2;
+  const startY = projectile.startY * TILE + TILE / 2;
+  const targetX = projectile.targetX * TILE + TILE / 2;
+  const targetY = projectile.targetY * TILE + TILE / 2;
+  const angle = Math.atan2(targetY - startY, targetX - startX);
+  const pulse = 0.92 + Math.sin((renderClockMs || performance.now()) / 90 + projectile.x) * 0.06;
+  const sprite = acquireProjectileSprite(texture);
+  sprite.x = x;
+  sprite.y = y;
+  sprite.rotation = angle;
+  sprite.alpha = projectile.projectileType === "stone_shot" ? 0.94 : 0.98;
+  sprite.tint = projectile.projectileType === "arrow" ? tribeConfig[projectile.tribeId].color : 0xffffff;
+  if (projectile.projectileType === "stone_shot") {
+    sprite.width = 30 * pulse;
+    sprite.height = 26 * pulse;
+  } else if (projectile.projectileType === "turret_bolt") {
+    sprite.width = 38 * pulse;
+    sprite.height = 16 * pulse;
+  } else {
+    sprite.width = 34 * pulse;
+    sprite.height = 14 * pulse;
+  }
+}
+
 function drawProjectile(graphics: Graphics, projectile: SiegeProjectile): void {
   const x = projectile.x * TILE + TILE / 2;
   const y = projectile.y * TILE + TILE / 2;
+  const startX = projectile.startX * TILE + TILE / 2;
+  const startY = projectile.startY * TILE + TILE / 2;
+  const targetX = projectile.targetX * TILE + TILE / 2;
+  const targetY = projectile.targetY * TILE + TILE / 2;
+  const dx = targetX - startX;
+  const dy = targetY - startY;
+  const len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len;
+  const uy = dy / len;
   const color = tribeConfig[projectile.tribeId].color;
   const pulse = 0.74 + Math.sin((renderClockMs || performance.now()) / 90 + projectile.x) * 0.2;
-  graphics.circle(x - 8, y + 6, 3.2).fill({ color, alpha: 0.16 });
-  graphics.circle(x - 4, y + 3, 2.4).fill({ color: 0xf2d28b, alpha: 0.22 });
-  graphics.circle(x, y, 4.2).fill({ color: 0x2b2925, alpha: 0.96 }).stroke({ color: 0xf2d28b, width: 1.4, alpha: pulse });
-  graphics.circle(x - 1.2, y - 1.4, 1.4).fill({ color: 0xb8b0a1, alpha: 0.82 });
+  if (projectile.projectileType === "arrow") {
+    const tailX = x - ux * 16;
+    const tailY = y - uy * 16;
+    const tipX = x + ux * 9;
+    const tipY = y + uy * 9;
+    const leftX = tipX - ux * 5 + uy * 3;
+    const leftY = tipY - uy * 5 - ux * 3;
+    const rightX = tipX - ux * 5 - uy * 3;
+    const rightY = tipY - uy * 5 + ux * 3;
+    graphics.moveTo(tailX, tailY).lineTo(tipX, tipY).stroke({ color: 0x2a1c10, width: 4.2, alpha: 0.72 });
+    graphics.moveTo(tailX, tailY).lineTo(tipX, tipY).stroke({ color: 0xe7d2a1, width: 2.1, alpha: 0.95 });
+    graphics.moveTo(tipX, tipY).lineTo(leftX, leftY).lineTo(rightX, rightY).closePath().fill({ color, alpha: 0.9 }).stroke({ color: 0x080706, width: 0.8, alpha: 0.68 });
+    graphics.circle(tipX, tipY, 2.1).fill({ color: 0xfff1b8, alpha: 0.78 });
+    return;
+  }
+  if (projectile.projectileType === "turret_bolt") {
+    const tailX = x - ux * 20;
+    const tailY = y - uy * 20;
+    const noseX = x + ux * 11;
+    const noseY = y + uy * 11;
+    graphics.moveTo(tailX, tailY).lineTo(noseX, noseY).stroke({ color: 0x09121d, width: 8, alpha: 0.42 });
+    graphics.moveTo(tailX, tailY).lineTo(noseX, noseY).stroke({ color, width: 4.8, alpha: 0.72 });
+    graphics.moveTo(x - ux * 8, y - uy * 8).lineTo(noseX, noseY).stroke({ color: 0xf8fbff, width: 2.4, alpha: 0.92 });
+    graphics.circle(noseX, noseY, 5.5).fill({ color: 0xe8f2ff, alpha: 0.16 + pulse * 0.16 }).stroke({ color, width: 1.7, alpha: 0.76 });
+    graphics.circle(noseX + ux * 3, noseY + uy * 3, 2.5).fill({ color: 0xffffff, alpha: 0.82 });
+    return;
+  }
+  const trailBackX = x - ux * 24;
+  const trailBackY = y - uy * 24;
+  const trailMidX = x - ux * 12;
+  const trailMidY = y - uy * 12;
+  const sparkX = x + ux * 8;
+  const sparkY = y + uy * 8;
   graphics
-    .moveTo(x - 7, y + 5)
-    .lineTo(x - 15, y + 11)
-    .stroke({ color, width: 2, alpha: 0.42 });
-  graphics.moveTo(x + 4, y - 3).lineTo(x + 9, y - 7).stroke({ color: 0xffe17b, width: 1.4, alpha: 0.34 });
+    .moveTo(trailBackX, trailBackY)
+    .lineTo(trailMidX, trailMidY)
+    .lineTo(x, y)
+    .stroke({ color: 0x1b1208, width: 9, alpha: 0.36 });
+  graphics.moveTo(trailBackX, trailBackY).lineTo(x, y).stroke({ color: 0xff7a2f, width: 6.2, alpha: 0.54 });
+  graphics.moveTo(trailMidX, trailMidY).lineTo(sparkX, sparkY).stroke({ color: 0xfff3a4, width: 3.2, alpha: 0.84 });
+  graphics.circle(x, y, 11.5).fill({ color: 0xffb347, alpha: 0.18 + pulse * 0.1 });
+  graphics.circle(x, y, 7.2).fill({ color: 0x2b2925, alpha: 0.98 }).stroke({ color: 0xffed9a, width: 3.2, alpha: pulse });
+  graphics.circle(x - ux * 2.2 - uy * 1.5, y - uy * 2.2 + ux * 1.5, 2.5).fill({ color: 0xded7c5, alpha: 0.96 });
+  graphics.circle(sparkX, sparkY, 3.8).fill({ color: 0xfff0a4, alpha: 0.72 });
+  graphics.circle(sparkX + ux * 4, sparkY + uy * 4, 2.4).fill({ color: 0xff6d2f, alpha: 0.62 });
 }
 
 function drawFog(game: GameState, graphics: Graphics): void {
@@ -8497,9 +10256,21 @@ function updateHud(game: GameState): void {
   selectedPanel.innerHTML = selectedMarkup(game);
   diplomacyPanel.innerHTML = diplomacyMarkup(game);
   const events = observerMode ? game.events.slice(-16).reverse() : getRecentVisibleEvents(game, playerTribe, 14);
-  eventLog.innerHTML = events
+  const eventLogUnits = observerMode ? Object.values(game.units).filter((unit) => unit.hp > 0) : getVisibleUnits(game, playerTribe);
+  const eventLogBuildings = observerMode ? Object.values(game.buildings) : getVisibleBuildings(game, playerTribe);
+  const combatMarkers = buildRecentCombatEventMarkers(game, eventLogUnits, eventLogBuildings, 4);
+  const combatMarkup =
+    combatMarkers.length > 0
+      ? `<div class="event-row combat-event-row"><strong>Recent combat</strong>${combatMarkers
+          .map(
+            (marker) =>
+              `<br><span class="muted">Turn ${marker.tick}</span> ${escapeHtml(marker.title)} <span class="muted">@ ${marker.x},${marker.y}</span>`
+          )
+          .join("")}</div>`
+      : "";
+  eventLog.innerHTML = `${combatMarkup}${events
     .map((event) => `<div class="event-row"><strong>${event.title}</strong><br><span class="muted">Turn ${event.tick}</span><br>${event.body}</div>`)
-    .join("");
+    .join("")}`;
 }
 
 function selectedMarkup(game: GameState): string {
@@ -8542,7 +10313,14 @@ function selectedMarkup(game: GameState): string {
       ${
         building.type === "gate" && getActiveGateAccessTreaties(game, building.id).length > 0
           ? `<div class="selected-row">Access treaties: ${getActiveGateAccessTreaties(game, building.id)
-              .map((treaty) => `${escapeHtml(game.tribes[treaty.targetTribeId].name)}${treaty.expiresAtTick ? ` until ${treaty.expiresAtTick}` : ""}`)
+              .map(
+                (treaty) =>
+                  `${escapeHtml(game.tribes[treaty.targetTribeId].name)}${treaty.expiresAtTick ? ` until ${treaty.expiresAtTick}` : ""}${
+                    treaty.routeId ? ` route ${escapeHtml(treaty.routeId)}` : ""
+                  }${treaty.routeName ? ` ${escapeHtml(treaty.routeName)}` : ""}${
+                    treaty.routeGateIds?.length ? ` gates ${treaty.routeGateIds.map((id) => escapeHtml(id)).join("/")}` : ""
+                  }`
+              )
               .join(", ")}</div>`
           : ""
       }
@@ -8720,14 +10498,14 @@ function victoryMarkup(game: GameState): string {
       <div><span class="muted">Year</span><strong>${victory.currentYear} / ${victory.finalYear}</strong></div>
       <div><span class="muted">Survivors</span><strong>${victory.survivingTribes} / ${tribeIds.length}</strong></div>
       <div><span class="muted">Next review</span><strong>${deadlineLabel}</strong></div>
-      <div><span class="muted">Blue score</span><strong>${playerScore?.survivalScore ?? 0}</strong></div>
+      <div><span class="muted">Blue wealth</span><strong>${playerScore?.wealth ?? computeWealth(game, playerTribe)}</strong></div>
     </div>
     <div class="victory-meter" aria-label="Victory pressure ${progress}%">
       <span style="width:${progress}%"></span>
     </div>
     ${
       playerScore
-        ? `<div class="muted">Blue population: ${playerScore.population}; happiness ${playerScore.happiness}; safety ${playerScore.safety}; wealth per person ${playerScore.wealthPerCapita}.</div>`
+        ? `<div class="muted">Review culls the lowest total wealth. Blue population ${playerScore.population}; happiness ${playerScore.happiness}; safety ${playerScore.safety}; per-head wealth ${playerScore.wealthPerCapita} is diagnostic only.</div>`
         : ""
     }
     ${
@@ -8775,7 +10553,7 @@ function aiBugMarkup(game: GameState): string {
 function aiInfoRequestMarkup(game: GameState): string {
   const requests = state.aiInformationRequests.slice(-8).reverse();
   if (requests.length === 0) {
-    return `<span class="muted">No strategic information requests yet.</span>`;
+    return `<span class="muted">No private intelligence requests yet. Peer questions belong in physical diplomacy messages.</span>`;
   }
   return requests
     .map(
@@ -8783,7 +10561,7 @@ function aiInfoRequestMarkup(game: GameState): string {
         <div class="info-request-row">
           <div class="info-request-header">
             <strong style="color:${game.tribes[request.tribeId].colorText}">${escapeHtml(game.tribes[request.tribeId].name)}</strong>
-            <span class="tag">request</span>
+            <span class="tag">private intel</span>
             <span class="tag">turn ${request.tick}</span>
           </div>
           <div><strong>${escapeHtml(request.subject)}</strong></div>
@@ -8792,7 +10570,7 @@ function aiInfoRequestMarkup(game: GameState): string {
           ${
             request.answer
               ? `<div class="info-answer ${request.answerStatus === "partial" ? "partial" : ""}">
-                  <strong>${request.answerStatus === "partial" ? "Partial answer" : "Answer"}</strong>
+                  <strong>${request.answerStatus === "partial" ? "Partial clerk answer" : "Clerk answer"}</strong>
                   <br>${escapeHtml(request.answer)}
                 </div>`
               : `<div class="muted">Answer pending.</div>`
@@ -9228,12 +11006,12 @@ function tribeMarkup(game: GameState): string {
             <span class="tag">${game.tribes[tribeId].controller.toUpperCase()}</span>
           </div>
           <div class="tribe-stat-grid">
-            <div><span class="muted">Score</span><strong>${score?.survivalScore ?? 0}</strong></div>
+            <div><span class="muted">Mandate</span><strong>${score?.survivalScore ?? 0}</strong></div>
             <div><span class="muted">Wealth</span><strong>${score?.wealth ?? computeWealth(game, tribeId)}</strong></div>
             <div><span class="muted">Pop</span><strong>${units.length}/${populationCap}</strong></div>
             <div><span class="muted">Happy</span><strong>${score?.happiness ?? Math.round(game.tribes[tribeId].happiness)}</strong></div>
             <div><span class="muted">Safety</span><strong>${score?.safety ?? 0}</strong></div>
-            <div><span class="muted">W/person</span><strong>${score?.wealthPerCapita ?? 0}</strong></div>
+            <div><span class="muted">Per head</span><strong>${score?.wealthPerCapita ?? 0}</strong></div>
           </div>
           <span class="muted">Sovereign ${game.tribes[tribeId].sovereignName}</span><br>
           <span class="muted">Style ${game.tribes[tribeId].namingStyle}</span><br>
@@ -10070,6 +11848,12 @@ function describeUnitTask(game: GameState, unit: Unit): string {
     const building = game.buildings[task.targetBuildingId];
     return building ? `Repairing ${building.type} ${building.id}` : "Repairing missing building";
   }
+  if (task.kind === "guardSiege") {
+    const verb = task.guardRole === "escort" ? "Escorting siege" : "Covering siege";
+    return `${verb} ${task.siegePlanId} around ${formatPosition(task.anchor)} radius ${task.radius}${
+      task.guardPlan ? `: ${task.guardPlan}` : ""
+    }`;
+  }
   const building = game.buildings[task.targetBuildingId];
   if (building && task.assaultPhase === "assembling" && task.assemblyTarget) {
     return `Assembling for ${task.assaultMode ?? "coordinated"} assault at ${formatPosition(task.assemblyTarget)} before attacking ${building.type} ${building.id}`;
@@ -10078,6 +11862,9 @@ function describeUnitTask(game: GameState, unit: Unit): string {
     const wave = task.assaultWaveIndex !== undefined ? `wave ${task.assaultWaveIndex + 1}` : "delayed wave";
     const release = task.assaultWaveReleaseTick !== undefined ? ` until turn ${task.assaultWaveReleaseTick}` : "";
     return `Holding ${wave}${release} before attacking ${building.type} ${building.id}`;
+  }
+  if (building && task.interdictRepairs) {
+    return `Interdicting repairs on ${building.type} ${building.id}${task.repairInterdictionPlan ? `: ${task.repairInterdictionPlan}` : ""}`;
   }
   return building
     ? `Attacking ${building.type} ${building.id} of ${game.tribes[building.tribeId].name}${
